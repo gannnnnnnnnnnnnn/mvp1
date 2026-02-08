@@ -13,6 +13,7 @@ A minimal Next.js App Router project for uploading PDF/CSV files to local disk, 
 - `POST /api/upload`: upload one file (PDF/CSV, <=20MB)
 - `GET /api/files`: list uploaded files (newest first)
 - `GET /api/files/:id/download`: download file by metadata ID
+- `POST /api/parse/pdf-text`: extract text from PDF with local cache
 - Persistent metadata index in `uploads/index.json`
 - Basic hardening already added:
   - in-process write queue for index append
@@ -125,6 +126,30 @@ curl -L "http://localhost:3000/api/files/<id>/download" \
   -o downloaded-file
 ```
 
+### Extract PDF text (Phase 2.1)
+
+```bash
+curl -X POST http://localhost:3000/api/parse/pdf-text \
+  -H "Content-Type: application/json" \
+  -d "{\"fileId\":\"<id>\",\"force\":false}"
+```
+
+Expected success shape:
+
+```json
+{
+  "ok": true,
+  "fileId": "...",
+  "text": "....",
+  "meta": {
+    "extractor": "pdf-parse",
+    "length": 12345,
+    "cached": true,
+    "truncated": false
+  }
+}
+```
+
 ## Project Structure
 
 ```text
@@ -133,6 +158,7 @@ app/
     upload/route.ts                  # upload endpoint
     files/route.ts                   # list endpoint
     files/[id]/download/route.ts     # download endpoint
+    parse/pdf-text/route.ts          # PDF text extract + cache endpoint
   page.tsx                           # upload/list UI
   layout.tsx                         # root layout
 lib/

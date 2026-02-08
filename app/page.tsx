@@ -14,6 +14,19 @@ type FileMeta = {
 };
 
 type ApiError = { code: string; message: string };
+type ParseTextMeta = {
+  extractor: string;
+  length: number;
+  cached: boolean;
+  truncated?: boolean;
+};
+
+type ParseTextResult = {
+  fileId: string;
+  originalName: string;
+  text: string;
+  meta: ParseTextMeta;
+};
 
 export default function Home() {
   // Local UI state hooks.
@@ -23,6 +36,11 @@ export default function Home() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
+  const [extractingFileId, setExtractingFileId] = useState<string | null>(null);
+  const [extractError, setExtractError] = useState<ApiError | null>(null);
+  const [extractResult, setExtractResult] = useState<ParseTextResult | null>(null);
+  const [showFullText, setShowFullText] = useState(false);
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
   /**
    * Helper: format bytes to something human friendly.
@@ -31,6 +49,16 @@ export default function Home() {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  /**
+   * We only enable "Extract Text" for likely PDF rows.
+   * This mirrors backend checks (mimeType/extension) and improves UX.
+   */
+  const isPdfFile = (file: FileMeta) => {
+    const mimeOk = (file.mimeType || "").toLowerCase() === "application/pdf";
+    const extOk = file.originalName.toLowerCase().endsWith(".pdf");
+    return mimeOk || extOk;
   };
 
   /**
@@ -92,6 +120,70 @@ export default function Home() {
     }
   };
 
+  /**
+   * Call Phase 2.1 API to extract PDF text with optional force re-parse.
+   * The API may return truncated preview text for very large results.
+   */
+  const handleExtractText = async (file: FileMeta, force = false) => {
+    setExtractingFileId(file.id);
+    setExtractError(null);
+    setCopyMsg(null);
+
+    try {
+      const res = await fetch("/api/parse/pdf-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileId: file.id, force }),
+      });
+
+      const data = (await res.json()) as
+        | {
+            ok: true;
+            fileId: string;
+            text: string;
+            meta: ParseTextMeta;
+          }
+        | {
+            ok: false;
+            error: ApiError;
+          };
+
+      if (!data.ok) {
+        setExtractError(data.error);
+        return;
+      }
+
+      setExtractResult({
+        fileId: data.fileId,
+        originalName: file.originalName,
+        text: data.text,
+        meta: data.meta,
+      });
+      setShowFullText(false);
+    } catch {
+      setExtractError({
+        code: "EXTRACT_REQUEST_FAIL",
+        message: "调用文本抽取接口失败，请稍后重试。",
+      });
+    } finally {
+      setExtractingFileId(null);
+    }
+  };
+
+  /**
+   * Clipboard API for quick manual validation and downstream use.
+   */
+  const handleCopyText = async () => {
+    if (!extractResult) return;
+
+    try {
+      await navigator.clipboard.writeText(extractResult.text);
+      setCopyMsg("已复制文本到剪贴板。");
+    } catch {
+      setCopyMsg("复制失败（请检查浏览器权限）。");
+    }
+  };
+
   // On first load, pull the existing file list to prove persistence.
   useEffect(() => {
     fetchFiles();
@@ -107,15 +199,24 @@ export default function Home() {
     }`;
   }, [selectedFile]);
 
+  /**
+   * Default preview shows first 4000 chars; user can expand if needed.
+   */
+  const visibleExtractText = useMemo(() => {
+    if (!extractResult) return "";
+    if (showFullText) return extractResult.text;
+    return extractResult.text.slice(0, 4000);
+  }, [extractResult, showFullText]);
+
   return (
     <main className="min-h-screen bg-slate-50 p-8">
       <div className="mx-auto max-w-5xl space-y-8">
         <header>
           <h1 className="text-3xl font-semibold text-slate-900">
-            Web Dropbox 1.0 — Phase 1
+            Web Dropbox 1.0 — Phase 2.1
           </h1>
           <p className="mt-2 text-slate-600">
-            上传 PDF/CSV，保存到服务器 uploads/，并查看已上传文件。
+            上传 PDF/CSV，保存到服务器 uploads/，查看列表，并为 PDF 抽取文本预览。
           </p>
         </header>
 
@@ -193,7 +294,7 @@ export default function Home() {
                   <th className="px-3 py-2">Size</th>
                   <th className="px-3 py-2">Type</th>
                   <th className="px-3 py-2">Uploaded At</th>
-                  <th className="px-3 py-2">Download</th>
+                  <th className="px-3 py-2">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -221,12 +322,27 @@ export default function Home() {
                         {new Date(file.uploadedAt).toLocaleString()}
                       </td>
                       <td className="px-3 py-2">
-                        <a
-                          href={`/api/files/${file.id}/download`}
-                          className="text-blue-600 hover:underline"
-                        >
-                          下载
-                        </a>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <a
+                            href={`/api/files/${file.id}/download`}
+                            className="text-blue-600 hover:underline"
+                          >
+                            下载
+                          </a>
+                          {isPdfFile(file) && (
+                            <button
+                              onClick={() => {
+                                void handleExtractText(file, false);
+                              }}
+                              disabled={extractingFileId === file.id}
+                              className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {extractingFileId === file.id
+                                ? "Extracting..."
+                                : "Extract Text"}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -234,6 +350,80 @@ export default function Home() {
               </tbody>
             </table>
           </div>
+
+          {extractError && (
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              文本抽取错误（{extractError.code}）：{extractError.message}
+            </div>
+          )}
+
+          {extractResult && (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h3 className="text-base font-semibold text-slate-900">
+                Extracted Text Preview
+              </h3>
+              <p className="mt-1 text-xs text-slate-600">
+                fileId: <span className="font-mono">{extractResult.fileId}</span> ·
+                文件名: {extractResult.originalName}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                extractor: {extractResult.meta.extractor} · length:{" "}
+                {extractResult.meta.length} · cached:{" "}
+                {extractResult.meta.cached ? "true" : "false"} · truncated:{" "}
+                {extractResult.meta.truncated ? "true" : "false"}
+              </p>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => {
+                    void handleCopyText();
+                  }}
+                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100"
+                >
+                  Copy text
+                </button>
+
+                <button
+                  onClick={() => setShowFullText((prev) => !prev)}
+                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100"
+                >
+                  {showFullText ? "Collapse" : "Show full"}
+                </button>
+
+                <button
+                  onClick={() => {
+                    const file = files.find((item) => item.id === extractResult.fileId);
+                    if (file) {
+                      void handleExtractText(file, true);
+                    }
+                  }}
+                  disabled={extractingFileId === extractResult.fileId}
+                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Re-extract
+                </button>
+              </div>
+
+              {copyMsg && (
+                <div className="mt-2 text-xs text-green-700">{copyMsg}</div>
+              )}
+
+              {extractResult.meta.truncated && (
+                <div className="mt-2 text-xs text-amber-700">
+                  文本过大，服务端仅返回了预览片段（完整文本已写入本地缓存）。
+                </div>
+              )}
+
+              <div className="mt-3 max-h-80 overflow-auto rounded-lg border border-slate-200 bg-white p-3 font-mono text-xs leading-5 whitespace-pre-wrap text-slate-800">
+                {visibleExtractText || "(empty text)"}
+              </div>
+              {!showFullText && extractResult.text.length > 4000 && (
+                <div className="mt-2 text-xs text-slate-500">
+                  当前显示前 4000 字，点击 Show full 查看当前返回的完整内容。
+                </div>
+              )}
+            </div>
+          )}
         </section>
       </div>
     </main>
