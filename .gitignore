@@ -43,6 +43,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -56,3 +57,4 @@ node_modules/
 uploads/
 node_modules/
 .env*
+!.env.example
