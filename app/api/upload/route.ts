@@ -19,8 +19,8 @@ import {
 
 // Hard limits to protect the server.
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
-const ALLOWED_MIME = ["application/pdf", "text/csv"];
 const ALLOWED_EXT = [".pdf", ".csv"];
+const CSV_MIME = ["text/csv", "application/vnd.ms-excel"];
 
 /**
  * Convert a Web File (from request.formData()) to a Node.js Buffer.
@@ -34,17 +34,23 @@ async function fileToBuffer(file: File): Promise<Buffer> {
  * Ensure the file is either PDF or CSV based on MIME type or extension.
  */
 function isAllowedType(file: File) {
-  const mimeOk = ALLOWED_MIME.includes(file.type);
   const ext = path.extname(file.name || "").toLowerCase();
   const extOk = ALLOWED_EXT.includes(ext);
-  return mimeOk || extOk;
+  if (!extOk) return false;
+
+  // Some clients may not send MIME for local files; keep extension as baseline.
+  if (!file.type) return true;
+
+  if (ext === ".pdf") return file.type === "application/pdf";
+  if (ext === ".csv") return CSV_MIME.includes(file.type);
+  return false;
 }
 
 /**
  * Build the stored filename. We keep extension to help later downloads.
  */
 function buildStoredName(file: File, id: string) {
-  const ext = path.extname(file.name || "");
+  const ext = path.extname(file.name || "").toLowerCase();
   return `${id}${ext || ""}`;
 }
 
@@ -109,7 +115,7 @@ export async function POST(request: Request) {
     // Build identifiers and paths.
     const id = randomUUID();
     const storedName = buildStoredName(file, id);
-    const relativePath = path.join("uploads", storedName);
+    const relativePath = path.posix.join("uploads", storedName);
     const absolutePath = path.join(uploadsDirAbsolute, storedName);
 
     // Write the file to disk.
@@ -118,10 +124,16 @@ export async function POST(request: Request) {
 
     // Build and persist metadata (write temp then rename inside appendMetadata).
     const metadata = buildMetadata({ file, id, storedName, relativePath });
-    await appendMetadata(metadata);
+    try {
+      await appendMetadata(metadata);
+    } catch {
+      // Keep file/index consistency if metadata write fails.
+      await fs.unlink(absolutePath).catch(() => undefined);
+      throw new Error("metadata_write_failed");
+    }
 
     return NextResponse.json({ ok: true, file: metadata });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Upload failed", err);
     return NextResponse.json(
       {

@@ -35,6 +35,9 @@ export const uploadsDirAbsolute = path.join(process.cwd(), UPLOADS_DIR);
  */
 const indexFileAbsolute = path.join(uploadsDirAbsolute, INDEX_FILE);
 
+// In-process write lock to avoid read-modify-write races on index.json.
+let indexWriteQueue: Promise<void> = Promise.resolve();
+
 /**
  * Ensure the uploads directory exists. Safe to call multiple times.
  */
@@ -49,11 +52,29 @@ export async function ensureUploadsDir() {
 export async function readIndex(): Promise<FileMeta[]> {
   try {
     const buf = await fs.readFile(indexFileAbsolute, "utf8");
-    const data = JSON.parse(buf);
-    if (!Array.isArray(data)) return [];
-    return data as FileMeta[];
-  } catch (err: any) {
-    if (err?.code === "ENOENT") return [];
+    try {
+      const data = JSON.parse(buf);
+      if (!Array.isArray(data)) return [];
+      return data as FileMeta[];
+    } catch {
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const corruptPath = `${indexFileAbsolute}.corrupt-${stamp}`;
+      try {
+        await fs.rename(indexFileAbsolute, corruptPath);
+      } catch {
+        // Best effort only: if rename fails we still return an empty list.
+      }
+      return [];
+    }
+  } catch (err: unknown) {
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "code" in err &&
+      err.code === "ENOENT"
+    ) {
+      return [];
+    }
     throw err;
   }
 }
@@ -73,9 +94,20 @@ async function writeIndexSafe(files: FileMeta[]) {
  * Append a new metadata record and persist.
  */
 export async function appendMetadata(entry: FileMeta) {
-  const current = await readIndex();
-  current.push(entry);
-  await writeIndexSafe(current);
+  const previous = indexWriteQueue;
+  let release: (() => void) | undefined;
+  indexWriteQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+  try {
+    const current = await readIndex();
+    current.push(entry);
+    await writeIndexSafe(current);
+  } finally {
+    release?.();
+  }
 }
 
 /**

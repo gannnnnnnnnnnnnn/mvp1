@@ -8,11 +8,9 @@ import { useEffect, useMemo, useState } from "react";
 type FileMeta = {
   id: string;
   originalName: string;
-  storedName: string;
   size: number;
   mimeType: string;
   uploadedAt: string;
-  path: string;
 };
 
 type ApiError = { code: string; message: string };
@@ -49,7 +47,7 @@ export default function Home() {
         return;
       }
       setFiles(data.files as FileMeta[]);
-    } catch (err) {
+    } catch {
       setError({ code: "FETCH_FAILED", message: "获取文件列表失败。" });
     } finally {
       setIsLoadingList(false);
@@ -87,7 +85,7 @@ export default function Home() {
       setSuccessMsg("上传成功！");
       setSelectedFile(null);
       await fetchFiles(); // Refresh list after successful upload.
-    } catch (err) {
+    } catch {
       setError({ code: "UPLOAD_FAILED", message: "上传失败，请稍后重试。" });
     } finally {
       setIsUploading(false);
@@ -97,7 +95,6 @@ export default function Home() {
   // On first load, pull the existing file list to prove persistence.
   useEffect(() => {
     fetchFiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /**
