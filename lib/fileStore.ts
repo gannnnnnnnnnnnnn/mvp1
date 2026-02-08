@@ -39,6 +39,25 @@ const indexFileAbsolute = path.join(uploadsDirAbsolute, INDEX_FILE);
 let indexWriteQueue: Promise<void> = Promise.resolve();
 
 /**
+ * Serialize write operations against index.json.
+ * Keeping one helper avoids duplicating lock logic in each mutation function.
+ */
+async function withIndexWriteLock<T>(work: () => Promise<T>): Promise<T> {
+  const previous = indexWriteQueue;
+  let release: (() => void) | undefined;
+  indexWriteQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release?.();
+  }
+}
+
+/**
  * Ensure the uploads directory exists. Safe to call multiple times.
  */
 export async function ensureUploadsDir() {
@@ -94,20 +113,11 @@ async function writeIndexSafe(files: FileMeta[]) {
  * Append a new metadata record and persist.
  */
 export async function appendMetadata(entry: FileMeta) {
-  const previous = indexWriteQueue;
-  let release: (() => void) | undefined;
-  indexWriteQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-
-  await previous;
-  try {
+  await withIndexWriteLock(async () => {
     const current = await readIndex();
     current.push(entry);
     await writeIndexSafe(current);
-  } finally {
-    release?.();
-  }
+  });
 }
 
 /**
@@ -116,4 +126,30 @@ export async function appendMetadata(entry: FileMeta) {
 export async function findById(id: string): Promise<FileMeta | undefined> {
   const current = await readIndex();
   return current.find((item) => item.id === id);
+}
+
+/**
+ * Replace the entire index atomically.
+ * Useful for cleanup endpoints that reset metadata to [].
+ */
+export async function replaceIndex(entries: FileMeta[]) {
+  await withIndexWriteLock(async () => {
+    await writeIndexSafe(entries);
+  });
+}
+
+/**
+ * Remove a single metadata row by id atomically.
+ * Returns removed row if found.
+ */
+export async function removeById(id: string): Promise<FileMeta | undefined> {
+  return withIndexWriteLock(async () => {
+    const current = await readIndex();
+    const idx = current.findIndex((item) => item.id === id);
+    if (idx < 0) return undefined;
+
+    const [removed] = current.splice(idx, 1);
+    await writeIndexSafe(current);
+    return removed;
+  });
 }
