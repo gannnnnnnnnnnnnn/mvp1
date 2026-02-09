@@ -1,10 +1,11 @@
 /**
- * Phase 2.3
+ * Phase 2.5.2 (CommBank-only)
  *
- * Rule-based parser for transaction lines. This is intentionally conservative:
- * - keep rawLine for traceability
- * - lower confidence for uncertain parses
- * - emit warnings instead of dropping problematic rows
+ * This parser is intentionally rule-based and bank-specific for now.
+ * We prioritize:
+ * 1) traceability (keep rawLine),
+ * 2) deterministic behavior,
+ * 3) conservative warnings for unclassified lines.
  */
 
 export type ParsedTransaction = {
@@ -12,6 +13,7 @@ export type ParsedTransaction = {
   date: string;
   description: string;
   amount: number;
+  balance?: number;
   currency?: string;
   rawLine: string;
   confidence: number;
@@ -28,39 +30,92 @@ export type ParseTransactionsResult = {
   warnings: ParseWarning[];
 };
 
-type AmountParse = {
-  amount: number;
+type ParsedMoney = {
+  value: number;
   currency?: string;
-  confidence: number;
 };
 
-const DATE_PREFIX_RE = /^(\d{1,2}\/\d{1,2}\/\d{2,4})\s+(.*)$/;
-const AMOUNT_TAIL_RE =
-  /((?:(?:[A-Z]{3}|[$£€])\s*)?(?:\(?-?\d{1,3}(?:,\d{3})*(?:\.\d{2})\)?(?:[Cc][Rr])?|-?\d+(?:\.\d{2})(?:[Cc][Rr])?))\s*$/;
+type MoneyTokenMatch = {
+  token: string;
+  index: number;
+};
+
+type ParsedTail = {
+  description: string;
+  amount: ParsedMoney;
+  balance: ParsedMoney;
+};
+
+type PendingTransaction = {
+  dateIso: string;
+  descriptionParts: string[];
+  rawLines: string[];
+};
+
+const DATE_PREFIX_RE = /^(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\s*(.*)$/;
+const HEADER_ANCHOR = "datetransactiondetailsamountbalance";
+
+const MONTH_INDEX: Record<string, number> = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
+};
+
+// Supports: -$50.00, $2,000.00, (50.00), 12.34CR
+const MONEY_TOKEN_RE =
+  /(?:-?\$?\d+(?:,\d{3})*(?:\.\d{2})|\(\$?\d+(?:,\d{3})*(?:\.\d{2})\)|\$?\d+(?:,\d{3})*(?:\.\d{2})CR)/gi;
 
 function clamp01(v: number) {
   return Math.max(0, Math.min(1, v));
 }
 
-/**
- * Supports DD/MM/YYYY and DD/MM/YY.
- * Two-digit years are normalized to 20xx (00-69) or 19xx (70-99).
- */
+function compactAlphaNum(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isHeaderLine(line: string) {
+  return compactAlphaNum(line).includes(HEADER_ANCHOR);
+}
+
+function isNoiseLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+
+  // CommBank PDF page-break artifacts that should not become warnings.
+  if (/^created\s+/i.test(trimmed)) return true;
+  if (/^while this letter is accurate/i.test(trimmed)) return true;
+  if (/^we['’]re not responsible/i.test(trimmed)) return true;
+  if (/^transaction summary\b/i.test(trimmed)) return true;
+  if (/^account number/i.test(trimmed)) return true;
+  if (/^page\s*\d+\s*of\s*\d+/i.test(trimmed.replace(/\s+/g, ""))) return true;
+
+  return isHeaderLine(trimmed);
+}
+
 function toIsoDate(dateToken: string): string | null {
-  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(dateToken.trim());
+  const m = /^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/.exec(dateToken.trim());
   if (!m) return null;
 
   const day = Number(m[1]);
-  const month = Number(m[2]);
-  const rawYear = Number(m[3]);
-  const year = m[3].length === 2 ? (rawYear >= 70 ? 1900 + rawYear : 2000 + rawYear) : rawYear;
+  const month = MONTH_INDEX[m[2].toLowerCase()];
+  const year = Number(m[3]);
 
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (!Number.isInteger(day) || month === undefined || !Number.isInteger(year)) return null;
+  if (day < 1 || day > 31) return null;
 
-  const dt = new Date(Date.UTC(year, month - 1, day));
+  const dt = new Date(Date.UTC(year, month, day));
   if (
     dt.getUTCFullYear() !== year ||
-    dt.getUTCMonth() + 1 !== month ||
+    dt.getUTCMonth() !== month ||
     dt.getUTCDate() !== day
   ) {
     return null;
@@ -69,49 +124,97 @@ function toIsoDate(dateToken: string): string | null {
   return dt.toISOString();
 }
 
-/**
- * Amount format support (minimum requested):
- * - -12.34
- * - 1,234.56
- * - (12.34)
- * - 12.34CR
- */
-function parseAmountToken(token: string): AmountParse | null {
-  let text = token.trim();
-  if (!text) return null;
+function parseMoneyToken(token: string): ParsedMoney | null {
+  const raw = token.trim();
+  if (!raw) return null;
 
-  const currencyMatch = /^([A-Z]{3}|[$£€])\s*/.exec(text);
-  const currency = currencyMatch ? currencyMatch[1] : undefined;
-  if (currencyMatch) text = text.slice(currencyMatch[0].length);
+  const upper = raw.toUpperCase();
+  const hasCR = upper.endsWith("CR");
+  const hasParens = upper.startsWith("(") && upper.endsWith(")");
+  const hasMinus = upper.includes("-");
+  const currency = raw.includes("$") ? "AUD" : undefined;
 
-  const hasCR = /CR$/i.test(text);
-  text = text.replace(/CR$/i, "");
+  const numeric = upper
+    .replace(/CR$/i, "")
+    .replace(/[()$,\s]/g, "")
+    .replace(/[-+]/g, "");
 
-  const hasParens = /^\(.*\)$/.test(text);
-  if (hasParens) text = text.slice(1, -1);
-
-  const hasMinus = text.startsWith("-");
-  if (hasMinus) text = text.slice(1);
-
-  text = text.replace(/,/g, "").trim();
-  const value = Number(text);
+  const value = Number(numeric);
   if (!Number.isFinite(value)) return null;
 
-  let amount = value;
-  let confidence = 0.7;
+  // CommBank statements in this phase: explicit minus / parentheses are debits,
+  // CR is explicit credit, unsigned token defaults to positive credit.
+  const signed = hasParens || hasMinus ? -Math.abs(value) : Math.abs(value);
+  const finalValue = hasCR ? Math.abs(value) : signed;
 
-  if (hasCR) {
-    amount = Math.abs(value);
-    confidence = 0.9;
-  } else if (hasParens || hasMinus) {
-    amount = -Math.abs(value);
-    confidence = 0.9;
-  } else {
-    // Conservative fallback for statement style: unsigned values are treated as expense.
-    amount = -Math.abs(value);
+  return { value: finalValue, currency };
+}
+
+function extractMoneyMatches(text: string): MoneyTokenMatch[] {
+  const re = new RegExp(MONEY_TOKEN_RE.source, "gi");
+  const result: MoneyTokenMatch[] = [];
+
+  for (const match of text.matchAll(re)) {
+    if (match.index === undefined) continue;
+    result.push({ token: match[0], index: match.index });
   }
 
-  return { amount, currency, confidence };
+  return result;
+}
+
+/**
+ * Parse a line tail with amount + balance at the end.
+ * We take the last two money tokens to avoid brittle assumptions about spaces.
+ */
+function parseTailWithAmountAndBalance(text: string): ParsedTail | null {
+  const matches = extractMoneyMatches(text);
+  if (matches.length < 2) return null;
+
+  const amountToken = matches[matches.length - 2];
+  const balanceToken = matches[matches.length - 1];
+
+  const amount = parseMoneyToken(amountToken.token);
+  const balance = parseMoneyToken(balanceToken.token);
+  if (!amount || !balance) return null;
+
+  const description = text.slice(0, amountToken.index).trim();
+  return { description, amount, balance };
+}
+
+function pushWarning(
+  warnings: ParseWarning[],
+  rawLine: string,
+  reason: string,
+  confidence = 0.2
+) {
+  warnings.push({ rawLine, reason, confidence: clamp01(confidence) });
+}
+
+function normalizeDescription(parts: string[]) {
+  return parts
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isLikelyReferenceLine(line: string) {
+  const compact = line.replace(/\s+/g, "").trim();
+  return /^\d{6,}$/.test(compact);
+}
+
+function appendToPreviousTransaction(
+  transactions: ParsedTransaction[],
+  raw: string,
+  line: string
+) {
+  if (transactions.length === 0) return false;
+  const prev = transactions[transactions.length - 1];
+  prev.description = `${prev.description} ${line}`.replace(/\s+/g, " ").trim();
+  prev.rawLine = `${prev.rawLine}\n${raw}`;
+  prev.confidence = clamp01(prev.confidence - 0.08);
+  return true;
 }
 
 export function parseTransactionsV1(sectionText: string, fileId: string): ParseTransactionsResult {
@@ -119,90 +222,111 @@ export function parseTransactionsV1(sectionText: string, fileId: string): ParseT
   const transactions: ParsedTransaction[] = [];
   const warnings: ParseWarning[] = [];
 
+  let pending: PendingTransaction | null = null;
   let counter = 0;
 
-  for (const raw of lines) {
-    const line = raw.trim();
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
     if (!line) continue;
+
+    if (isNoiseLine(line)) {
+      continue;
+    }
 
     const dateMatch = DATE_PREFIX_RE.exec(line);
 
-    // Continuation lines append to previous transaction description.
-    if (!dateMatch) {
-      if (transactions.length > 0) {
-        const prev = transactions[transactions.length - 1];
-        prev.description = `${prev.description} ${line}`.trim();
-        prev.rawLine = `${prev.rawLine}\n${raw}`;
-        prev.confidence = clamp01(prev.confidence - 0.05);
-      } else {
-        warnings.push({
-          rawLine: raw,
-          reason: "No date and no previous transaction to attach.",
-          confidence: 0.2,
+    if (dateMatch) {
+      if (pending) {
+        pushWarning(
+          warnings,
+          pending.rawLines.join("\n"),
+          "Pending transaction was not completed before next dated row.",
+          0.25
+        );
+        pending = null;
+      }
+
+      const dateIso = toIsoDate(dateMatch[1]);
+      if (!dateIso) {
+        pushWarning(warnings, rawLine, "Invalid date format.", 0.25);
+        continue;
+      }
+
+      const afterDate = (dateMatch[2] || "").trim();
+      const inlineParsed = parseTailWithAmountAndBalance(afterDate);
+
+      if (inlineParsed) {
+        counter += 1;
+        const description = inlineParsed.description || "(no description)";
+        transactions.push({
+          id: `${fileId}-${counter}`,
+          date: dateIso,
+          description,
+          amount: inlineParsed.amount.value,
+          balance: inlineParsed.balance.value,
+          currency: inlineParsed.amount.currency || inlineParsed.balance.currency,
+          rawLine,
+          confidence: description === "(no description)" ? 0.75 : 0.95,
         });
+        continue;
+      }
+
+      // CommBank Direct Credit pattern:
+      // line 1 = date + text, next line(s) = reference, final line = amount+balance.
+      pending = {
+        dateIso,
+        descriptionParts: [afterDate],
+        rawLines: [rawLine],
+      };
+      continue;
+    }
+
+    // Non-dated line handling.
+    if (pending) {
+      pending.rawLines.push(rawLine);
+
+      const parsedTail = parseTailWithAmountAndBalance(line);
+      if (parsedTail) {
+        pending.descriptionParts.push(parsedTail.description);
+
+        counter += 1;
+        transactions.push({
+          id: `${fileId}-${counter}`,
+          date: pending.dateIso,
+          description: normalizeDescription(pending.descriptionParts) || "(no description)",
+          amount: parsedTail.amount.value,
+          balance: parsedTail.balance.value,
+          currency: parsedTail.amount.currency || parsedTail.balance.currency,
+          rawLine: pending.rawLines.join("\n"),
+          confidence: 0.88,
+        });
+
+        pending = null;
+        continue;
+      }
+
+      if (isLikelyReferenceLine(line)) {
+        pending.descriptionParts.push(line);
+      } else {
+        // Keep unknown continuation lines for traceability. We do not warn yet,
+        // because many CommBank rows span multiple lines before amount appears.
+        pending.descriptionParts.push(line);
       }
       continue;
     }
 
-    const dateToken = dateMatch[1];
-    const afterDate = dateMatch[2] || "";
-    const isoDate = toIsoDate(dateToken);
-
-    // Try parsing amount from line tail.
-    const amountMatch = AMOUNT_TAIL_RE.exec(afterDate);
-    if (!amountMatch) {
-      counter += 1;
-      const fallbackTx: ParsedTransaction = {
-        id: `${fileId}-${counter}`,
-        date: isoDate || "",
-        description: afterDate.trim(),
-        amount: 0,
-        rawLine: raw,
-        confidence: 0.3,
-      };
-      transactions.push(fallbackTx);
-      warnings.push({
-        rawLine: raw,
-        reason: "Date found but amount not recognized.",
-        confidence: 0.3,
-      });
-      continue;
+    if (!appendToPreviousTransaction(transactions, rawLine, line)) {
+      pushWarning(warnings, rawLine, "Unclassified line (no date and no pending row).", 0.2);
     }
+  }
 
-    const amountToken = amountMatch[1].trim();
-    const amountParsed = parseAmountToken(amountToken);
-
-    if (!amountParsed || !isoDate) {
-      counter += 1;
-      const fallbackTx: ParsedTransaction = {
-        id: `${fileId}-${counter}`,
-        date: isoDate || "",
-        description: afterDate.trim(),
-        amount: 0,
-        rawLine: raw,
-        confidence: 0.3,
-      };
-      transactions.push(fallbackTx);
-      warnings.push({
-        rawLine: raw,
-        reason: !isoDate ? "Date format invalid." : "Amount parse failed.",
-        confidence: 0.3,
-      });
-      continue;
-    }
-
-    const description = afterDate.slice(0, amountMatch.index).trim();
-
-    counter += 1;
-    transactions.push({
-      id: `${fileId}-${counter}`,
-      date: isoDate,
-      description: description || "(no description)",
-      amount: amountParsed.amount,
-      currency: amountParsed.currency,
-      rawLine: raw,
-      confidence: amountParsed.confidence,
-    });
+  if (pending) {
+    pushWarning(
+      warnings,
+      pending.rawLines.join("\n"),
+      "Pending transaction reached end without amount/balance line.",
+      0.25
+    );
   }
 
   return { transactions, warnings };
