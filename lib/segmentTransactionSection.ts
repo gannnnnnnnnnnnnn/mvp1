@@ -12,12 +12,19 @@
 
 export type SegmentDebug = {
   /**
-   * 1-based line number where we found the header line.
-   * Undefined means we failed to detect a header and returned full text.
+   * 1-based line number where we found the transaction header anchor.
+   * Undefined means anchor was not found and we used full text fallback.
    */
   startLine?: number;
-  /** Number of repeated noisy lines removed from the returned section. */
+  /**
+   * 1-based line number where we detected a known CommBank ending hint.
+   * Undefined means no explicit ending hint was found.
+   */
+  endLine?: number;
+  /** Number of repeated header rows removed from the final segment. */
   removedLines: number;
+  /** Whether the required CommBank header anchor was detected. */
+  headerFound: boolean;
 };
 
 export type SegmentResult = {
@@ -25,36 +32,26 @@ export type SegmentResult = {
   debug: SegmentDebug;
 };
 
-const HEADER_HINTS = ["date", "description", "amount", "transaction", "transactions"];
-
-function normalizeLine(line: string) {
-  return line.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-/**
- * We keep this heuristic simple (minimum viable):
- * - if a line contains at least two table keywords, treat it as transaction header.
- */
-function looksLikeTransactionHeader(line: string) {
-  const normalized = normalizeLine(line);
-  if (!normalized) return false;
-
-  let hit = 0;
-  for (const hint of HEADER_HINTS) {
-    if (normalized.includes(hint)) hit += 1;
-  }
-  return hit >= 2;
-}
+// CommBank anchor requested in Milestone 2.5.1:
+// "Date Transaction details Amount Balance"
+// PDF extraction may remove spaces, so we compare with a compacted form.
+const COMMBANK_HEADER_ANCHOR = "datetransactiondetailsamountbalance";
+const COMMBANK_END_ANCHOR = "anypendingtransactionshaventbeenincluded";
 
 /**
- * Repeated short lines are usually page headers/footers in PDF extraction output.
- * We remove those only when frequency is high enough to avoid over-cleaning.
+ * Compact to alphanumeric only so we can match regardless of spaces/punctuation,
+ * e.g. "DateTransaction detailsAmountBalance" still matches the same anchor.
  */
-function shouldRemoveByFrequency(normalized: string, count: number) {
-  if (!normalized) return false;
-  if (count < 3) return false;
-  if (normalized.length > 120) return false;
-  return true;
+function compactAlphaNum(line: string) {
+  return line.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isCommbankHeaderLine(line: string) {
+  return compactAlphaNum(line).includes(COMMBANK_HEADER_ANCHOR);
+}
+
+function isCommbankEndingLine(line: string) {
+  return compactAlphaNum(line).includes(COMMBANK_END_ANCHOR);
 }
 
 export function segmentTransactionSection(text: string): SegmentResult {
@@ -63,36 +60,43 @@ export function segmentTransactionSection(text: string): SegmentResult {
 
   let headerIndex = -1;
   for (let i = 0; i < lines.length; i += 1) {
-    if (looksLikeTransactionHeader(lines[i])) {
+    if (isCommbankHeaderLine(lines[i])) {
       headerIndex = i;
       break;
     }
   }
 
-  // If header exists, return lines after header; otherwise fallback to full text.
-  const candidateLines = headerIndex >= 0 ? lines.slice(headerIndex + 1) : lines.slice();
-
-  const freq = new Map<string, number>();
-  for (const line of candidateLines) {
-    const key = normalizeLine(line);
-    if (!key) continue;
-    freq.set(key, (freq.get(key) || 0) + 1);
-  }
-
+  // If header exists, start from the row after it; otherwise fallback to full text.
+  const startIndex = headerIndex >= 0 ? headerIndex + 1 : 0;
+  const filteredLines: string[] = [];
+  let endLine: number | undefined;
   let removedLines = 0;
-  const filteredLines = candidateLines.filter((line) => {
-    const key = normalizeLine(line);
-    const count = freq.get(key) || 0;
-    const remove = shouldRemoveByFrequency(key, count);
-    if (remove) removedLines += 1;
-    return !remove;
-  });
+
+  for (let i = startIndex; i < lines.length; i += 1) {
+    const line = lines[i];
+
+    // Stop at known CommBank ending disclaimer to keep only transaction area.
+    if (isCommbankEndingLine(line)) {
+      endLine = i + 1;
+      break;
+    }
+
+    // Remove repeated header rows caused by page breaks.
+    if (isCommbankHeaderLine(line)) {
+      removedLines += 1;
+      continue;
+    }
+
+    filteredLines.push(line);
+  }
 
   return {
     sectionText: filteredLines.join("\n").trim(),
     debug: {
       startLine: headerIndex >= 0 ? headerIndex + 1 : undefined,
+      endLine,
       removedLines,
+      headerFound: headerIndex >= 0,
     },
   };
 }
