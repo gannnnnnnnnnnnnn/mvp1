@@ -32,7 +32,9 @@ type ParseTextResult = {
 
 type SegmentDebug = {
   startLine?: number;
+  endLine?: number;
   removedLines: number;
+  headerFound: boolean;
 };
 
 type SegmentResult = {
@@ -47,6 +49,7 @@ type ParsedTransaction = {
   date: string;
   description: string;
   amount: number;
+  balance?: number;
   currency?: string;
   rawLine: string;
   confidence: number;
@@ -63,6 +66,10 @@ type ParseTransactionsResult = {
   originalName: string;
   transactions: ParsedTransaction[];
   warnings: ParseWarning[];
+  needsReview: boolean;
+  reviewReasons: string[];
+  sectionTextPreview: string;
+  debug?: SegmentDebug;
 };
 
 export default function Home() {
@@ -272,6 +279,10 @@ export default function Home() {
             ok: true;
             transactions: ParsedTransaction[];
             warnings: ParseWarning[];
+            needsReview?: boolean;
+            reviewReasons?: string[];
+            sectionTextPreview?: string;
+            debug?: SegmentDebug;
           }
         | { ok: false; error: ApiError };
 
@@ -285,6 +296,10 @@ export default function Home() {
         originalName: file.originalName,
         transactions: data.transactions,
         warnings: data.warnings,
+        needsReview: data.needsReview === true,
+        reviewReasons: Array.isArray(data.reviewReasons) ? data.reviewReasons : [],
+        sectionTextPreview: typeof data.sectionTextPreview === "string" ? data.sectionTextPreview : "",
+        debug: data.debug,
       });
       setExpandedRawLines({});
     } catch {
@@ -666,7 +681,10 @@ export default function Home() {
                 fileId: <span className="font-mono">{segmentResult.fileId}</span> · 文件名: {segmentResult.originalName}
               </p>
               <p className="mt-1 text-xs text-slate-600">
-                startLine: {segmentResult.debug.startLine ?? "not found"} · removedLines: {segmentResult.debug.removedLines}
+                headerFound: {segmentResult.debug.headerFound ? "true" : "false"} · startLine:{" "}
+                {segmentResult.debug.startLine ?? "not found"} · endLine:{" "}
+                {segmentResult.debug.endLine ?? "not found"} · removedLines:{" "}
+                {segmentResult.debug.removedLines}
               </p>
               <div className="mt-3 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white p-3 font-mono text-xs leading-5 whitespace-pre-wrap text-slate-800">
                 {segmentResult.sectionText || "(empty section)"}
@@ -676,13 +694,36 @@ export default function Home() {
 
           {txResult && (
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <h3 className="text-base font-semibold text-slate-900">Parsed Transactions v1</h3>
+              <h3 className="text-base font-semibold text-slate-900">Parsed Transactions v2 (CommBank)</h3>
               <p className="mt-1 text-xs text-slate-600">
                 fileId: <span className="font-mono">{txResult.fileId}</span> · 文件名: {txResult.originalName}
               </p>
               <p className="mt-1 text-xs text-slate-600">
                 transactions: {txResult.transactions.length} · warnings: {txResult.warnings.length}
               </p>
+              <p className="mt-1 text-xs text-slate-600">
+                needsReview: {txResult.needsReview ? "true" : "false"}
+                {txResult.debug
+                  ? ` · headerFound: ${txResult.debug.headerFound ? "true" : "false"} · startLine: ${
+                      txResult.debug.startLine ?? "not found"
+                    }`
+                  : ""}
+              </p>
+
+              {txResult.needsReview && (
+                <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                  <div className="font-medium">Review Required</div>
+                  <ul className="mt-1 list-disc pl-5">
+                    {txResult.reviewReasons.map((reason, idx) => (
+                      <li key={`${idx}-${reason.slice(0, 12)}`}>{reason}</li>
+                    ))}
+                  </ul>
+                  <div className="mt-2 font-medium">Section Preview</div>
+                  <div className="mt-1 max-h-48 overflow-auto rounded border border-red-200 bg-white p-2 font-mono text-[11px] leading-5 whitespace-pre-wrap text-slate-700">
+                    {txResult.sectionTextPreview || "(empty section preview)"}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
                 <table className="min-w-full text-left text-xs text-slate-700">
@@ -691,6 +732,7 @@ export default function Home() {
                       <th className="px-3 py-2">Date</th>
                       <th className="px-3 py-2">Description</th>
                       <th className="px-3 py-2">Amount</th>
+                      <th className="px-3 py-2">Balance</th>
                       <th className="px-3 py-2">Confidence</th>
                       <th className="px-3 py-2">Raw</th>
                     </tr>
@@ -707,6 +749,11 @@ export default function Home() {
                         <td className="px-3 py-2">{tx.description}</td>
                         <td className="px-3 py-2">
                           {tx.amount.toFixed(2)} {tx.currency || ""}
+                        </td>
+                        <td className="px-3 py-2">
+                          {typeof tx.balance === "number"
+                            ? `${tx.balance.toFixed(2)} ${tx.currency || ""}`
+                            : "-"}
                         </td>
                         <td className="px-3 py-2">{tx.confidence.toFixed(2)}</td>
                         <td className="px-3 py-2">
@@ -733,9 +780,9 @@ export default function Home() {
 
               {txResult.warnings.length > 0 && (
                 <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                  <div className="font-medium">Warnings</div>
+                  <div className="font-medium">Warnings (Top 20)</div>
                   <ul className="mt-1 list-disc pl-5">
-                    {txResult.warnings.map((w, idx) => (
+                    {txResult.warnings.slice(0, 20).map((w, idx) => (
                       <li key={`${idx}-${w.rawLine.slice(0, 12)}`}>
                         confidence {w.confidence.toFixed(2)} · {w.reason} · raw: {w.rawLine}
                       </li>

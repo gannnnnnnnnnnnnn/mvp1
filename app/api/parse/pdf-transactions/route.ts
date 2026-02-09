@@ -62,11 +62,28 @@ export async function POST(request: Request) {
     const text = await fs.readFile(textPath, "utf8");
     const segmented = segmentTransactionSection(text);
     const parsed = parseTransactionsV1(segmented.sectionText, body.fileId);
+    const reviewReasons: string[] = [];
+
+    // Milestone 2.5.3 quality gate:
+    // 1) header not found usually means segmentation failed.
+    // 2) very small transaction count is suspicious for full statements.
+    if (!segmented.debug.headerFound) {
+      reviewReasons.push("Segment header not found. Please review original extracted text.");
+    }
+    if (parsed.transactions.length < 5) {
+      reviewReasons.push("Parsed transactions are too few (< 5). Please review segment/parsing result.");
+    }
+    const needsReview = reviewReasons.length > 0;
 
     return NextResponse.json({
       ok: true,
       transactions: parsed.transactions,
       warnings: parsed.warnings,
+      needsReview,
+      reviewReasons,
+      debug: segmented.debug,
+      // Keep preview bounded for UI readability.
+      sectionTextPreview: segmented.sectionText.slice(0, 4000),
     });
   } catch (err: unknown) {
     if (hasErrnoCode(err, "ENOENT")) {
