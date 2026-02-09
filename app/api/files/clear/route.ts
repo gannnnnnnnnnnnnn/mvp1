@@ -15,6 +15,7 @@ import {
 
 const API_TOKEN = process.env.API_TOKEN;
 const TEXT_CACHE_ROOT = path.join(process.cwd(), "uploads", "text-cache");
+const INDEX_BASENAME = "index.json";
 
 type ClearRequest = {
   confirm: string;
@@ -74,6 +75,26 @@ async function clearTextCacheDir() {
 }
 
 /**
+ * Safety net: remove leftover binary files directly under uploads/.
+ * We explicitly keep index.json and text-cache folder structure.
+ */
+async function clearDanglingUploads() {
+  await fs.mkdir(uploadsDirAbsolute, { recursive: true });
+  const entries = await fs.readdir(uploadsDirAbsolute, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(uploadsDirAbsolute, entry.name);
+    if (entry.name === INDEX_BASENAME) continue;
+    if (entry.name === "text-cache") continue;
+    if (entry.isDirectory()) {
+      await fs.rm(fullPath, { recursive: true, force: true });
+      continue;
+    }
+    await unlinkIfExists(fullPath);
+  }
+}
+
+/**
  * Resolve upload path under uploads root safely.
  */
 function resolveSafeStoredPath(storedName: string) {
@@ -121,6 +142,7 @@ export async function POST(request: Request) {
 
     // Clear all text-cache files.
     await clearTextCacheDir();
+    await clearDanglingUploads();
 
     // Atomically reset index to empty array.
     await fs.mkdir(uploadsDirAbsolute, { recursive: true });
