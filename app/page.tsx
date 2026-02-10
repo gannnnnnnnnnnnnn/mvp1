@@ -61,11 +61,19 @@ type ParseWarning = {
   confidence: number;
 };
 
+type ParseQuality = {
+  headerFound: boolean;
+  balanceContinuityPassRate: number;
+  balanceContinuityChecked: number;
+  needsReviewReasons: string[];
+};
+
 type ParseTransactionsResult = {
   fileId: string;
   originalName: string;
   transactions: ParsedTransaction[];
   warnings: ParseWarning[];
+  quality?: ParseQuality;
   needsReview: boolean;
   reviewReasons: string[];
   sectionTextPreview: string;
@@ -279,6 +287,7 @@ export default function Home() {
             ok: true;
             transactions: ParsedTransaction[];
             warnings: ParseWarning[];
+            quality?: ParseQuality;
             needsReview?: boolean;
             reviewReasons?: string[];
             sectionTextPreview?: string;
@@ -296,6 +305,7 @@ export default function Home() {
         originalName: file.originalName,
         transactions: data.transactions,
         warnings: data.warnings,
+        quality: data.quality,
         needsReview: data.needsReview === true,
         reviewReasons: Array.isArray(data.reviewReasons) ? data.reviewReasons : [],
         sectionTextPreview: typeof data.sectionTextPreview === "string" ? data.sectionTextPreview : "",
@@ -708,6 +718,17 @@ export default function Home() {
                       txResult.debug.startLine ?? "not found"
                     }`
                   : ""}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Header found: {txResult.quality?.headerFound ? "true" : "false"}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                Balance continuity:{" "}
+                {typeof txResult.quality?.balanceContinuityPassRate === "number"
+                  ? `${(txResult.quality.balanceContinuityPassRate * 100).toFixed(1)}%`
+                  : "-"}
+                {" · checked: "}
+                {txResult.quality?.balanceContinuityChecked ?? 0}
               </p>
 
               {txResult.needsReview && (

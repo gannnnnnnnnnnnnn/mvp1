@@ -24,6 +24,51 @@ type ParseQuality = {
   needsReviewReasons: string[];
 };
 
+function round2(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Balance continuity check:
+ * expectedNext = balance[i] + amount[i]
+ * pass if abs(expectedNext - actualNext) <= 0.01
+ */
+function assessBalanceContinuity(
+  transactions: Array<{ amount: number; balance?: number }>
+) {
+  const checked = transactions.length >= 2 ? transactions.length - 1 : 0;
+  if (checked === 0) {
+    return { checked: 0, passRate: 0 };
+  }
+
+  let pass = 0;
+  for (let i = 0; i < transactions.length - 1; i += 1) {
+    const current = transactions[i];
+    const next = transactions[i + 1];
+    const currentBalance = current.balance;
+    const nextBalance = next.balance;
+
+    if (
+      typeof currentBalance !== "number" ||
+      typeof nextBalance !== "number" ||
+      !Number.isFinite(current.amount)
+    ) {
+      continue;
+    }
+
+    const expectedNext = round2(currentBalance + current.amount);
+    const actualNext = round2(nextBalance);
+    if (Math.abs(expectedNext - actualNext) <= 0.01) {
+      pass += 1;
+    }
+  }
+
+  return {
+    checked,
+    passRate: pass / checked,
+  };
+}
+
 function errorJson(status: number, code: string, message: string) {
   return NextResponse.json(
     {
@@ -70,6 +115,7 @@ export async function POST(request: Request) {
     const segmented = segmentTransactionSection(text);
     const parsed = parseTransactionsV1(segmented.sectionText, body.fileId);
     const needsReviewReasons: string[] = [];
+    const continuity = assessBalanceContinuity(parsed.transactions);
 
     // Milestone A (header gate):
     // Use machine-readable reason code for stable downstream checks.
@@ -80,12 +126,19 @@ export async function POST(request: Request) {
     if (parsed.transactions.length < 5) {
       needsReviewReasons.push("TRANSACTIONS_TOO_FEW");
     }
+    // Milestone B (balance continuity gate):
+    // Require enough comparisons first to avoid small-sample false alarms.
+    if (continuity.checked >= 5 && continuity.passRate < 0.85) {
+      needsReviewReasons.push("BALANCE_CONTINUITY_LOW");
+    }
 
     // Keep legacy reviewReasons field so existing UI/clients do not break.
     const legacyReasonMessageMap: Record<string, string> = {
       HEADER_NOT_FOUND: "Segment header not found. Please review original extracted text.",
       TRANSACTIONS_TOO_FEW:
         "Parsed transactions are too few (< 5). Please review segment/parsing result.",
+      BALANCE_CONTINUITY_LOW:
+        "Balance continuity is below threshold (passRate < 0.85). Please review parsed rows.",
     };
     const reviewReasons = needsReviewReasons.map(
       (code) => legacyReasonMessageMap[code] || code
@@ -93,8 +146,8 @@ export async function POST(request: Request) {
 
     const quality: ParseQuality = {
       headerFound: segmented.debug.headerFound,
-      balanceContinuityPassRate: 0,
-      balanceContinuityChecked: 0,
+      balanceContinuityPassRate: continuity.passRate,
+      balanceContinuityChecked: continuity.checked,
       needsReviewReasons: [...needsReviewReasons],
     };
     const needsReview = quality.needsReviewReasons.length > 0;
