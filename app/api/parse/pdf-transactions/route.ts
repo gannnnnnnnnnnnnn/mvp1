@@ -17,6 +17,13 @@ type ParseRequest = {
   fileId: string;
 };
 
+type ParseQuality = {
+  headerFound: boolean;
+  balanceContinuityPassRate: number;
+  balanceContinuityChecked: number;
+  needsReviewReasons: string[];
+};
+
 function errorJson(status: number, code: string, message: string) {
   return NextResponse.json(
     {
@@ -62,18 +69,35 @@ export async function POST(request: Request) {
     const text = await fs.readFile(textPath, "utf8");
     const segmented = segmentTransactionSection(text);
     const parsed = parseTransactionsV1(segmented.sectionText, body.fileId);
-    const reviewReasons: string[] = [];
+    const needsReviewReasons: string[] = [];
 
-    // Milestone 2.5.3 quality gate:
-    // 1) header not found usually means segmentation failed.
-    // 2) very small transaction count is suspicious for full statements.
+    // Milestone A (header gate):
+    // Use machine-readable reason code for stable downstream checks.
     if (!segmented.debug.headerFound) {
-      reviewReasons.push("Segment header not found. Please review original extracted text.");
+      needsReviewReasons.push("HEADER_NOT_FOUND");
     }
+    // Keep old "too few transactions" behavior for compatibility.
     if (parsed.transactions.length < 5) {
-      reviewReasons.push("Parsed transactions are too few (< 5). Please review segment/parsing result.");
+      needsReviewReasons.push("TRANSACTIONS_TOO_FEW");
     }
-    const needsReview = reviewReasons.length > 0;
+
+    // Keep legacy reviewReasons field so existing UI/clients do not break.
+    const legacyReasonMessageMap: Record<string, string> = {
+      HEADER_NOT_FOUND: "Segment header not found. Please review original extracted text.",
+      TRANSACTIONS_TOO_FEW:
+        "Parsed transactions are too few (< 5). Please review segment/parsing result.",
+    };
+    const reviewReasons = needsReviewReasons.map(
+      (code) => legacyReasonMessageMap[code] || code
+    );
+
+    const quality: ParseQuality = {
+      headerFound: segmented.debug.headerFound,
+      balanceContinuityPassRate: 0,
+      balanceContinuityChecked: 0,
+      needsReviewReasons: [...needsReviewReasons],
+    };
+    const needsReview = quality.needsReviewReasons.length > 0;
 
     return NextResponse.json({
       ok: true,
@@ -82,6 +106,7 @@ export async function POST(request: Request) {
       needsReview,
       reviewReasons,
       debug: segmented.debug,
+      quality,
       // Keep preview bounded for UI readability.
       sectionTextPreview: segmented.sectionText.slice(0, 4000),
     });
