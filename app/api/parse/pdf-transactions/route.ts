@@ -30,37 +30,44 @@ function round2(value: number) {
 
 /**
  * Balance continuity check:
- * expectedNext = balance[i] + amount[i]
- * pass if abs(expectedNext - actualNext) <= 0.01
+ * Statement semantics: each row balance is post-transaction balance.
+ * So we validate current row by previous balance + current amount ~= current balance.
  */
 function assessBalanceContinuity(
   transactions: Array<{ amount: number; balance?: number }>
 ) {
-  const checked = transactions.length >= 2 ? transactions.length - 1 : 0;
-  if (checked === 0) {
+  if (transactions.length < 2) {
     return { checked: 0, passRate: 0 };
   }
 
   let pass = 0;
-  for (let i = 0; i < transactions.length - 1; i += 1) {
+  let checked = 0;
+
+  // Start from i=1 because the first row has no previous row to reconcile against.
+  for (let i = 1; i < transactions.length; i += 1) {
+    const previous = transactions[i - 1];
     const current = transactions[i];
-    const next = transactions[i + 1];
+    const previousBalance = previous.balance;
     const currentBalance = current.balance;
-    const nextBalance = next.balance;
 
     if (
+      typeof previousBalance !== "number" ||
       typeof currentBalance !== "number" ||
-      typeof nextBalance !== "number" ||
-      !Number.isFinite(current.amount)
+      !Number.isFinite(current.amount as number)
     ) {
       continue;
     }
+    checked += 1;
 
-    const expectedNext = round2(currentBalance + current.amount);
-    const actualNext = round2(nextBalance);
-    if (Math.abs(expectedNext - actualNext) <= 0.01) {
+    const expectedCurr = round2(previousBalance + current.amount);
+    const actualCurr = round2(currentBalance);
+    if (Math.abs(expectedCurr - actualCurr) <= 0.01) {
       pass += 1;
     }
+  }
+
+  if (checked === 0) {
+    return { checked: 0, passRate: 0 };
   }
 
   return {
