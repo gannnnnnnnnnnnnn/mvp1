@@ -182,4 +182,11 @@ npm run build
 npm run start
 ```
 
+## CommBank Snapshot (Quick)
+
+1. Place sample PDF at `fixtures/TransactionSummary.pdf`.
+2. Start server: `npm run dev` (use `cmd`, not PowerShell, if script policy blocks npm).
+3. Generate baseline: `npm run snapshot:generate` -> writes `expected/TransactionSummary.parsed.json`.
+4. Compare current parser: `npm run snapshot:compare` -> writes `tmp/actual.json`.
+
 Note: in offline/blocked-network environments, `npm run build` may fail to fetch Google Fonts used in `app/layout.tsx`.

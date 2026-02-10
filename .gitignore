@@ -24,6 +24,8 @@ uploads/text-cache/
 
 # testing
 /coverage
+tmp/
+fixtures/*.pdf
 
 # next.js
 /.next/

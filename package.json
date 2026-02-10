@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "snapshot:generate": "node scripts/commbank_snapshot.mjs generate",
+    "snapshot:compare": "node scripts/commbank_snapshot.mjs compare"
   },
   "dependencies": {
     "next": "16.1.3",
