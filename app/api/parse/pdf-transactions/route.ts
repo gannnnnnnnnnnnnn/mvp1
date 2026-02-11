@@ -10,6 +10,7 @@ import path from "path";
 import { segmentTransactionSection } from "@/lib/segmentTransactionSection";
 import { parseTransactionsV1 } from "@/lib/parseTransactionsV1";
 import { detectCommBankTemplate } from "@/lib/commbankTemplate";
+import { parseCommbankStatementDebitCredit } from "@/lib/parseCommbankStatementDebitCredit";
 
 const FILE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const TEXT_CACHE_ROOT = path.join(process.cwd(), "uploads", "text-cache");
@@ -122,7 +123,10 @@ export async function POST(request: Request) {
     const text = await fs.readFile(textPath, "utf8");
     const templateType = detectCommBankTemplate(text);
     const segmented = segmentTransactionSection(text, templateType);
-    const parsed = parseTransactionsV1(segmented.sectionText, body.fileId);
+    const parsed =
+      templateType === "commbank_statement_debit_credit"
+        ? parseCommbankStatementDebitCredit(segmented.sectionText, body.fileId, text)
+        : parseTransactionsV1(segmented.sectionText, body.fileId);
     const needsReviewReasons: string[] = [];
     const continuity = assessBalanceContinuity(parsed.transactions);
 
