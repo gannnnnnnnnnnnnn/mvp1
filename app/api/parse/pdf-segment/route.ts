@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { segmentTransactionSection } from "@/lib/segmentTransactionSection";
+import { detectCommBankTemplate } from "@/lib/commbankTemplate";
 
 const FILE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const TEXT_CACHE_ROOT = path.join(process.cwd(), "uploads", "text-cache");
@@ -59,11 +60,13 @@ export async function POST(request: Request) {
 
   try {
     const text = await fs.readFile(textPath, "utf8");
-    const segmented = segmentTransactionSection(text);
+    const templateType = detectCommBankTemplate(text);
+    const segmented = segmentTransactionSection(text, templateType);
 
     return NextResponse.json({
       ok: true,
       fileId: body.fileId,
+      templateType,
       sectionText: segmented.sectionText,
       debug: segmented.debug,
     });

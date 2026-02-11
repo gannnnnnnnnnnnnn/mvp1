@@ -121,7 +121,7 @@ export async function POST(request: Request) {
   try {
     const text = await fs.readFile(textPath, "utf8");
     const templateType = detectCommBankTemplate(text);
-    const segmented = segmentTransactionSection(text);
+    const segmented = segmentTransactionSection(text, templateType);
     const parsed = parseTransactionsV1(segmented.sectionText, body.fileId);
     const needsReviewReasons: string[] = [];
     const continuity = assessBalanceContinuity(parsed.transactions);
