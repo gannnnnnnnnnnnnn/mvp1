@@ -9,6 +9,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { segmentTransactionSection } from "@/lib/segmentTransactionSection";
 import { parseTransactionsV1 } from "@/lib/parseTransactionsV1";
+import { detectCommBankTemplate } from "@/lib/commbankTemplate";
 
 const FILE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const TEXT_CACHE_ROOT = path.join(process.cwd(), "uploads", "text-cache");
@@ -119,6 +120,7 @@ export async function POST(request: Request) {
 
   try {
     const text = await fs.readFile(textPath, "utf8");
+    const templateType = detectCommBankTemplate(text);
     const segmented = segmentTransactionSection(text);
     const parsed = parseTransactionsV1(segmented.sectionText, body.fileId);
     const needsReviewReasons: string[] = [];
@@ -167,6 +169,7 @@ export async function POST(request: Request) {
       reviewReasons,
       debug: segmented.debug,
       quality,
+      templateType,
       // Keep preview bounded for UI readability.
       sectionTextPreview: segmented.sectionText.slice(0, 4000),
     });
