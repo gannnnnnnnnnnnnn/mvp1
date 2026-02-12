@@ -3,7 +3,6 @@
  *
  * Detection is driven by template configs under templates/commbank.
  */
-import { COMM_BANK_TEMPLATES } from "@/templates/commbank";
 import { CommBankTemplateId } from "@/templates/commbank/types";
 
 export type CommBankTemplateType = CommBankTemplateId | "unknown";
@@ -12,33 +11,46 @@ function compactAlphaNum(text: string) {
   return text.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function hasTermsNearEachOther(
+  lines: string[],
+  terms: string[],
+  windowSize = 6
+) {
+  const loweredTerms = terms.map((t) => t.toLowerCase());
+  for (let i = 0; i < lines.length; i += 1) {
+    const windowText = lines
+      .slice(i, Math.min(lines.length, i + windowSize))
+      .join(" ")
+      .toLowerCase();
+    const hitAll = loweredTerms.every((term) => windowText.includes(term));
+    if (hitAll) return true;
+  }
+  return false;
+}
+
 export function detectCommBankTemplate(text: string): CommBankTemplateType {
-  const raw = text || "";
-  const compact = compactAlphaNum(raw);
-  const lowered = raw.toLowerCase();
-  let bestId: CommBankTemplateId | null = null;
-  let bestScore = 0;
+  const safeText = text || "";
+  const compact = compactAlphaNum(safeText);
+  const lines = safeText.replace(/\r\n/g, "\n").split("\n");
 
-  for (const tpl of COMM_BANK_TEMPLATES) {
-    let score = 0;
-    for (const anchor of tpl.headerAnchors) {
-      const a = anchor.toLowerCase();
-      const aCompact = compactAlphaNum(anchor);
-      if (!aCompact) continue;
+  // Auto template: Debit/Credit + Balance around same header area.
+  const autoByAnchor = compact.includes("transactiondebitcreditbalance");
+  const autoByTerms = hasTermsNearEachOther(lines, [
+    "transaction",
+    "debit",
+    "credit",
+    "balance",
+  ]);
+  if (autoByAnchor || autoByTerms) return "commbank_auto_debit_credit";
 
-      if (compact.includes(aCompact) || lowered.includes(a)) {
-        score += 1;
-      }
-    }
+  // Manual export template: Transaction details + Amount + Balance.
+  const manualByAnchor = compact.includes("transactiondetailsamountbalance");
+  const manualByTerms = hasTermsNearEachOther(lines, [
+    "transaction details",
+    "amount",
+    "balance",
+  ]);
+  if (manualByAnchor || manualByTerms) return "commbank_manual_amount_balance";
 
-    if (score > bestScore) {
-      bestScore = score;
-      bestId = tpl.id;
-    }
-  }
-
-  if (!bestId || bestScore <= 0) {
-    return "unknown";
-  }
-  return bestId;
+  return "unknown";
 }

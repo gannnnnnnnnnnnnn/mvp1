@@ -1,6 +1,6 @@
 export type CommBankTemplateId =
-  | "commbank_transaction_summary"
-  | "commbank_statement_debit_credit";
+  | "commbank_manual_amount_balance"
+  | "commbank_auto_debit_credit";
 
 export type AmountBalanceStrategy =
   | "amount_balance"
@@ -32,4 +32,3 @@ export type CommBankTemplateConfig = {
     minContinuityChecked: number;
   };
 };
-

@@ -1,7 +1,7 @@
 import { CommBankTemplateConfig } from "@/templates/commbank/types";
 
 export const commbankTransactionSummaryTemplate: CommBankTemplateConfig = {
-  id: "commbank_transaction_summary",
+  id: "commbank_manual_amount_balance",
   bank: "commbank",
   name: "CommBank Transaction Summary",
   headerAnchors: ["Date Transaction details Amount Balance"],
@@ -27,4 +27,3 @@ export const commbankTransactionSummaryTemplate: CommBankTemplateConfig = {
     minContinuityChecked: 5,
   },
 };
-

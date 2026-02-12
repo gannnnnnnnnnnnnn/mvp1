@@ -1,7 +1,7 @@
 import { CommBankTemplateConfig } from "@/templates/commbank/types";
 
 export const commbankStatementDebitCreditTemplate: CommBankTemplateConfig = {
-  id: "commbank_statement_debit_credit",
+  id: "commbank_auto_debit_credit",
   bank: "commbank",
   name: "CommBank Statement Debit/Credit/Balance",
   headerAnchors: [

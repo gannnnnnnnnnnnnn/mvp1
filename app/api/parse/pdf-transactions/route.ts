@@ -130,10 +130,10 @@ export async function POST(request: Request) {
       | ReturnType<typeof parseCommbankStatementDebitCredit>;
 
     switch (templateType) {
-      case "commbank_transaction_summary":
+      case "commbank_manual_amount_balance":
         parsed = parseTransactionsV1(segmented.sectionText, body.fileId);
         break;
-      case "commbank_statement_debit_credit":
+      case "commbank_auto_debit_credit":
         parsed = parseCommbankStatementDebitCredit(segmented.sectionText, body.fileId, text);
         break;
       default:

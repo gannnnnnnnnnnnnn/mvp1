@@ -134,7 +134,7 @@ function segmentByTemplate(
 
 export function segmentTransactionSection(
   text: string,
-  templateType: CommBankTemplateType = "commbank_transaction_summary"
+  templateType: CommBankTemplateType = "commbank_manual_amount_balance"
 ): SegmentResult {
   const normalizedText = (text || "").replace(/\r\n/g, "\n");
   const lines = normalizedText.split("\n");
