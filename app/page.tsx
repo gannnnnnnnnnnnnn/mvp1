@@ -49,6 +49,8 @@ type ParsedTransaction = {
   date: string;
   description: string;
   amount: number;
+  debit?: number;
+  credit?: number;
   balance?: number;
   currency?: string;
   rawLine: string;
@@ -71,6 +73,7 @@ type ParseQuality = {
 type ParseTransactionsResult = {
   fileId: string;
   originalName: string;
+  templateType: "commbank_manual_amount_balance" | "commbank_auto_debit_credit" | "unknown";
   transactions: ParsedTransaction[];
   warnings: ParseWarning[];
   quality?: ParseQuality;
@@ -285,6 +288,7 @@ export default function Home() {
       const data = (await res.json()) as
         | {
             ok: true;
+            templateType?: "commbank_manual_amount_balance" | "commbank_auto_debit_credit" | "unknown";
             transactions: ParsedTransaction[];
             warnings: ParseWarning[];
             quality?: ParseQuality;
@@ -303,6 +307,7 @@ export default function Home() {
       setTxResult({
         fileId: file.id,
         originalName: file.originalName,
+        templateType: data.templateType ?? "unknown",
         transactions: data.transactions,
         warnings: data.warnings,
         quality: data.quality,
@@ -453,6 +458,17 @@ export default function Home() {
     if (showFullText) return extractResult.text;
     return extractResult.text.slice(0, 4000);
   }, [extractResult, showFullText]);
+
+  const templateLabel = (templateType: ParseTransactionsResult["templateType"]) => {
+    switch (templateType) {
+      case "commbank_manual_amount_balance":
+        return "manual";
+      case "commbank_auto_debit_credit":
+        return "auto";
+      default:
+        return "unknown";
+    }
+  };
 
   return (
     <main className="min-h-screen bg-slate-50 p-8">
@@ -711,25 +727,31 @@ export default function Home() {
               <p className="mt-1 text-xs text-slate-600">
                 transactions: {txResult.transactions.length} · warnings: {txResult.warnings.length}
               </p>
-              <p className="mt-1 text-xs text-slate-600">
-                needsReview: {txResult.needsReview ? "true" : "false"}
-                {txResult.debug
-                  ? ` · headerFound: ${txResult.debug.headerFound ? "true" : "false"} · startLine: ${
-                      txResult.debug.startLine ?? "not found"
-                    }`
-                  : ""}
-              </p>
-              <p className="mt-1 text-xs text-slate-600">
-                Header found: {txResult.quality?.headerFound ? "true" : "false"}
-              </p>
-              <p className="mt-1 text-xs text-slate-600">
-                Balance continuity:{" "}
-                {typeof txResult.quality?.balanceContinuityPassRate === "number"
-                  ? `${(txResult.quality.balanceContinuityPassRate * 100).toFixed(1)}%`
-                  : "-"}
-                {" · checked: "}
-                {txResult.quality?.balanceContinuityChecked ?? 0}
-              </p>
+
+              <div className="mt-3 rounded border border-slate-200 bg-white p-3 text-xs text-slate-700">
+                <p>
+                  Template: <span className="font-medium">{templateLabel(txResult.templateType)}</span> (
+                  {txResult.templateType})
+                </p>
+                <p>Header: {txResult.quality?.headerFound ? "found" : "not found"}</p>
+                <p>
+                  Continuity:{" "}
+                  {typeof txResult.quality?.balanceContinuityPassRate === "number"
+                    ? `${(txResult.quality.balanceContinuityPassRate * 100).toFixed(1)}%`
+                    : "-"}
+                  {" · checked: "}
+                  {txResult.quality?.balanceContinuityChecked ?? 0}
+                </p>
+                <p>Review Required: {txResult.needsReview ? "yes" : "no"}</p>
+                {txResult.needsReview && (
+                  <p>
+                    Reasons:{" "}
+                    {txResult.quality?.needsReviewReasons?.length
+                      ? txResult.quality.needsReviewReasons.join(", ")
+                      : txResult.reviewReasons.join(", ") || "-"}
+                  </p>
+                )}
+              </div>
 
               {txResult.needsReview && (
                 <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-xs text-red-800">
