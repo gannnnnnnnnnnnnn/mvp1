@@ -1,30 +1,44 @@
 /**
  * CommBank template detection (Phase: multi-template support within same bank).
  *
- * Keep detection intentionally small and deterministic:
- * - transaction summary template: Date Transaction details Amount Balance
- * - debit/credit statement template: Date Transaction Debit Credit Balance
+ * Detection is driven by template configs under templates/commbank.
  */
+import { COMM_BANK_TEMPLATES } from "@/templates/commbank";
+import { CommBankTemplateId } from "@/templates/commbank/types";
 
-export type CommBankTemplateType =
-  | "commbank_transaction_summary"
-  | "commbank_statement_debit_credit"
-  | "unknown";
+export type CommBankTemplateType = CommBankTemplateId | "unknown";
 
 function compactAlphaNum(text: string) {
   return text.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 export function detectCommBankTemplate(text: string): CommBankTemplateType {
-  const compact = compactAlphaNum(text || "");
+  const raw = text || "";
+  const compact = compactAlphaNum(raw);
+  const lowered = raw.toLowerCase();
+  let bestId: CommBankTemplateId | null = null;
+  let bestScore = 0;
 
-  if (compact.includes("datetransactiondebitcreditbalance")) {
-    return "commbank_statement_debit_credit";
-  }
-  if (compact.includes("datetransactiondetailsamountbalance")) {
-    return "commbank_transaction_summary";
+  for (const tpl of COMM_BANK_TEMPLATES) {
+    let score = 0;
+    for (const anchor of tpl.headerAnchors) {
+      const a = anchor.toLowerCase();
+      const aCompact = compactAlphaNum(anchor);
+      if (!aCompact) continue;
+
+      if (compact.includes(aCompact) || lowered.includes(a)) {
+        score += 1;
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestId = tpl.id;
+    }
   }
 
-  return "unknown";
+  if (!bestId || bestScore <= 0) {
+    return "unknown";
+  }
+  return bestId;
 }
-
