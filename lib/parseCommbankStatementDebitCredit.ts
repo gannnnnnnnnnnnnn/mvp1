@@ -35,9 +35,13 @@ const DATE_LINE_RE =
 const PERIOD_RE =
   /Period\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})\s*-\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})/i;
 
-// Supports: -$50.00, $2,000.00, (50.00), 12.34CR
+// Strict money candidates:
+// - must include two decimal places
+// - allows optional $ / commas / parentheses
+// - allows optional CR/DR suffix
+// - forbids partial matches inside longer numeric fragments (e.g. 1363.10645)
 const MONEY_TOKEN_RE =
-  /(?<!\d)(?:\(\$?\d{1,3}(?:,\d{3})*\.\d{2}\)|-?\$?\d{1,3}(?:,\d{3})*\.\d{2}|-?\$?\d+\.\d{2})(?:CR|DR)?/gi;
+  /(?<![\d.])(?:\(\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)|-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})(?:\s?(?:CR|DR))?(?![\d.])/gi;
 
 const CREDIT_HINTS = [
   "CREDIT TO ACCOUNT",
@@ -152,17 +156,18 @@ function parseMoneyToken(token: string): MoneyParsed | null {
   if (!raw) return null;
 
   const upper = raw.toUpperCase();
-  const hasParens = upper.startsWith("(") && upper.endsWith(")");
-  const hasMinus = upper.includes("-");
-  const suffix: "CR" | "DR" | null = upper.endsWith("CR")
+  const condensed = upper.replace(/\s+/g, "");
+  const hasParens = condensed.startsWith("(") && condensed.endsWith(")");
+  const hasMinus = condensed.includes("-");
+  const suffix: "CR" | "DR" | null = condensed.endsWith("CR")
     ? "CR"
-    : upper.endsWith("DR")
+    : condensed.endsWith("DR")
       ? "DR"
       : null;
 
-  const numeric = upper
+  const numeric = condensed
     .replace(/CR$|DR$/i, "")
-    .replace(/[()$,\s]/g, "");
+    .replace(/[()$,]/g, "");
   const parsed = Number(numeric);
   if (!Number.isFinite(parsed)) return null;
 
@@ -182,6 +187,11 @@ function parseMoneyToken(token: string): MoneyParsed | null {
 function extractMoneyTokens(lines: string[]): MoneyTokenWithLine[] {
   const tokens: MoneyTokenWithLine[] = [];
   for (const line of lines) {
+    const trimmed = line.trim();
+    if (isReferenceOnlyLine(trimmed)) {
+      continue;
+    }
+
     // Value Date lines may glue year+money (e.g. ".../202519.56...").
     const normalized = line.replace(
       /(Value Date:\s*\d{2}\/\d{2}\/\d{4})(?=\d)/gi,
@@ -210,6 +220,23 @@ function hasAnyHint(blockUpper: string, hints: string[]) {
   return hints.some((hint) => blockUpper.includes(hint));
 }
 
+function isReferenceOnlyLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+
+  // Reference-like rows in auto statements are often pure numbers/symbols.
+  // If a row has no money markers and no 2-decimal currency pattern,
+  // we keep it as description metadata but exclude it from money candidates.
+  if (trimmed.includes("$")) return false;
+  if (/,/.test(trimmed)) return false;
+  if (/\b(?:CR|DR)\b/i.test(trimmed)) return false;
+  if (/[()]/.test(trimmed)) return false;
+  if (/\d+\.\d{2}/.test(trimmed)) return false;
+
+  const compact = trimmed.replace(/\s+/g, "");
+  return /^[0-9\-/.]+$/.test(compact);
+}
+
 function isNonTransactionBlock(firstLine: string) {
   const normalized = firstLine.toLowerCase();
   return (
@@ -225,6 +252,10 @@ function buildDescription(lines: string[], firstRemainder: string) {
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i].trim();
     if (!line) continue;
+    if (isReferenceOnlyLine(line)) {
+      parts.push(`REF: ${line}`);
+      continue;
+    }
     parts.push(line);
   }
 
