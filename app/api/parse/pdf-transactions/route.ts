@@ -11,6 +11,7 @@ import { segmentTransactionSection } from "@/lib/segmentTransactionSection";
 import { parseTransactionsV1 } from "@/lib/parseTransactionsV1";
 import { detectCommBankTemplate } from "@/lib/commbankTemplate";
 import { parseCommbankStatementDebitCredit } from "@/lib/parseCommbankStatementDebitCredit";
+import { getCommBankTemplateById } from "@/templates/commbank";
 
 const FILE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const TEXT_CACHE_ROOT = path.join(process.cwd(), "uploads", "text-cache");
@@ -122,13 +123,33 @@ export async function POST(request: Request) {
   try {
     const text = await fs.readFile(textPath, "utf8");
     const templateType = detectCommBankTemplate(text);
+    const templateConfig = getCommBankTemplateById(templateType);
     const segmented = segmentTransactionSection(text, templateType);
-    const parsed =
-      templateType === "commbank_statement_debit_credit"
-        ? parseCommbankStatementDebitCredit(segmented.sectionText, body.fileId, text)
-        : parseTransactionsV1(segmented.sectionText, body.fileId);
+    let parsed:
+      | ReturnType<typeof parseTransactionsV1>
+      | ReturnType<typeof parseCommbankStatementDebitCredit>;
+
+    switch (templateType) {
+      case "commbank_transaction_summary":
+        parsed = parseTransactionsV1(segmented.sectionText, body.fileId);
+        break;
+      case "commbank_statement_debit_credit":
+        parsed = parseCommbankStatementDebitCredit(segmented.sectionText, body.fileId, text);
+        break;
+      default:
+        parsed = { transactions: [], warnings: [] };
+        break;
+    }
+
     const needsReviewReasons: string[] = [];
-    const continuity = assessBalanceContinuity(parsed.transactions);
+    const continuity =
+      templateConfig?.quality.enableContinuityGate === true
+        ? assessBalanceContinuity(parsed.transactions)
+        : { checked: 0, passRate: 0 };
+
+    if (templateType === "unknown") {
+      needsReviewReasons.push("TEMPLATE_UNKNOWN");
+    }
 
     // Milestone A (header gate):
     // Use machine-readable reason code for stable downstream checks.
@@ -141,12 +162,18 @@ export async function POST(request: Request) {
     }
     // Milestone B (balance continuity gate):
     // Require enough comparisons first to avoid small-sample false alarms.
-    if (continuity.checked >= 5 && continuity.passRate < 0.85) {
+    if (
+      templateConfig?.quality.enableContinuityGate === true &&
+      continuity.checked >= templateConfig.quality.minContinuityChecked &&
+      continuity.passRate < templateConfig.quality.continuityThreshold
+    ) {
       needsReviewReasons.push("BALANCE_CONTINUITY_LOW");
     }
 
     // Keep legacy reviewReasons field so existing UI/clients do not break.
     const legacyReasonMessageMap: Record<string, string> = {
+      TEMPLATE_UNKNOWN:
+        "Template unknown. Please review raw text and add/update CommBank template config.",
       HEADER_NOT_FOUND: "Segment header not found. Please review original extracted text.",
       TRANSACTIONS_TOO_FEW:
         "Parsed transactions are too few (< 5). Please review segment/parsing result.",
