@@ -21,7 +21,6 @@ type AmountResolution = {
   amount: number;
   debit?: number;
   credit?: number;
-  bothPresent: boolean;
   confidencePenalty: number;
 };
 
@@ -320,21 +319,21 @@ function resolveAmount(params: {
 
   if (side === "debit") {
     const debit = candidate.absValue;
+    const credit = undefined;
     return {
-      amount: -debit,
+      amount: (credit ?? 0) - debit,
       debit,
-      credit: undefined,
-      bothPresent,
+      credit,
       confidencePenalty,
     };
   }
 
   const credit = candidate.absValue;
+  const debit = undefined;
   return {
-    amount: credit,
-    debit: undefined,
+    amount: credit - (debit ?? 0),
+    debit,
     credit,
-    bothPresent,
     confidencePenalty,
   };
 }
