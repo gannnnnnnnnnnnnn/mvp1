@@ -4,7 +4,10 @@ export const commbankStatementDebitCreditTemplate: CommBankTemplateConfig = {
   id: "commbank_statement_debit_credit",
   bank: "commbank",
   name: "CommBank Statement Debit/Credit/Balance",
-  headerAnchors: ["Date Transaction Debit Credit Balance"],
+  headerAnchors: [
+    "Date Transaction Debit Credit Balance",
+    "TransactionDebitCreditBalance",
+  ],
   segment: {
     startAfterHeader: true,
     stopAnchors: ["CLOSING BALANCE", "Transaction Summary during"],
@@ -29,4 +32,3 @@ export const commbankStatementDebitCreditTemplate: CommBankTemplateConfig = {
     minContinuityChecked: 5,
   },
 };
-

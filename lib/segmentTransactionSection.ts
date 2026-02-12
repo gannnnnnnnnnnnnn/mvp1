@@ -11,6 +11,8 @@
  */
 
 import { CommBankTemplateType } from "@/lib/commbankTemplate";
+import { COMM_BANK_TEMPLATE_MAP } from "@/templates/commbank";
+import { CommBankTemplateConfig } from "@/templates/commbank/types";
 
 export type SegmentDebug = {
   /**
@@ -29,24 +31,14 @@ export type SegmentDebug = {
   headerFound: boolean;
   /** Optional end trigger reason (for debugging failed/early stops). */
   stopReason?: string;
+  /** Template id used for this segmentation run. */
+  templateType?: CommBankTemplateType;
 };
 
 export type SegmentResult = {
   sectionText: string;
   debug: SegmentDebug;
 };
-
-// CommBank anchor requested in Milestone 2.5.1:
-// "Date Transaction details Amount Balance"
-// PDF extraction may remove spaces, so we compare with a compacted form.
-const SUMMARY_HEADER_ANCHOR = "datetransactiondetailsamountbalance";
-const SUMMARY_END_ANCHOR = "anypendingtransactionshaventbeenincluded";
-
-// CommBank traditional statement template:
-// "Date Transaction Debit Credit Balance" (often split across lines in PDF text).
-const STATEMENT_HEADER_ANCHOR = "transactiondebitcreditbalance";
-const STATEMENT_STOP_CLOSING_BALANCE = "closingbalance";
-const STATEMENT_STOP_SUMMARY = "transactionsummaryduring";
 
 /**
  * Compact to alphanumeric only so we can match regardless of spaces/punctuation,
@@ -56,24 +48,52 @@ function compactAlphaNum(line: string) {
   return line.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function isSummaryHeaderLine(line: string) {
-  return compactAlphaNum(line).includes(SUMMARY_HEADER_ANCHOR);
+function matchesAnchor(line: string, anchor: string) {
+  const lineLower = line.toLowerCase();
+  const anchorLower = anchor.toLowerCase();
+  if (lineLower.includes(anchorLower)) return true;
+  return compactAlphaNum(line).includes(compactAlphaNum(anchor));
 }
 
-function isSummaryEndingLine(line: string) {
-  return compactAlphaNum(line).includes(SUMMARY_END_ANCHOR);
-}
-
-function segmentSummaryTemplate(lines: string[]): SegmentResult {
+function findHeaderIndex(lines: string[], template: CommBankTemplateConfig) {
   let headerIndex = -1;
   for (let i = 0; i < lines.length; i += 1) {
-    if (isSummaryHeaderLine(lines[i])) {
+    const line = lines[i];
+    const hit = template.headerAnchors.some((anchor) => matchesAnchor(line, anchor));
+    if (hit) {
       headerIndex = i;
       break;
     }
   }
+  return headerIndex;
+}
 
-  const startIndex = headerIndex >= 0 ? headerIndex + 1 : 0;
+function buildRemoveRegexList(patterns: string[]) {
+  const list: RegExp[] = [];
+  for (const pattern of patterns) {
+    try {
+      list.push(new RegExp(pattern, "i"));
+    } catch {
+      // Ignore malformed patterns so one bad rule does not break the endpoint.
+    }
+  }
+  return list;
+}
+
+function segmentByTemplate(
+  lines: string[],
+  template: CommBankTemplateConfig,
+  templateType: CommBankTemplateType
+): SegmentResult {
+  const headerIndex = findHeaderIndex(lines, template);
+  const startIndex =
+    headerIndex >= 0
+      ? template.segment.startAfterHeader
+        ? headerIndex + 1
+        : headerIndex
+      : 0;
+
+  const removeRegexes = buildRemoveRegexList(template.segment.removeLinePatterns || []);
   const filteredLines: string[] = [];
   let endLine: number | undefined;
   let removedLines = 0;
@@ -81,14 +101,17 @@ function segmentSummaryTemplate(lines: string[]): SegmentResult {
 
   for (let i = startIndex; i < lines.length; i += 1) {
     const line = lines[i];
-
-    if (isSummaryEndingLine(line)) {
+    const stopAnchor = template.segment.stopAnchors.find((anchor) =>
+      matchesAnchor(line, anchor)
+    );
+    if (stopAnchor) {
       endLine = i + 1;
-      stopReason = "PENDING_TRANSACTIONS_NOTE";
+      stopReason = stopAnchor;
       break;
     }
 
-    if (isSummaryHeaderLine(line)) {
+    const shouldRemove = removeRegexes.some((re) => re.test(line));
+    if (shouldRemove) {
       removedLines += 1;
       continue;
     }
@@ -104,79 +127,7 @@ function segmentSummaryTemplate(lines: string[]): SegmentResult {
       removedLines,
       headerFound: headerIndex >= 0,
       stopReason,
-    },
-  };
-}
-
-function isStatementHeaderLine(line: string) {
-  const compact = compactAlphaNum(line);
-  return compact.includes(STATEMENT_HEADER_ANCHOR);
-}
-
-function isStatementDateOnlyHeader(line: string) {
-  return line.trim().toLowerCase() === "date";
-}
-
-function isStatementPageNoise(line: string) {
-  const trimmed = line.trim();
-  if (!trimmed) return false;
-  if (/^statement\s+\d+/i.test(trimmed)) return true;
-  if (/^account number/i.test(trimmed)) return true;
-  // Account number line variants such as "06 3408 11101463"
-  if (/^\d{2}(?:\s+\d{2,6}){1,}$/i.test(trimmed)) return true;
-  return false;
-}
-
-function segmentStatementTemplate(lines: string[]): SegmentResult {
-  let headerIndex = -1;
-  for (let i = 0; i < lines.length; i += 1) {
-    if (isStatementHeaderLine(lines[i])) {
-      headerIndex = i;
-      break;
-    }
-  }
-
-  const startIndex = headerIndex >= 0 ? headerIndex + 1 : 0;
-  const filteredLines: string[] = [];
-  let endLine: number | undefined;
-  let removedLines = 0;
-  let stopReason: string | undefined;
-
-  for (let i = startIndex; i < lines.length; i += 1) {
-    const line = lines[i];
-    const compact = compactAlphaNum(line);
-
-    if (compact.includes(STATEMENT_STOP_CLOSING_BALANCE)) {
-      endLine = i + 1;
-      stopReason = "CLOSING_BALANCE";
-      break;
-    }
-    if (compact.includes(STATEMENT_STOP_SUMMARY)) {
-      endLine = i + 1;
-      stopReason = "TRANSACTION_SUMMARY_DURING";
-      break;
-    }
-
-    if (isStatementHeaderLine(line) || isStatementDateOnlyHeader(line)) {
-      removedLines += 1;
-      continue;
-    }
-    if (isStatementPageNoise(line)) {
-      removedLines += 1;
-      continue;
-    }
-
-    filteredLines.push(line);
-  }
-
-  return {
-    sectionText: filteredLines.join("\n").trim(),
-    debug: {
-      startLine: headerIndex >= 0 ? headerIndex + 1 : undefined,
-      endLine,
-      removedLines,
-      headerFound: headerIndex >= 0,
-      stopReason,
+      templateType,
     },
   };
 }
@@ -187,9 +138,19 @@ export function segmentTransactionSection(
 ): SegmentResult {
   const normalizedText = (text || "").replace(/\r\n/g, "\n");
   const lines = normalizedText.split("\n");
-
-  if (templateType === "commbank_statement_debit_credit") {
-    return segmentStatementTemplate(lines);
+  const template = COMM_BANK_TEMPLATE_MAP[templateType as keyof typeof COMM_BANK_TEMPLATE_MAP];
+  if (!template) {
+    return {
+      sectionText: normalizedText.trim(),
+      debug: {
+        startLine: undefined,
+        endLine: undefined,
+        removedLines: 0,
+        headerFound: false,
+        stopReason: "TEMPLATE_NOT_FOUND",
+        templateType,
+      },
+    };
   }
-  return segmentSummaryTemplate(lines);
+  return segmentByTemplate(lines, template, templateType);
 }
