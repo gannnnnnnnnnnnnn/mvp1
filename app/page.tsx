@@ -774,7 +774,14 @@ export default function Home() {
                     <tr className="border-b bg-slate-50 text-slate-500">
                       <th className="px-3 py-2">Date</th>
                       <th className="px-3 py-2">Description</th>
-                      <th className="px-3 py-2">Amount</th>
+                      {txResult.templateType === "commbank_auto_debit_credit" ? (
+                        <>
+                          <th className="px-3 py-2">Debit</th>
+                          <th className="px-3 py-2">Credit</th>
+                        </>
+                      ) : (
+                        <th className="px-3 py-2">Amount</th>
+                      )}
                       <th className="px-3 py-2">Balance</th>
                       <th className="px-3 py-2">Confidence</th>
                       <th className="px-3 py-2">Raw</th>
@@ -790,9 +797,24 @@ export default function Home() {
                       >
                         <td className="px-3 py-2">{tx.date ? new Date(tx.date).toISOString().slice(0, 10) : "-"}</td>
                         <td className="px-3 py-2">{tx.description}</td>
-                        <td className="px-3 py-2">
-                          {tx.amount.toFixed(2)} {tx.currency || ""}
-                        </td>
+                        {txResult.templateType === "commbank_auto_debit_credit" ? (
+                          <>
+                            <td className="px-3 py-2">
+                              {typeof tx.debit === "number"
+                                ? `${Math.abs(tx.debit).toFixed(2)} ${tx.currency || ""}`
+                                : "-"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {typeof tx.credit === "number"
+                                ? `${Math.abs(tx.credit).toFixed(2)} ${tx.currency || ""}`
+                                : "-"}
+                            </td>
+                          </>
+                        ) : (
+                          <td className="px-3 py-2">
+                            {tx.amount.toFixed(2)} {tx.currency || ""}
+                          </td>
+                        )}
                         <td className="px-3 py-2">
                           {typeof tx.balance === "number"
                             ? `${tx.balance.toFixed(2)} ${tx.currency || ""}`
