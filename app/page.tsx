@@ -761,6 +761,14 @@ export default function Home() {
                       <li key={`${idx}-${reason.slice(0, 12)}`}>{reason}</li>
                     ))}
                   </ul>
+                  <div className="mt-2">
+                    Continuity:{" "}
+                    {typeof txResult.quality?.balanceContinuityPassRate === "number"
+                      ? `${(txResult.quality.balanceContinuityPassRate * 100).toFixed(1)}%`
+                      : "-"}
+                    {" · checked: "}
+                    {txResult.quality?.balanceContinuityChecked ?? 0}
+                  </div>
                   <div className="mt-2 font-medium">Section Preview</div>
                   <div className="mt-1 max-h-48 overflow-auto rounded border border-red-200 bg-white p-2 font-mono text-[11px] leading-5 whitespace-pre-wrap text-slate-700">
                     {txResult.sectionTextPreview || "(empty section preview)"}
@@ -838,6 +846,14 @@ export default function Home() {
               {txResult.transactions.map((tx) =>
                 expandedRawLines[tx.id] ? (
                   <div key={`${tx.id}-raw`} className="mt-2 rounded border border-slate-200 bg-white p-2 font-mono text-xs whitespace-pre-wrap">
+                    {txResult.templateType === "commbank_auto_debit_credit" && (
+                      <div className="mb-1 text-[11px] text-slate-600">
+                        parsed: debit={typeof tx.debit === "number" ? tx.debit.toFixed(2) : "-"} ·
+                        credit={typeof tx.credit === "number" ? tx.credit.toFixed(2) : "-"} ·
+                        amount={Number.isFinite(tx.amount) ? tx.amount.toFixed(2) : "-"} ·
+                        balance={typeof tx.balance === "number" ? tx.balance.toFixed(2) : "-"}
+                      </div>
+                    )}
                     [{tx.id}]\n{tx.rawLine}
                   </div>
                 ) : null
