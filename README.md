@@ -8,6 +8,68 @@ A minimal Next.js App Router project for uploading PDF/CSV files to local disk, 
 - TypeScript
 - Local filesystem storage (`uploads/` + `uploads/index.json`)
 
+## Development Progress (Human-friendly)
+
+这段给两类读者看：非工程背景同学，以及后续接手的工程同学。  
+看法很简单：先看树状图（我们做到哪了），再看原则（为什么这样做），最后看下一步。  
+目标不是“讲全技术细节”，而是快速理解路线和决策。
+
+```text
+MVP: Personal Cashflow App
+├─ Goal
+│  └─ 帮用户把银行 PDF 变成“可核对、可解释、可追溯”的现金流数据。
+│
+├─ Phase 1: File Handling
+│  ├─ ✅ Upload / list / download PDFs
+│  ├─ ✅ 本地存储 uploads/ + index.json
+│  └─ ✅ 基础安全（路径检查、大小限制、简单鉴权）
+│
+├─ Phase 2: Text -> Segment -> Parse (CommBank)
+│  ├─ ✅ Text extraction + cache (pdf-parse + text-cache)
+│  ├─ ✅ Segment v1/v2（TransactionSummary 模板）
+│  ├─ ✅ Parse v1/v2（结构化表格输出）
+│  └─ ✅ UI 可追溯展示（rawLine / confidence / warnings）
+│
+├─ Phase 2.5: Quality Gate “上锁”
+│  ├─ ✅ headerFound gate
+│  ├─ ✅ balance continuity gate
+│  │   └─ 采用 post-transaction 语义：prev.balance + curr.amount ~= curr.balance
+│  └─ ✅ needsReview + reasons（失败可解释，不 silent fail）
+│
+├─ Phase 2.6: Regression Baseline
+│  ├─ ✅ 单样本快照：generate / compare
+│  ├─ 🔄 多样本回归跑批（最小脚本）已开始收口
+│  └─ ✅ main 上已有可回滚的阶段提交链
+│
+├─ Phase 3.0.x: Template System (CommBank only)
+│  ├─ ✅ template detect（summary vs debit/credit statement）
+│  ├─ ✅ template-aware segment route
+│  ├─ ✅ statement 模板 parse（多行聚合、年份推断、continuity gate）
+│  └─ 🔄 templates/commbank/*.json 规则外置（下一步）
+│
+└─ Phase 3.0: Interpretation Layer (跨账户解释)
+   ├─ ⏳ Household boundary（哪些账户算“家里账户”）
+   ├─ ⏳ Internal transfer linking（转账不算消费）
+   ├─ ⏳ Credit card semantics（刷卡与还款语义拆分）
+   └─ ⏳ Summary / export（可读结论输出）
+```
+
+### Why We Designed It This Way
+
+- 先规则后 AI：先把可解释规则跑通，LLM 不做第一步 parser。  
+- 可解释失败：任何失败都要有 `needsReview + reasons`，不让用户猜。  
+- 模板化优先：按模板分流，比把所有情况塞进一个大正则更稳。  
+- 单银行闭环优先：先把 CommBank 跑稳，再考虑扩银行。  
+- 小步可回滚：每个里程碑独立 commit，方便定位回归点。
+
+### Next 3-5 Steps
+
+1. 落地 `templates/commbank`（detect / segment / parse 规则配置化）。  
+2. 继续收紧 statement 模板（噪音行过滤、block 边界、warning 降噪）。  
+3. 开始 Phase 3 解释层（家庭边界 + 内部转账 linking + 信用卡语义）。  
+4. 增加最小多样本回归跑批输出（指标表，不引入复杂测试框架）。  
+5. 导出与 summary（给非技术用户的可读结论）。
+
 ## What Exists Today (Phase 0/1)
 
 - `POST /api/upload`: upload one file (PDF/CSV, <=20MB)
