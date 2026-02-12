@@ -365,6 +365,7 @@ function finalizeBlock(params: {
   if (isNonTransactionBlock(rawLines[0])) return null;
 
   const rawBlock = rawLines.join("\n");
+  const warningCountBefore = warnings.length;
   const dateIso = inferDateIso(dayText, monthText, yearText, period);
   if (!dateIso) {
     pushWarning(warnings, rawBlock, "Unable to infer transaction date.", 0.3);
@@ -409,19 +410,29 @@ function finalizeBlock(params: {
     pushWarning(warnings, rawBlock, "AUTO_AMOUNT_NOT_FOUND", 0.35);
   }
 
-  let confidence = rawLines.length === 1 ? 0.95 : 0.88;
-  if (!balanceRaw || !amountResolved) {
-    confidence = 0.42;
-  } else {
-    confidence = clamp01(confidence - amountResolved.confidencePenalty);
-  }
-
   // Statement balance may carry "CR" suffix in source text.
   // For this phase we treat suffix as marker only and store numeric value.
   const balance = balanceRaw ? Math.abs(balanceRaw.absValue) : undefined;
   const amount = amountResolved?.amount ?? 0;
   const debit = amountResolved?.debit;
   const credit = amountResolved?.credit;
+  const hasAmountSide =
+    (typeof debit === "number" && typeof credit !== "number") ||
+    (typeof debit !== "number" && typeof credit === "number");
+  const hasCoreFields = typeof balance === "number" && hasAmountSide;
+  const warningCountAdded = warnings.length - warningCountBefore;
+
+  let confidence = 0.42;
+  if (hasCoreFields && warningCountAdded === 0) {
+    confidence = 0.95;
+  } else if (hasCoreFields) {
+    const fallbackPenalty = amountResolved?.confidencePenalty ?? 0;
+    const warningPenalty = Math.min(0.25, warningCountAdded * 0.08);
+    confidence = clamp01(0.88 - fallbackPenalty - warningPenalty);
+  } else {
+    const warningPenalty = Math.min(0.25, warningCountAdded * 0.05);
+    confidence = clamp01(0.55 - warningPenalty);
+  }
 
   return {
     id: `${fileId}-${counter}`,
