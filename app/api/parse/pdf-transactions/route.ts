@@ -37,7 +37,8 @@ function round2(value: number) {
  * So we validate current row by previous balance + current amount ~= current balance.
  */
 function assessBalanceContinuity(
-  transactions: Array<{ amount: number; balance?: number }>
+  transactions: Array<{ amount: number; balance?: number; debit?: number; credit?: number }>,
+  templateType: ReturnType<typeof detectCommBankTemplate>
 ) {
   if (transactions.length < 2) {
     return { checked: 0, passRate: 0 };
@@ -60,6 +61,16 @@ function assessBalanceContinuity(
     ) {
       continue;
     }
+
+    // For auto debit/credit template, only compare rows where amount was
+    // explicitly mapped from debit or credit (not fallback placeholder).
+    if (
+      templateType === "commbank_auto_debit_credit" &&
+      typeof current.debit !== "number" &&
+      typeof current.credit !== "number"
+    ) {
+      continue;
+    }
     checked += 1;
 
     const expectedCurr = round2(previousBalance + current.amount);
@@ -77,6 +88,12 @@ function assessBalanceContinuity(
     checked,
     passRate: pass / checked,
   };
+}
+
+function pushReasonUnique(reasons: string[], code: string) {
+  if (!reasons.includes(code)) {
+    reasons.push(code);
+  }
 }
 
 function errorJson(status: number, code: string, message: string) {
@@ -144,21 +161,21 @@ export async function POST(request: Request) {
     const needsReviewReasons: string[] = [];
     const continuity =
       templateConfig?.quality.enableContinuityGate === true
-        ? assessBalanceContinuity(parsed.transactions)
+        ? assessBalanceContinuity(parsed.transactions, templateType)
         : { checked: 0, passRate: 0 };
 
     if (templateType === "unknown") {
-      needsReviewReasons.push("TEMPLATE_UNKNOWN");
+      pushReasonUnique(needsReviewReasons, "TEMPLATE_UNKNOWN");
     }
 
     // Milestone A (header gate):
     // Use machine-readable reason code for stable downstream checks.
     if (!segmented.debug.headerFound) {
-      needsReviewReasons.push("HEADER_NOT_FOUND");
+      pushReasonUnique(needsReviewReasons, "HEADER_NOT_FOUND");
     }
     // Keep old "too few transactions" behavior for compatibility.
     if (parsed.transactions.length < 5) {
-      needsReviewReasons.push("TRANSACTIONS_TOO_FEW");
+      pushReasonUnique(needsReviewReasons, "TRANSACTIONS_TOO_FEW");
     }
     // Milestone B (balance continuity gate):
     // Require enough comparisons first to avoid small-sample false alarms.
@@ -167,7 +184,28 @@ export async function POST(request: Request) {
       continuity.checked >= templateConfig.quality.minContinuityChecked &&
       continuity.passRate < templateConfig.quality.continuityThreshold
     ) {
-      needsReviewReasons.push("BALANCE_CONTINUITY_LOW");
+      pushReasonUnique(needsReviewReasons, "BALANCE_CONTINUITY_LOW");
+    }
+
+    if (templateType === "commbank_auto_debit_credit") {
+      // If parser detected both debit and credit in the same block, mark review.
+      if (parsed.warnings.some((w) => w.reason === "DEBIT_CREDIT_BOTH_PRESENT")) {
+        pushReasonUnique(needsReviewReasons, "DEBIT_CREDIT_BOTH_PRESENT");
+      }
+
+      // Low coverage = too many rows missing amount mapping or running balance.
+      const coverageTotal = parsed.transactions.length;
+      if (coverageTotal > 0) {
+        const lowCoverageCount = parsed.transactions.filter(
+          (tx) =>
+            typeof tx.balance !== "number" ||
+            (typeof tx.debit !== "number" && typeof tx.credit !== "number")
+        ).length;
+        const lowCoverageRate = lowCoverageCount / coverageTotal;
+        if (lowCoverageRate > 0.1) {
+          pushReasonUnique(needsReviewReasons, "AUTO_PARSE_LOW_COVERAGE");
+        }
+      }
     }
 
     // Keep legacy reviewReasons field so existing UI/clients do not break.
@@ -179,6 +217,10 @@ export async function POST(request: Request) {
         "Parsed transactions are too few (< 5). Please review segment/parsing result.",
       BALANCE_CONTINUITY_LOW:
         "Balance continuity is below threshold (passRate < 0.85). Please review parsed rows.",
+      DEBIT_CREDIT_BOTH_PRESENT:
+        "Both debit and credit values were detected in one parsed block. Please review this statement format.",
+      AUTO_PARSE_LOW_COVERAGE:
+        "Auto template parse coverage is low (missing amount or balance in many rows).",
     };
     const reviewReasons = needsReviewReasons.map(
       (code) => legacyReasonMessageMap[code] || code

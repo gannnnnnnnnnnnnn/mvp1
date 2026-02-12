@@ -13,6 +13,8 @@ export type ParsedTransaction = {
   date: string;
   description: string;
   amount: number;
+  debit?: number;
+  credit?: number;
   balance?: number;
   currency?: string;
   rawLine: string;

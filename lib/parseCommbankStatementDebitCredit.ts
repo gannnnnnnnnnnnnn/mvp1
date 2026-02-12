@@ -11,15 +11,53 @@ type StatementPeriod = {
 
 type MoneyParsed = {
   value: number;
+  absValue: number;
   suffix: "CR" | "DR" | null;
+  hasMinus: boolean;
+  hasParens: boolean;
+};
+
+type AmountResolution = {
+  amount: number;
+  debit?: number;
+  credit?: number;
+  bothPresent: boolean;
+  confidencePenalty: number;
+};
+
+type MoneyTokenWithLine = {
+  token: string;
+  line: string;
 };
 
 const DATE_LINE_RE =
   /^(\d{2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s*(\d{4}))?(.*)$/i;
 const PERIOD_RE =
   /Period\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})\s*-\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})/i;
+
+// Supports: -$50.00, $2,000.00, (50.00), 12.34CR
 const MONEY_TOKEN_RE =
-  /(?<!\d)(?:-?\$?\d{1,3}(?:,\d{3})*|-?\$?\d+)\.\d{2}(?:CR|DR)?/gi;
+  /(?<!\d)(?:\(\$?\d{1,3}(?:,\d{3})*\.\d{2}\)|-?\$?\d{1,3}(?:,\d{3})*\.\d{2}|-?\$?\d+\.\d{2})(?:CR|DR)?/gi;
+
+const CREDIT_HINTS = [
+  "CREDIT TO ACCOUNT",
+  "FAST TRANSFER FROM",
+  "TRANSFER FROM",
+  "PAYMENT RECEIVED",
+  "INTEREST",
+  "REFUND",
+];
+const DEBIT_HINTS = [
+  "TRANSFER TO",
+  "OVERDRAW FEE",
+  "FEE",
+  "DEBIT",
+  "CARD",
+  "EFTPOS",
+  "PURCHASE",
+  "WITHDRAWAL",
+  "PAYMENT TO",
+];
 
 const MONTH_INDEX: Record<string, number> = {
   jan: 0,
@@ -114,6 +152,8 @@ function parseMoneyToken(token: string): MoneyParsed | null {
   if (!raw) return null;
 
   const upper = raw.toUpperCase();
+  const hasParens = upper.startsWith("(") && upper.endsWith(")");
+  const hasMinus = upper.includes("-");
   const suffix: "CR" | "DR" | null = upper.endsWith("CR")
     ? "CR"
     : upper.endsWith("DR")
@@ -122,26 +162,52 @@ function parseMoneyToken(token: string): MoneyParsed | null {
 
   const numeric = upper
     .replace(/CR$|DR$/i, "")
-    .replace(/[$,\s]/g, "");
-  const value = Number(numeric);
-  if (!Number.isFinite(value)) return null;
+    .replace(/[()$,\s]/g, "");
+  const parsed = Number(numeric);
+  if (!Number.isFinite(parsed)) return null;
 
-  return { value, suffix };
+  const absValue = Math.abs(parsed);
+  const signedByToken =
+    hasParens || hasMinus || suffix === "DR" ? -absValue : absValue;
+
+  return {
+    value: suffix === "CR" ? absValue : signedByToken,
+    absValue,
+    suffix,
+    hasMinus,
+    hasParens,
+  };
 }
 
-function extractMoneyTokens(lines: string[]): string[] {
-  const tokens: string[] = [];
+function extractMoneyTokens(lines: string[]): MoneyTokenWithLine[] {
+  const tokens: MoneyTokenWithLine[] = [];
   for (const line of lines) {
-    // Value Date lines often glue year and amount: ".../202519.56$$108.66CR".
+    // Value Date lines may glue year+money (e.g. ".../202519.56...").
     const normalized = line.replace(
       /(Value Date:\s*\d{2}\/\d{2}\/\d{4})(?=\d)/gi,
       "$1 "
     );
     for (const match of normalized.matchAll(MONEY_TOKEN_RE)) {
-      tokens.push(match[0]);
+      tokens.push({ token: match[0], line: normalized });
     }
   }
   return tokens;
+}
+
+function isFinancialLine(line: string) {
+  const upper = line.toUpperCase();
+  return (
+    upper.includes("$") ||
+    upper.includes("CR") ||
+    upper.includes("DR") ||
+    upper.includes("VALUE DATE") ||
+    upper.includes("CREDIT TO ACCOUNT") ||
+    upper.includes("TRANSFER")
+  );
+}
+
+function hasAnyHint(blockUpper: string, hints: string[]) {
+  return hints.some((hint) => blockUpper.includes(hint));
 }
 
 function isNonTransactionBlock(firstLine: string) {
@@ -165,26 +231,6 @@ function buildDescription(lines: string[], firstRemainder: string) {
   return parts.join(" | ").replace(/\s+/g, " ").trim();
 }
 
-function detectAmountSign(blockTextUpper: string, amount: MoneyParsed) {
-  if (
-    blockTextUpper.includes("CREDIT TO ACCOUNT") ||
-    blockTextUpper.includes("FAST TRANSFER FROM")
-  ) {
-    return 1;
-  }
-  if (
-    blockTextUpper.includes("TRANSFER TO") ||
-    blockTextUpper.includes("OVERDRAW FEE") ||
-    blockTextUpper.includes("DEBIT") ||
-    blockTextUpper.includes("CARD XX")
-  ) {
-    return -1;
-  }
-  if (amount.suffix === "CR") return 1;
-  if (amount.suffix === "DR") return -1;
-  return -1;
-}
-
 function pushWarning(
   warnings: ParseWarning[],
   rawLine: string,
@@ -192,6 +238,69 @@ function pushWarning(
   confidence = 0.3
 ) {
   warnings.push({ rawLine, reason, confidence: clamp01(confidence) });
+}
+
+function resolveAmount(params: {
+  blockUpper: string;
+  amountCandidates: MoneyParsed[];
+  rawBlock: string;
+  warnings: ParseWarning[];
+}): AmountResolution | null {
+  const { blockUpper, amountCandidates, rawBlock, warnings } = params;
+  if (amountCandidates.length === 0) return null;
+
+  const hasExplicitDebit = amountCandidates.some(
+    (c) => c.hasMinus || c.hasParens || c.suffix === "DR"
+  );
+  const hasExplicitCredit = amountCandidates.some((c) => c.suffix === "CR");
+  const bothPresent = hasExplicitDebit && hasExplicitCredit;
+  if (bothPresent) {
+    pushWarning(warnings, rawBlock, "DEBIT_CREDIT_BOTH_PRESENT", 0.35);
+  }
+
+  const candidate = amountCandidates[amountCandidates.length - 1];
+  const hasCreditHint = hasAnyHint(blockUpper, CREDIT_HINTS);
+  const hasDebitHint = hasAnyHint(blockUpper, DEBIT_HINTS);
+
+  let side: "debit" | "credit" | "unknown" = "unknown";
+  if (candidate.hasMinus || candidate.hasParens || candidate.suffix === "DR") {
+    side = "debit";
+  } else if (candidate.suffix === "CR") {
+    side = "credit";
+  } else if (hasCreditHint && !hasDebitHint) {
+    side = "credit";
+  } else if (hasDebitHint && !hasCreditHint) {
+    side = "debit";
+  }
+
+  // Fallback for column-misaligned extract text:
+  // keep parser deterministic and expose ambiguity with warning + lower confidence.
+  let confidencePenalty = 0;
+  if (side === "unknown") {
+    side = "debit";
+    confidencePenalty += 0.22;
+    pushWarning(warnings, rawBlock, "AUTO_AMOUNT_SIDE_AMBIGUOUS", 0.45);
+  }
+
+  if (side === "debit") {
+    const debit = candidate.absValue;
+    return {
+      amount: -debit,
+      debit,
+      credit: undefined,
+      bothPresent,
+      confidencePenalty,
+    };
+  }
+
+  const credit = candidate.absValue;
+  return {
+    amount: credit,
+    debit: undefined,
+    credit,
+    bothPresent,
+    confidencePenalty,
+  };
 }
 
 function finalizeBlock(params: {
@@ -220,67 +329,55 @@ function finalizeBlock(params: {
   if (rawLines.length === 0) return null;
   if (isNonTransactionBlock(rawLines[0])) return null;
 
+  const rawBlock = rawLines.join("\n");
   const dateIso = inferDateIso(dayText, monthText, yearText, period);
   if (!dateIso) {
-    pushWarning(warnings, rawLines.join("\n"), "Unable to infer transaction date.", 0.3);
+    pushWarning(warnings, rawBlock, "Unable to infer transaction date.", 0.3);
     return null;
   }
 
   const moneyTokens = extractMoneyTokens(rawLines);
-  if (moneyTokens.length < 2) {
-    pushWarning(
-      warnings,
-      rawLines.join("\n"),
-      "Amount/balance not found for statement block.",
-      0.35
-    );
-    return {
-      id: `${fileId}-${counter}`,
-      date: dateIso,
-      description: buildDescription(rawLines, firstRemainder) || "(no description)",
-      amount: 0,
-      balance: undefined,
-      rawLine: rawLines.join("\n"),
-      confidence: 0.4,
-    };
+  const preferredTokens = moneyTokens.filter((item) => isFinancialLine(item.line));
+  const tokensToParse =
+    preferredTokens.length >= 2 ? preferredTokens : moneyTokens;
+  const parsedTokens = tokensToParse
+    .map((item) => parseMoneyToken(item.token))
+    .filter(Boolean) as MoneyParsed[];
+  const balanceRaw =
+    parsedTokens.length > 0 ? parsedTokens[parsedTokens.length - 1] : undefined;
+  const amountCandidates = parsedTokens.slice(0, -1);
+  const amountResolved = resolveAmount({
+    blockUpper: rawBlock.toUpperCase(),
+    amountCandidates,
+    rawBlock,
+    warnings,
+  });
+
+  let confidence = rawLines.length === 1 ? 0.95 : 0.88;
+  if (!balanceRaw || !amountResolved) {
+    pushWarning(warnings, rawBlock, "AUTO_MISSING_AMOUNT_OR_BALANCE", 0.35);
+    confidence = 0.42;
+  } else {
+    confidence = clamp01(confidence - amountResolved.confidencePenalty);
   }
 
-  const amountRaw = parseMoneyToken(moneyTokens[moneyTokens.length - 2]);
-  const balanceRaw = parseMoneyToken(moneyTokens[moneyTokens.length - 1]);
-  if (!amountRaw || !balanceRaw) {
-    pushWarning(
-      warnings,
-      rawLines.join("\n"),
-      "Failed to parse amount/balance tokens.",
-      0.35
-    );
-    return {
-      id: `${fileId}-${counter}`,
-      date: dateIso,
-      description: buildDescription(rawLines, firstRemainder) || "(no description)",
-      amount: 0,
-      balance: undefined,
-      rawLine: rawLines.join("\n"),
-      confidence: 0.4,
-    };
-  }
-
-  const blockUpper = rawLines.join("\n").toUpperCase();
-  const sign = detectAmountSign(blockUpper, amountRaw);
-  const amount = sign * Math.abs(amountRaw.value);
-
-  let balance = Math.abs(balanceRaw.value);
-  if (balanceRaw.suffix === "DR") balance = -Math.abs(balanceRaw.value);
-  if (balanceRaw.suffix === "CR") balance = Math.abs(balanceRaw.value);
+  // Statement balance may carry "CR" suffix in source text.
+  // For this phase we treat suffix as marker only and store numeric value.
+  const balance = balanceRaw ? Math.abs(balanceRaw.absValue) : undefined;
+  const amount = amountResolved?.amount ?? 0;
+  const debit = amountResolved?.debit;
+  const credit = amountResolved?.credit;
 
   return {
     id: `${fileId}-${counter}`,
     date: dateIso,
     description: buildDescription(rawLines, firstRemainder) || "(no description)",
     amount,
+    debit,
+    credit,
     balance,
-    rawLine: rawLines.join("\n"),
-    confidence: rawLines.length === 1 ? 0.95 : 0.88,
+    rawLine: rawBlock,
+    confidence,
   };
 }
 
@@ -354,4 +451,3 @@ export function parseCommbankStatementDebitCredit(
 
   return { transactions, warnings };
 }
-
