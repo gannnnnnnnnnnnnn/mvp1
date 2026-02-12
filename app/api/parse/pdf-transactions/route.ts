@@ -192,6 +192,12 @@ export async function POST(request: Request) {
       if (parsed.warnings.some((w) => w.reason === "DEBIT_CREDIT_BOTH_PRESENT")) {
         pushReasonUnique(needsReviewReasons, "DEBIT_CREDIT_BOTH_PRESENT");
       }
+      if (parsed.warnings.some((w) => w.reason.startsWith("AUTO_AMOUNT_NOT_FOUND"))) {
+        pushReasonUnique(needsReviewReasons, "AUTO_AMOUNT_NOT_FOUND");
+      }
+      if (parsed.warnings.some((w) => w.reason.startsWith("AUTO_BALANCE_NOT_FOUND"))) {
+        pushReasonUnique(needsReviewReasons, "AUTO_BALANCE_NOT_FOUND");
+      }
 
       // Low coverage = too many rows missing amount mapping or running balance.
       const coverageTotal = parsed.transactions.length;
@@ -221,6 +227,10 @@ export async function POST(request: Request) {
         "Both debit and credit values were detected in one parsed block. Please review this statement format.",
       AUTO_PARSE_LOW_COVERAGE:
         "Auto template parse coverage is low (missing amount or balance in many rows).",
+      AUTO_AMOUNT_NOT_FOUND:
+        "Could not find a valid auto-template amount candidate for some blocks.",
+      AUTO_BALANCE_NOT_FOUND:
+        "Could not find a valid auto-template running balance candidate for some blocks.",
     };
     const reviewReasons = needsReviewReasons.map(
       (code) => legacyReasonMessageMap[code] || code

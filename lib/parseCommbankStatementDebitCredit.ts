@@ -42,6 +42,7 @@ const PERIOD_RE =
 // - forbids partial matches inside longer numeric fragments (e.g. 1363.10645)
 const MONEY_TOKEN_RE =
   /(?<![\d.])(?:\(\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)|-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})(?:\s?(?:CR|DR))?(?![\d.])/gi;
+const MAX_MONEY_ABS = 1_000_000;
 
 const CREDIT_HINTS = [
   "CREDIT TO ACCOUNT",
@@ -182,6 +183,10 @@ function parseMoneyToken(token: string): MoneyParsed | null {
     hasMinus,
     hasParens,
   };
+}
+
+function isMoneyCandidateSane(m: MoneyParsed) {
+  return m.absValue <= MAX_MONEY_ABS;
 }
 
 function extractMoneyTokens(lines: string[]): MoneyTokenWithLine[] {
@@ -374,9 +379,23 @@ function finalizeBlock(params: {
   const parsedTokens = tokensToParse
     .map((item) => parseMoneyToken(item.token))
     .filter(Boolean) as MoneyParsed[];
+  const saneTokens: MoneyParsed[] = [];
+  for (const token of parsedTokens) {
+    if (!isMoneyCandidateSane(token)) {
+      pushWarning(
+        warnings,
+        rawBlock,
+        `AMOUNT_OUTLIER: value exceeds ${MAX_MONEY_ABS}`,
+        0.3
+      );
+      continue;
+    }
+    saneTokens.push(token);
+  }
+
   const balanceRaw =
-    parsedTokens.length > 0 ? parsedTokens[parsedTokens.length - 1] : undefined;
-  const amountCandidates = parsedTokens.slice(0, -1);
+    saneTokens.length > 0 ? saneTokens[saneTokens.length - 1] : undefined;
+  const amountCandidates = saneTokens.slice(0, -1);
   const amountResolved = resolveAmount({
     blockUpper: rawBlock.toUpperCase(),
     amountCandidates,
@@ -384,9 +403,15 @@ function finalizeBlock(params: {
     warnings,
   });
 
+  if (!balanceRaw) {
+    pushWarning(warnings, rawBlock, "AUTO_BALANCE_NOT_FOUND", 0.35);
+  }
+  if (!amountResolved) {
+    pushWarning(warnings, rawBlock, "AUTO_AMOUNT_NOT_FOUND", 0.35);
+  }
+
   let confidence = rawLines.length === 1 ? 0.95 : 0.88;
   if (!balanceRaw || !amountResolved) {
-    pushWarning(warnings, rawBlock, "AUTO_MISSING_AMOUNT_OR_BALANCE", 0.35);
     confidence = 0.42;
   } else {
     confidence = clamp01(confidence - amountResolved.confidencePenalty);
