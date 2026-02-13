@@ -26,6 +26,7 @@ uploads/text-cache/
 /coverage
 tmp/
 fixtures/*.pdf
+/samples/private/
 
 # next.js
 /.next/

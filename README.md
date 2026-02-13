@@ -257,8 +257,28 @@ uploads/                             # runtime files (gitignored)
 ```bash
 npm run lint
 npm run build
+npm run test
 npm run start
 ```
+
+## Git Workflow (Phase 3)
+
+- Keep `main` always demoable (only merged, validated work).
+- Stable parser baseline tag: `v0.2.0-parser-stable`.
+- Phase 3 integration branch: `feature/phase3-core`.
+- Optional short-lived feature branches:
+  - `feature/phase3-<scope>`
+  - `fix/phase3-<scope>`
+
+Suggested commit prefixes:
+- `feat(<scope>): ...`
+- `fix(<scope>): ...`
+- `chore(<scope>): ...`
+- `docs(<scope>): ...`
+
+Sample privacy:
+- keep sensitive statement PDFs outside git-tracked folders
+- private samples path is ignored: `samples/private/`
 
 ## CommBank Snapshot (Quick)
 
