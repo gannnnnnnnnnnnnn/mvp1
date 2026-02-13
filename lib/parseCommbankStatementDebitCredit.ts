@@ -417,6 +417,16 @@ function finalizeBlock(params: {
     parsedTokens.push({ ...candidate, parsed });
   }
 
+  // Annotation/note-only rows should not become transactions.
+  // Example: "DEBIT INTEREST CHARGED ... $0.02" with no reliable balance/amount pair.
+  if (
+    parsedTokens.length === 0 ||
+    (parsedTokens.length === 1 && parsedTokens[0].parsed?.suffix == null)
+  ) {
+    pushWarning(warnings, rawBlock, "ANNOTATION_LINE_SKIPPED", 0.9);
+    return null;
+  }
+
   let balance: number | undefined;
   let amountResolved: AmountResolution | null = null;
 
