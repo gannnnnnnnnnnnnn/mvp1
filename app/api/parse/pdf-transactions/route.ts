@@ -309,6 +309,9 @@ export async function POST(request: Request) {
       if (parsed.warnings.some((w) => w.reason.startsWith("AMOUNT_OUTLIER"))) {
         pushReasonUnique(needsReviewReasons, "AMOUNT_OUTLIER");
       }
+      if (parsed.warnings.some((w) => w.reason.startsWith("BALANCE_SUFFIX_MISSING"))) {
+        pushReasonUnique(needsReviewReasons, "BALANCE_SUFFIX_MISSING");
+      }
       if (statementTotalsCheck.available && statementTotalsCheck.pass === false) {
         pushReasonUnique(needsReviewReasons, "STATEMENT_TOTALS_MISMATCH");
       }
@@ -349,6 +352,8 @@ export async function POST(request: Request) {
         "Amount sign is uncertain for some auto-template rows after balance reconciliation.",
       AMOUNT_OUTLIER:
         "Outlier amount candidates were detected and ignored during auto-template parsing.",
+      BALANCE_SUFFIX_MISSING:
+        "Balance value is missing CR/DR suffix and is non-zero, so this row is considered unreliable.",
       STATEMENT_TOTALS_MISMATCH:
         "Statement totals check failed: opening - totalDebits + totalCredits does not match closing.",
     };

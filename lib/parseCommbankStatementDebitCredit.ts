@@ -475,7 +475,19 @@ function finalizeBlock(params: {
   if (parsedTokens.length > 0) {
     const balanceIndex = pickBalanceCandidateIndex(parsedTokens);
     const balanceCandidate = parsedTokens[balanceIndex];
-    balance = Math.abs(balanceCandidate.parsed!.absValue);
+
+    // Rule: balance should carry CR/DR suffix in auto statements.
+    // If suffix is missing, only 0.00 is accepted as reliable.
+    if (balanceCandidate.parsed!.suffix === "CR") {
+      balance = Math.abs(balanceCandidate.parsed!.absValue);
+    } else if (balanceCandidate.parsed!.suffix === "DR") {
+      balance = -Math.abs(balanceCandidate.parsed!.absValue);
+    } else if (Math.abs(balanceCandidate.parsed!.absValue) <= MONEY_EQ_TOLERANCE) {
+      balance = 0;
+    } else {
+      pushWarning(warnings, rawBlock, "BALANCE_SUFFIX_MISSING", 0.35);
+      balance = undefined;
+    }
 
     // Amount candidates are constrained to balance neighborhood:
     // same line, previous line, and previous two lines.
