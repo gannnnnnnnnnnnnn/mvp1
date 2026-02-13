@@ -25,6 +25,15 @@ type ParseQuality = {
   balanceContinuityPassRate: number;
   balanceContinuityChecked: number;
   needsReviewReasons: string[];
+  statementTotalsCheck?: {
+    available: boolean;
+    pass?: boolean;
+    opening?: number;
+    totalDebits?: number;
+    totalCredits?: number;
+    closing?: number;
+    expectedClosing?: number;
+  };
 };
 
 function round2(value: number) {
@@ -96,6 +105,91 @@ function pushReasonUnique(reasons: string[], code: string) {
   }
 }
 
+function parseSignedMoneyToken(token: string) {
+  const upper = token.toUpperCase().replace(/\s+/g, "");
+  const hasParens = upper.startsWith("(") && upper.endsWith(")");
+  const hasMinus = upper.includes("-");
+  const hasCR = upper.endsWith("CR");
+  const hasDR = upper.endsWith("DR");
+
+  const numeric = upper
+    .replace(/CR$|DR$/i, "")
+    .replace(/[()$,]/g, "");
+  const value = Number(numeric);
+  if (!Number.isFinite(value)) return null;
+
+  const abs = Math.abs(value);
+  if (hasCR) return abs;
+  if (hasDR || hasMinus || hasParens) return -abs;
+  return abs;
+}
+
+function extractLooseMoneyTokens(text: string) {
+  const re = /(?:\(?\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)?(?:\s?(?:CR|DR))?)/gi;
+  const tokens: string[] = [];
+  for (const m of text.matchAll(re)) {
+    tokens.push(m[0]);
+  }
+  return tokens;
+}
+
+function assessStatementTotals(fullText: string) {
+  const lines = (fullText || "").replace(/\r\n/g, "\n").split("\n");
+  const labelIndex = lines.findIndex((line) =>
+    line
+      .toLowerCase()
+      .replace(/\s+/g, "")
+      .includes("openingbalance-totaldebits+totalcredits=closingbalance")
+  );
+  if (labelIndex < 0) {
+    return { available: false as const };
+  }
+
+  const valueLine = lines[labelIndex + 1] || "";
+  const combined = `${lines[labelIndex] || ""} ${valueLine}`.trim();
+  const tokens = extractLooseMoneyTokens(combined);
+  if (tokens.length < 3) {
+    return { available: false as const };
+  }
+
+  const opening = parseSignedMoneyToken(tokens[0]);
+  const totalDebits = parseSignedMoneyToken(tokens[1]);
+  const totalCredits = parseSignedMoneyToken(tokens[2]);
+  if (
+    typeof opening !== "number" ||
+    typeof totalDebits !== "number" ||
+    typeof totalCredits !== "number"
+  ) {
+    return { available: false as const };
+  }
+
+  let closing: number | undefined;
+  if (tokens.length >= 4) {
+    const parsedClosing = parseSignedMoneyToken(tokens[3]);
+    if (typeof parsedClosing === "number") {
+      closing = parsedClosing;
+    }
+  }
+  if (typeof closing !== "number" && /nil/i.test(combined)) {
+    closing = 0;
+  }
+  if (typeof closing !== "number") {
+    return { available: false as const };
+  }
+
+  const expectedClosing = round2(opening - Math.abs(totalDebits) + Math.abs(totalCredits));
+  const pass = Math.abs(expectedClosing - round2(closing)) <= 0.01;
+  return {
+    available: true as const,
+    pass,
+    opening,
+    totalDebits: Math.abs(totalDebits),
+    totalCredits: Math.abs(totalCredits),
+    closing: round2(closing),
+    expectedClosing,
+  };
+}
+
 function errorJson(status: number, code: string, message: string) {
   return NextResponse.json(
     {
@@ -163,6 +257,10 @@ export async function POST(request: Request) {
       templateConfig?.quality.enableContinuityGate === true
         ? assessBalanceContinuity(parsed.transactions, templateType)
         : { checked: 0, passRate: 0 };
+    const statementTotalsCheck =
+      templateType === "commbank_auto_debit_credit"
+        ? assessStatementTotals(text)
+        : { available: false as const };
 
     if (templateType === "unknown") {
       pushReasonUnique(needsReviewReasons, "TEMPLATE_UNKNOWN");
@@ -192,6 +290,13 @@ export async function POST(request: Request) {
       if (parsed.warnings.some((w) => w.reason === "DEBIT_CREDIT_BOTH_PRESENT")) {
         pushReasonUnique(needsReviewReasons, "DEBIT_CREDIT_BOTH_PRESENT");
       }
+      if (
+        parsed.transactions.some(
+          (tx) => typeof tx.debit === "number" && typeof tx.credit === "number"
+        )
+      ) {
+        pushReasonUnique(needsReviewReasons, "DEBIT_CREDIT_BOTH_PRESENT");
+      }
       if (parsed.warnings.some((w) => w.reason.startsWith("AUTO_AMOUNT_NOT_FOUND"))) {
         pushReasonUnique(needsReviewReasons, "AUTO_AMOUNT_NOT_FOUND");
       }
@@ -203,6 +308,9 @@ export async function POST(request: Request) {
       }
       if (parsed.warnings.some((w) => w.reason.startsWith("AMOUNT_OUTLIER"))) {
         pushReasonUnique(needsReviewReasons, "AMOUNT_OUTLIER");
+      }
+      if (statementTotalsCheck.available && statementTotalsCheck.pass === false) {
+        pushReasonUnique(needsReviewReasons, "STATEMENT_TOTALS_MISMATCH");
       }
 
       // Low coverage = too many rows missing amount mapping or running balance.
@@ -241,6 +349,8 @@ export async function POST(request: Request) {
         "Amount sign is uncertain for some auto-template rows after balance reconciliation.",
       AMOUNT_OUTLIER:
         "Outlier amount candidates were detected and ignored during auto-template parsing.",
+      STATEMENT_TOTALS_MISMATCH:
+        "Statement totals check failed: opening - totalDebits + totalCredits does not match closing.",
     };
     const reviewReasons = needsReviewReasons.map(
       (code) => legacyReasonMessageMap[code] || code
@@ -251,6 +361,18 @@ export async function POST(request: Request) {
       balanceContinuityPassRate: continuity.passRate,
       balanceContinuityChecked: continuity.checked,
       needsReviewReasons: [...needsReviewReasons],
+      statementTotalsCheck:
+        statementTotalsCheck.available === true
+          ? {
+              available: true,
+              pass: statementTotalsCheck.pass,
+              opening: statementTotalsCheck.opening,
+              totalDebits: statementTotalsCheck.totalDebits,
+              totalCredits: statementTotalsCheck.totalCredits,
+              closing: statementTotalsCheck.closing,
+              expectedClosing: statementTotalsCheck.expectedClosing,
+            }
+          : { available: false },
     };
     const needsReview = quality.needsReviewReasons.length > 0;
 
