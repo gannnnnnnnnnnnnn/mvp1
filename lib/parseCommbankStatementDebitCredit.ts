@@ -270,6 +270,54 @@ function buildDescription(lines: string[], firstRemainder: string) {
   return parts.join(" | ").replace(/\s+/g, " ").trim();
 }
 
+function splitGluedOutlierToken(
+  token: string,
+  line: string,
+  lineIndex: number,
+  startTokenIndex: number
+) {
+  const result: { synthetic: MoneyTokenWithLine[]; refs: string[] } = {
+    synthetic: [],
+    refs: [],
+  };
+
+  const condensed = token
+    .toUpperCase()
+    .replace(/\s+/g, "")
+    .replace(/CR$|DR$/i, "")
+    .replace(/[()$,]/g, "");
+  const m = /^(\d+)\.(\d{2})$/.exec(condensed);
+  if (!m) return result;
+
+  const intPart = m[1];
+  const decimal = m[2];
+  if (intPart.length < 5) return result;
+
+  const defaultRefHead = intPart.slice(0, -3);
+  if (defaultRefHead.length >= 6) {
+    result.refs.push(defaultRefHead);
+  }
+
+  let tokenIndex = startTokenIndex;
+  for (let width = 1; width <= Math.min(4, intPart.length - 1); width += 1) {
+    const tailInt = intPart.slice(-width);
+    const candidateToken = `${tailInt}.${decimal}`;
+    const parsed = parseMoneyToken(candidateToken);
+    if (!parsed || !isMoneyCandidateSane(parsed)) continue;
+
+    result.synthetic.push({
+      token: candidateToken,
+      line,
+      lineIndex,
+      tokenIndex,
+      parsed,
+    });
+    tokenIndex += 1;
+  }
+
+  return result;
+}
+
 function pushWarning(
   warnings: ParseWarning[],
   rawLine: string,
@@ -438,6 +486,7 @@ function finalizeBlock(params: {
   if (isNonTransactionBlock(rawLines[0])) return null;
 
   const rawBlock = rawLines.join("\n");
+  const glueRefs: string[] = [];
   const warningCountBefore = warnings.length;
   const dateIso = inferDateIso(dayText, monthText, yearText, period);
   if (!dateIso) {
@@ -453,6 +502,17 @@ function finalizeBlock(params: {
 
     if (!isMoneyCandidateSane(parsed)) {
       pushWarning(warnings, rawBlock, "AMOUNT_OUTLIER", 0.3);
+      const split = splitGluedOutlierToken(
+        candidate.token,
+        candidate.line,
+        candidate.lineIndex,
+        candidate.tokenIndex + 50_000
+      );
+      if (split.synthetic.length > 0) {
+        parsedTokens.push(...split.synthetic);
+        glueRefs.push(...split.refs);
+        pushWarning(warnings, rawBlock, "OUTLIER_GLUE_NUMBER", 0.6);
+      }
       continue;
     }
 
@@ -546,7 +606,13 @@ function finalizeBlock(params: {
   return {
     id: `${fileId}-${counter}`,
     date: dateIso,
-    description: buildDescription(rawLines, firstRemainder) || "(no description)",
+    description:
+      [
+        buildDescription(rawLines, firstRemainder),
+        ...glueRefs.map((ref) => `REF: ${ref}`),
+      ]
+        .filter(Boolean)
+        .join(" | ") || "(no description)",
     amount,
     debit,
     credit,
