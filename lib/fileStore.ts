@@ -13,6 +13,8 @@ import path from "path";
  */
 export type FileMeta = {
   id: string;
+  // Optional account scoping field for future multi-account analytics.
+  accountId?: string;
   originalName: string;
   storedName: string;
   size: number;

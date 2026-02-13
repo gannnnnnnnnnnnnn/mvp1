@@ -18,6 +18,13 @@ function isFiniteNumber(value) {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function isKnownTemplate(value) {
+  return (
+    value === "commbank_manual_amount_balance" ||
+    value === "commbank_auto_debit_credit"
+  );
+}
+
 async function main() {
   const raw = await fs.readFile(expectedPath, "utf8");
   const data = JSON.parse(raw);
@@ -52,9 +59,23 @@ async function main() {
     Number.isInteger(data.quality.balanceContinuityChecked),
     "quality.balanceContinuityChecked missing."
   );
+  assert(
+    isKnownTemplate(data.templateType),
+    "Snapshot must include a known commbank templateType."
+  );
+
+  const checked = data.quality.balanceContinuityChecked;
+  const passRate = data.quality.balanceContinuityPassRate;
+  if (checked >= 5) {
+    assert(
+      passRate >= 0.85,
+      `Continuity below threshold: ${passRate} (checked=${checked})`
+    );
+  }
+  assert(data.needsReview === false, "Baseline snapshot should not require review.");
 
   console.log(
-    `parser-smoke PASS: tx=${data.transactions.length}, continuity=${data.quality.balanceContinuityPassRate}`
+    `parser-smoke PASS: template=${data.templateType}, tx=${data.transactions.length}, continuity=${passRate}`
   );
 }
 
