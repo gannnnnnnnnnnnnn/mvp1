@@ -11,46 +11,52 @@ function compactAlphaNum(text: string) {
   return text.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function hasTermsNearEachOther(
-  lines: string[],
-  terms: string[],
-  windowSize = 6
-) {
-  const loweredTerms = terms.map((t) => t.toLowerCase());
+function buildHeaderWindows(lines: string[]) {
+  const windows: string[] = [];
+  const candidateIndexes: number[] = [];
+
   for (let i = 0; i < lines.length; i += 1) {
-    const windowText = lines
-      .slice(i, Math.min(lines.length, i + windowSize))
-      .join(" ")
-      .toLowerCase();
-    const hitAll = loweredTerms.every((term) => windowText.includes(term));
-    if (hitAll) return true;
+    const lower = (lines[i] || "").toLowerCase();
+    if (lower.includes("date")) {
+      candidateIndexes.push(i);
+    }
   }
-  return false;
+
+  // Fallback: if no explicit Date row, inspect early document area only.
+  if (candidateIndexes.length === 0) {
+    candidateIndexes.push(0);
+  }
+
+  for (const index of candidateIndexes) {
+    const start = Math.max(0, index - 1);
+    const end = Math.min(lines.length, index + 6);
+    const text = lines.slice(start, end).join(" ");
+    windows.push(compactAlphaNum(text));
+  }
+
+  return windows;
+}
+
+function windowHasTerms(compactedWindow: string, terms: string[]) {
+  return terms.every((term) => compactedWindow.includes(compactAlphaNum(term)));
 }
 
 export function detectCommBankTemplate(text: string): CommBankTemplateType {
   const safeText = text || "";
-  const compact = compactAlphaNum(safeText);
   const lines = safeText.replace(/\r\n/g, "\n").split("\n");
+  const windows = buildHeaderWindows(lines);
 
-  // Auto template: Debit/Credit + Balance around same header area.
-  const autoByAnchor = compact.includes("transactiondebitcreditbalance");
-  const autoByTerms = hasTermsNearEachOther(lines, [
-    "transaction",
-    "debit",
-    "credit",
-    "balance",
-  ]);
-  if (autoByAnchor || autoByTerms) return "commbank_auto_debit_credit";
+  // Priority 1: manual header evidence.
+  const manualHit = windows.some((window) =>
+    windowHasTerms(window, ["Transaction details", "Amount", "Balance"])
+  );
+  if (manualHit) return "commbank_manual_amount_balance";
 
-  // Manual export template: Transaction details + Amount + Balance.
-  const manualByAnchor = compact.includes("transactiondetailsamountbalance");
-  const manualByTerms = hasTermsNearEachOther(lines, [
-    "transaction details",
-    "amount",
-    "balance",
-  ]);
-  if (manualByAnchor || manualByTerms) return "commbank_manual_amount_balance";
+  // Priority 2: auto header evidence.
+  const autoHit = windows.some((window) =>
+    windowHasTerms(window, ["Transaction", "Debit", "Credit", "Balance"])
+  );
+  if (autoHit) return "commbank_auto_debit_credit";
 
   return "unknown";
 }
