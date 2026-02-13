@@ -25,6 +25,7 @@ type ParseQuality = {
   balanceContinuityPassRate: number;
   balanceContinuityChecked: number;
   needsReviewReasons: string[];
+  nonBlockingWarnings?: string[];
   statementTotalsCheck?: {
     available: boolean;
     pass?: boolean;
@@ -253,6 +254,7 @@ export async function POST(request: Request) {
     }
 
     const needsReviewReasons: string[] = [];
+    const nonBlockingWarnings: string[] = [];
     const continuity =
       templateConfig?.quality.enableContinuityGate === true
         ? assessBalanceContinuity(parsed.transactions, templateType)
@@ -306,9 +308,9 @@ export async function POST(request: Request) {
       if (parsed.warnings.some((w) => w.reason.startsWith("AMOUNT_SIGN_UNCERTAIN"))) {
         pushReasonUnique(needsReviewReasons, "AMOUNT_SIGN_UNCERTAIN");
       }
-      if (parsed.warnings.some((w) => w.reason.startsWith("AMOUNT_OUTLIER"))) {
-        pushReasonUnique(needsReviewReasons, "AMOUNT_OUTLIER");
-      }
+      const hasOutlierWarning = parsed.warnings.some((w) =>
+        w.reason.startsWith("AMOUNT_OUTLIER")
+      );
       if (parsed.warnings.some((w) => w.reason.startsWith("BALANCE_SUFFIX_MISSING"))) {
         pushReasonUnique(needsReviewReasons, "BALANCE_SUFFIX_MISSING");
       }
@@ -327,6 +329,24 @@ export async function POST(request: Request) {
         const lowCoverageRate = lowCoverageCount / coverageTotal;
         if (lowCoverageRate > 0.1) {
           pushReasonUnique(needsReviewReasons, "AUTO_PARSE_LOW_COVERAGE");
+        }
+      }
+
+      // Outlier by itself is a soft warning if parse+continuity still succeed.
+      // We only escalate to hard review when parsing quality already degraded.
+      if (hasOutlierWarning) {
+        const parseDegraded =
+          needsReviewReasons.includes("AUTO_AMOUNT_NOT_FOUND") ||
+          needsReviewReasons.includes("AUTO_BALANCE_NOT_FOUND") ||
+          needsReviewReasons.includes("AMOUNT_SIGN_UNCERTAIN") ||
+          needsReviewReasons.includes("BALANCE_SUFFIX_MISSING") ||
+          needsReviewReasons.includes("AUTO_PARSE_LOW_COVERAGE") ||
+          needsReviewReasons.includes("BALANCE_CONTINUITY_LOW");
+
+        if (parseDegraded) {
+          pushReasonUnique(needsReviewReasons, "AMOUNT_OUTLIER");
+        } else {
+          nonBlockingWarnings.push("AMOUNT_OUTLIER");
         }
       }
     }
@@ -366,6 +386,7 @@ export async function POST(request: Request) {
       balanceContinuityPassRate: continuity.passRate,
       balanceContinuityChecked: continuity.checked,
       needsReviewReasons: [...needsReviewReasons],
+      nonBlockingWarnings: [...nonBlockingWarnings],
       statementTotalsCheck:
         statementTotalsCheck.available === true
           ? {
