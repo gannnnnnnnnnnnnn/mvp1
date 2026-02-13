@@ -1,6 +1,7 @@
-# Personal Cashflow Agent (Phase 1)
+# Personal Cashflow Agent (CommBank Phase 3.0-prep)
 
-A minimal Next.js App Router project for uploading PDF/CSV files to local disk, listing uploaded files, and downloading by ID.
+A Next.js App Router project that now supports a full CommBank PDF pipeline:
+upload -> text extract -> segment -> parse -> quality gates -> UI review.
 
 ## Tech Stack
 
@@ -53,6 +54,21 @@ MVP: Personal Cashflow App
    ├─ ⏳ Credit card semantics（刷卡与还款语义拆分）
    └─ ⏳ Summary / export（可读结论输出）
 ```
+
+## Current Main Status (2026-02-13)
+
+- Template detect is now CommBank-only and stable with header-area priority:
+  - `commbank_manual_amount_balance`
+  - `commbank_auto_debit_credit`
+- Auto parser handles glued reference+amount lines (for example Direct Debit + long reference digits) and recovers correct amount via balance-window + continuity inference.
+- Balance semantics are signed internally:
+  - `CR` -> positive balance
+  - `DR` -> negative balance
+  - no suffix accepted only for `0.00`
+- Quality gate behavior:
+  - `AMOUNT_OUTLIER` is now a **non-blocking warning** when parsing still succeeds.
+  - hard review is kept for real failures (`AUTO_AMOUNT_NOT_FOUND`, `AMOUNT_SIGN_UNCERTAIN`, `BALANCE_CONTINUITY_LOW`, etc.).
+- UI shows template type, continuity summary, and review reasons; for auto rows it also shows `Debit/Credit` columns and raw debug context.
 
 ### Why We Designed It This Way
 
