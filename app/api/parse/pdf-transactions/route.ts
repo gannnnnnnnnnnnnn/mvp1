@@ -198,6 +198,12 @@ export async function POST(request: Request) {
       if (parsed.warnings.some((w) => w.reason.startsWith("AUTO_BALANCE_NOT_FOUND"))) {
         pushReasonUnique(needsReviewReasons, "AUTO_BALANCE_NOT_FOUND");
       }
+      if (parsed.warnings.some((w) => w.reason.startsWith("AMOUNT_SIGN_UNCERTAIN"))) {
+        pushReasonUnique(needsReviewReasons, "AMOUNT_SIGN_UNCERTAIN");
+      }
+      if (parsed.warnings.some((w) => w.reason.startsWith("AMOUNT_OUTLIER"))) {
+        pushReasonUnique(needsReviewReasons, "AMOUNT_OUTLIER");
+      }
 
       // Low coverage = too many rows missing amount mapping or running balance.
       const coverageTotal = parsed.transactions.length;
@@ -231,6 +237,10 @@ export async function POST(request: Request) {
         "Could not find a valid auto-template amount candidate for some blocks.",
       AUTO_BALANCE_NOT_FOUND:
         "Could not find a valid auto-template running balance candidate for some blocks.",
+      AMOUNT_SIGN_UNCERTAIN:
+        "Amount sign is uncertain for some auto-template rows after balance reconciliation.",
+      AMOUNT_OUTLIER:
+        "Outlier amount candidates were detected and ignored during auto-template parsing.",
     };
     const reviewReasons = needsReviewReasons.map(
       (code) => legacyReasonMessageMap[code] || code

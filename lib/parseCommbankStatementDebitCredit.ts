@@ -27,6 +27,9 @@ type AmountResolution = {
 type MoneyTokenWithLine = {
   token: string;
   line: string;
+  lineIndex: number;
+  tokenIndex: number;
+  parsed?: MoneyParsed;
 };
 
 const DATE_LINE_RE =
@@ -34,14 +37,12 @@ const DATE_LINE_RE =
 const PERIOD_RE =
   /Period\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})\s*-\s*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{4})/i;
 
-// Strict money candidates:
-// - must include two decimal places
-// - allows optional $ / commas / parentheses
-// - allows optional CR/DR suffix
-// - forbids partial matches inside longer numeric fragments (e.g. 1363.10645)
+// CommBank amount tokens are expected to have exactly 2 decimals.
+// Boundaries prevent grabbing partial values from long numeric references.
 const MONEY_TOKEN_RE =
   /(?<![\d.])(?:\(\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)|-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2})(?:\s?(?:CR|DR))?(?![\d.])/gi;
-const MAX_MONEY_ABS = 1_000_000;
+const MONEY_SANITY_MAX_ABS = 1_000_000;
+const MONEY_EQ_TOLERANCE = 0.01;
 
 const CREDIT_HINTS = [
   "CREDIT TO ACCOUNT",
@@ -80,6 +81,10 @@ const MONTH_INDEX: Record<string, number> = {
 
 function clamp01(v: number) {
   return Math.max(0, Math.min(1, v));
+}
+
+function round2(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function parseDayMonYearToken(token: string): Date | null {
@@ -136,16 +141,13 @@ function inferDateIso(
 
   for (const year of uniqueYears) {
     const dt = new Date(Date.UTC(year, month, day));
-    if (period.start && period.end) {
-      if (dt >= period.start && dt <= period.end) {
-        return dt.toISOString();
-      }
+    if (period.start && period.end && dt >= period.start && dt <= period.end) {
+      return dt.toISOString();
     }
   }
 
   if (period.end) {
-    const fallback = new Date(Date.UTC(period.end.getUTCFullYear(), month, day));
-    return fallback.toISOString();
+    return new Date(Date.UTC(period.end.getUTCFullYear(), month, day)).toISOString();
   }
 
   return null;
@@ -185,60 +187,57 @@ function parseMoneyToken(token: string): MoneyParsed | null {
 }
 
 function isMoneyCandidateSane(m: MoneyParsed) {
-  return m.absValue <= MAX_MONEY_ABS;
+  return m.absValue <= MONEY_SANITY_MAX_ABS;
 }
 
-function extractMoneyTokens(lines: string[]): MoneyTokenWithLine[] {
-  const tokens: MoneyTokenWithLine[] = [];
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (isReferenceOnlyLine(trimmed)) {
-      continue;
-    }
-
-    // Value Date lines may glue year+money (e.g. ".../202519.56...").
-    const normalized = line.replace(
-      /(Value Date:\s*\d{2}\/\d{2}\/\d{4})(?=\d)/gi,
-      "$1 "
-    );
-    for (const match of normalized.matchAll(MONEY_TOKEN_RE)) {
-      tokens.push({ token: match[0], line: normalized });
-    }
-  }
-  return tokens;
-}
-
-function isFinancialLine(line: string) {
-  const upper = line.toUpperCase();
-  return (
-    upper.includes("$") ||
-    upper.includes("CR") ||
-    upper.includes("DR") ||
-    upper.includes("VALUE DATE") ||
-    upper.includes("CREDIT TO ACCOUNT") ||
-    upper.includes("TRANSFER")
-  );
-}
-
-function hasAnyHint(blockUpper: string, hints: string[]) {
-  return hints.some((hint) => blockUpper.includes(hint));
+function hasStrictMoneyPattern(text: string) {
+  return new RegExp(MONEY_TOKEN_RE.source, "i").test(text);
 }
 
 function isReferenceOnlyLine(line: string) {
   const trimmed = line.trim();
   if (!trimmed) return false;
 
-  // Reference-like rows in auto statements are often pure numbers/symbols.
-  // If a row has no money markers and no 2-decimal currency pattern,
-  // we keep it as description metadata but exclude it from money candidates.
-  if (trimmed.includes("$")) return false;
-  if (/,/.test(trimmed)) return false;
-  if (/\b(?:CR|DR)\b/i.test(trimmed)) return false;
-  if (/[()]/.test(trimmed)) return false;
-  if (/\d+\.\d{2}/.test(trimmed)) return false;
+  // Only mark as reference if it contains a long digit chain and no valid
+  // two-decimal money token. This avoids dropping lines that are real amounts.
+  if (hasStrictMoneyPattern(trimmed)) return false;
+  const digitsOnly = trimmed.replace(/\D/g, "");
+  return digitsOnly.length >= 12;
+}
 
-  const compact = trimmed.replace(/\s+/g, "");
-  return /^[0-9\-/.]+$/.test(compact);
+function extractMoneyTokens(lines: string[]): MoneyTokenWithLine[] {
+  const tokens: MoneyTokenWithLine[] = [];
+  let tokenIndex = 0;
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const originalLine = lines[lineIndex];
+    const trimmed = originalLine.trim();
+    if (isReferenceOnlyLine(trimmed)) {
+      continue;
+    }
+
+    // Value Date lines may glue date+amount text; split to keep tokenization stable.
+    const normalized = originalLine.replace(
+      /(Value Date:\s*\d{2}\/\d{2}\/\d{4})(?=\d)/gi,
+      "$1 "
+    );
+    const re = new RegExp(MONEY_TOKEN_RE.source, "gi");
+    for (const match of normalized.matchAll(re)) {
+      tokens.push({
+        token: match[0],
+        line: normalized,
+        lineIndex,
+        tokenIndex,
+      });
+      tokenIndex += 1;
+    }
+  }
+
+  return tokens;
+}
+
+function hasAnyHint(blockUpper: string, hints: string[]) {
+  return hints.some((hint) => blockUpper.includes(hint));
 }
 
 function isNonTransactionBlock(firstLine: string) {
@@ -275,32 +274,80 @@ function pushWarning(
   warnings.push({ rawLine, reason, confidence: clamp01(confidence) });
 }
 
+function pickBalanceCandidateIndex(tokens: MoneyTokenWithLine[]) {
+  for (let i = tokens.length - 1; i >= 0; i -= 1) {
+    const parsed = tokens[i].parsed;
+    if (parsed?.suffix === "CR" || parsed?.suffix === "DR") {
+      return i;
+    }
+  }
+  return tokens.length - 1;
+}
+
 function resolveAmount(params: {
   blockUpper: string;
-  amountCandidates: MoneyParsed[];
+  amountCandidates: MoneyTokenWithLine[];
   rawBlock: string;
   warnings: ParseWarning[];
+  prevBalance?: number;
+  currBalance?: number;
 }): AmountResolution | null {
-  const { blockUpper, amountCandidates, rawBlock, warnings } = params;
+  const {
+    blockUpper,
+    amountCandidates,
+    rawBlock,
+    warnings,
+    prevBalance,
+    currBalance,
+  } = params;
   if (amountCandidates.length === 0) return null;
 
-  const hasExplicitDebit = amountCandidates.some(
-    (c) => c.hasMinus || c.hasParens || c.suffix === "DR"
+  const parsedCandidates = amountCandidates.filter((c) => c.parsed);
+  if (parsedCandidates.length === 0) return null;
+
+  const hasExplicitDebit = parsedCandidates.some(
+    (c) => c.parsed!.hasMinus || c.parsed!.hasParens || c.parsed!.suffix === "DR"
   );
-  const hasExplicitCredit = amountCandidates.some((c) => c.suffix === "CR");
-  const bothPresent = hasExplicitDebit && hasExplicitCredit;
-  if (bothPresent) {
+  const hasExplicitCredit = parsedCandidates.some((c) => c.parsed!.suffix === "CR");
+  if (hasExplicitDebit && hasExplicitCredit) {
     pushWarning(warnings, rawBlock, "DEBIT_CREDIT_BOTH_PRESENT", 0.35);
   }
 
-  const candidate = amountCandidates[amountCandidates.length - 1];
+  const hasContinuityInputs =
+    typeof prevBalance === "number" && typeof currBalance === "number";
+
+  // If we can reconcile against running balances, this is the most reliable sign source.
+  if (hasContinuityInputs) {
+    for (let i = parsedCandidates.length - 1; i >= 0; i -= 1) {
+      const candidate = parsedCandidates[i];
+      const v = candidate.parsed!.absValue;
+      const creditFits =
+        Math.abs(round2((prevBalance as number) + v) - round2(currBalance as number)) <=
+        MONEY_EQ_TOLERANCE;
+      const debitFits =
+        Math.abs(round2((prevBalance as number) - v) - round2(currBalance as number)) <=
+        MONEY_EQ_TOLERANCE;
+
+      if (creditFits && !debitFits) {
+        return { amount: v, credit: v, confidencePenalty: 0 };
+      }
+      if (debitFits && !creditFits) {
+        return { amount: -v, debit: v, confidencePenalty: 0 };
+      }
+    }
+
+    pushWarning(warnings, rawBlock, "AMOUNT_SIGN_UNCERTAIN", 0.35);
+    return null;
+  }
+
+  const candidate = parsedCandidates[parsedCandidates.length - 1];
   const hasCreditHint = hasAnyHint(blockUpper, CREDIT_HINTS);
   const hasDebitHint = hasAnyHint(blockUpper, DEBIT_HINTS);
 
   let side: "debit" | "credit" | "unknown" = "unknown";
-  if (candidate.hasMinus || candidate.hasParens || candidate.suffix === "DR") {
+  if (candidate.parsed!.hasMinus || candidate.parsed!.hasParens || candidate.parsed!.suffix === "DR") {
     side = "debit";
-  } else if (candidate.suffix === "CR") {
+  } else if (candidate.parsed!.suffix === "CR") {
     side = "credit";
   } else if (hasCreditHint && !hasDebitHint) {
     side = "credit";
@@ -308,34 +355,16 @@ function resolveAmount(params: {
     side = "debit";
   }
 
-  // Fallback for column-misaligned extract text:
-  // keep parser deterministic and expose ambiguity with warning + lower confidence.
-  let confidencePenalty = 0;
   if (side === "unknown") {
-    side = "debit";
-    confidencePenalty += 0.22;
-    pushWarning(warnings, rawBlock, "AUTO_AMOUNT_SIDE_AMBIGUOUS", 0.45);
+    pushWarning(warnings, rawBlock, "AMOUNT_SIGN_UNCERTAIN", 0.4);
+    return null;
   }
 
+  const v = candidate.parsed!.absValue;
   if (side === "debit") {
-    const debit = candidate.absValue;
-    const credit = undefined;
-    return {
-      amount: (credit ?? 0) - debit,
-      debit,
-      credit,
-      confidencePenalty,
-    };
+    return { amount: -v, debit: v, confidencePenalty: 0.1 };
   }
-
-  const credit = candidate.absValue;
-  const debit = undefined;
-  return {
-    amount: credit - (debit ?? 0),
-    debit,
-    credit,
-    confidencePenalty,
-  };
+  return { amount: v, credit: v, confidencePenalty: 0.1 };
 }
 
 function finalizeBlock(params: {
@@ -348,6 +377,7 @@ function finalizeBlock(params: {
   firstRemainder: string;
   period: StatementPeriod;
   warnings: ParseWarning[];
+  prevBalance?: number;
 }): ParsedTransaction | null {
   const {
     fileId,
@@ -359,6 +389,7 @@ function finalizeBlock(params: {
     firstRemainder,
     period,
     warnings,
+    prevBalance,
   } = params;
 
   if (rawLines.length === 0) return null;
@@ -373,46 +404,51 @@ function finalizeBlock(params: {
   }
 
   const moneyTokens = extractMoneyTokens(rawLines);
-  const preferredTokens = moneyTokens.filter((item) => isFinancialLine(item.line));
-  const tokensToParse =
-    preferredTokens.length >= 2 ? preferredTokens : moneyTokens;
-  const parsedTokens = tokensToParse
-    .map((item) => parseMoneyToken(item.token))
-    .filter(Boolean) as MoneyParsed[];
-  const saneTokens: MoneyParsed[] = [];
-  for (const token of parsedTokens) {
-    if (!isMoneyCandidateSane(token)) {
-      pushWarning(
-        warnings,
-        rawBlock,
-        `AMOUNT_OUTLIER: value exceeds ${MAX_MONEY_ABS}`,
-        0.3
-      );
+  const parsedTokens: MoneyTokenWithLine[] = [];
+  for (const candidate of moneyTokens) {
+    const parsed = parseMoneyToken(candidate.token);
+    if (!parsed) continue;
+
+    if (!isMoneyCandidateSane(parsed)) {
+      pushWarning(warnings, rawBlock, "AMOUNT_OUTLIER", 0.3);
       continue;
     }
-    saneTokens.push(token);
+
+    parsedTokens.push({ ...candidate, parsed });
   }
 
-  const balanceRaw =
-    saneTokens.length > 0 ? saneTokens[saneTokens.length - 1] : undefined;
-  const amountCandidates = saneTokens.slice(0, -1);
-  const amountResolved = resolveAmount({
-    blockUpper: rawBlock.toUpperCase(),
-    amountCandidates,
-    rawBlock,
-    warnings,
-  });
+  let balance: number | undefined;
+  let amountResolved: AmountResolution | null = null;
 
-  if (!balanceRaw) {
+  if (parsedTokens.length > 0) {
+    const balanceIndex = pickBalanceCandidateIndex(parsedTokens);
+    const balanceCandidate = parsedTokens[balanceIndex];
+    balance = Math.abs(balanceCandidate.parsed!.absValue);
+
+    // Amount candidates are constrained to balance neighborhood (same/prev/next line)
+    // to reduce pollution from unrelated reference lines in the same block.
+    const amountCandidates = parsedTokens.filter((c, idx) => {
+      if (idx === balanceIndex) return false;
+      return Math.abs(c.lineIndex - balanceCandidate.lineIndex) <= 1;
+    });
+
+    amountResolved = resolveAmount({
+      blockUpper: rawBlock.toUpperCase(),
+      amountCandidates,
+      rawBlock,
+      warnings,
+      prevBalance,
+      currBalance: balance,
+    });
+  }
+
+  if (typeof balance !== "number") {
     pushWarning(warnings, rawBlock, "AUTO_BALANCE_NOT_FOUND", 0.35);
   }
   if (!amountResolved) {
     pushWarning(warnings, rawBlock, "AUTO_AMOUNT_NOT_FOUND", 0.35);
   }
 
-  // Statement balance may carry "CR" suffix in source text.
-  // For this phase we treat suffix as marker only and store numeric value.
-  const balance = balanceRaw ? Math.abs(balanceRaw.absValue) : undefined;
   const amount = amountResolved?.amount ?? 0;
   const debit = amountResolved?.debit;
   const credit = amountResolved?.credit;
@@ -430,8 +466,8 @@ function finalizeBlock(params: {
     const warningPenalty = Math.min(0.25, warningCountAdded * 0.08);
     confidence = clamp01(0.88 - fallbackPenalty - warningPenalty);
   } else {
-    const warningPenalty = Math.min(0.25, warningCountAdded * 0.05);
-    confidence = clamp01(0.55 - warningPenalty);
+    const warningPenalty = Math.min(0.3, warningCountAdded * 0.06);
+    confidence = clamp01(0.5 - warningPenalty);
   }
 
   return {
@@ -467,6 +503,10 @@ export function parseCommbankStatementDebitCredit(
   const flush = () => {
     if (currentBlock.length === 0) return;
     counter += 1;
+
+    const prevBalance =
+      transactions.length > 0 ? transactions[transactions.length - 1].balance : undefined;
+
     const parsed = finalizeBlock({
       fileId,
       counter,
@@ -477,12 +517,14 @@ export function parseCommbankStatementDebitCredit(
       firstRemainder,
       period,
       warnings,
+      prevBalance,
     });
     if (parsed) {
       transactions.push(parsed);
     } else {
       counter -= 1;
     }
+
     currentBlock = [];
     currentDay = "";
     currentMonth = "";
@@ -510,7 +552,7 @@ export function parseCommbankStatementDebitCredit(
       continue;
     }
 
-    // Ignore pre-table residual lines without active block.
+    // Ignore residual lines before first dated transaction row.
   }
 
   flush();
