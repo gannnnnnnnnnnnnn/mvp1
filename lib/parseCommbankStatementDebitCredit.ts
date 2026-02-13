@@ -201,8 +201,13 @@ function isReferenceOnlyLine(line: string) {
   // Only mark as reference if it contains a long digit chain and no valid
   // two-decimal money token. This avoids dropping lines that are real amounts.
   if (hasStrictMoneyPattern(trimmed)) return false;
+  const compactDigits = trimmed.replace(/\s+/g, "");
+  if (/^\d+$/.test(compactDigits) && compactDigits.length >= 9) {
+    return true;
+  }
+
   const digitsOnly = trimmed.replace(/\D/g, "");
-  return digitsOnly.length >= 12;
+  return /^[0-9./-]+$/.test(compactDigits) && digitsOnly.length >= 12;
 }
 
 function extractMoneyTokens(lines: string[]): MoneyTokenWithLine[] {
@@ -216,11 +221,11 @@ function extractMoneyTokens(lines: string[]): MoneyTokenWithLine[] {
       continue;
     }
 
-    // Value Date lines may glue date+amount text; split to keep tokenization stable.
-    const normalized = originalLine.replace(
-      /(Value Date:\s*\d{2}\/\d{2}\/\d{4})(?=\d)/gi,
-      "$1 "
-    );
+    const normalized = originalLine
+      .replace(
+        /(Value Date:\s*\d{2}\/\d{2}\/\d{4})(?=\d)/gi,
+        "$1 "
+      );
     const re = new RegExp(MONEY_TOKEN_RE.source, "gi");
     for (const match of normalized.matchAll(re)) {
       tokens.push({
@@ -282,6 +287,43 @@ function pickBalanceCandidateIndex(tokens: MoneyTokenWithLine[]) {
     }
   }
   return tokens.length - 1;
+}
+
+function deriveImpliedAmountCandidatesFromWindow(
+  lines: string[],
+  balanceLineIndex: number
+) {
+  const synthetic: MoneyTokenWithLine[] = [];
+  let syntheticIndex = 10_000;
+  const start = Math.max(0, balanceLineIndex - 2);
+
+  for (let lineIndex = balanceLineIndex; lineIndex >= start; lineIndex -= 1) {
+    const line = lines[lineIndex] || "";
+    const re = /(\d+)\.(\d{2})/g;
+    for (const m of line.matchAll(re)) {
+      if (!m[1] || !m[2]) continue;
+      const intPart = m[1];
+      const decimalPart = m[2];
+      if (intPart.length <= 6) continue;
+
+      for (let width = 1; width <= Math.min(6, intPart.length); width += 1) {
+        const tailInt = intPart.slice(-width);
+        const token = `${tailInt}.${decimalPart}`;
+        const parsed = parseMoneyToken(token);
+        if (!parsed || !isMoneyCandidateSane(parsed)) continue;
+        synthetic.push({
+          token,
+          line,
+          lineIndex,
+          tokenIndex: syntheticIndex,
+          parsed,
+        });
+        syntheticIndex += 1;
+      }
+    }
+  }
+
+  return synthetic;
 }
 
 function resolveAmount(params: {
@@ -435,12 +477,21 @@ function finalizeBlock(params: {
     const balanceCandidate = parsedTokens[balanceIndex];
     balance = Math.abs(balanceCandidate.parsed!.absValue);
 
-    // Amount candidates are constrained to balance neighborhood (same/prev/next line)
-    // to reduce pollution from unrelated reference lines in the same block.
+    // Amount candidates are constrained to balance neighborhood:
+    // same line, previous line, and previous two lines.
     const amountCandidates = parsedTokens.filter((c, idx) => {
       if (idx === balanceIndex) return false;
-      return Math.abs(c.lineIndex - balanceCandidate.lineIndex) <= 1;
+      return (
+        c.lineIndex <= balanceCandidate.lineIndex &&
+        c.lineIndex >= balanceCandidate.lineIndex - 2
+      );
     });
+
+    if (amountCandidates.length === 0) {
+      amountCandidates.push(
+        ...deriveImpliedAmountCandidatesFromWindow(rawLines, balanceCandidate.lineIndex)
+      );
+    }
 
     amountResolved = resolveAmount({
       blockUpper: rawBlock.toUpperCase(),
