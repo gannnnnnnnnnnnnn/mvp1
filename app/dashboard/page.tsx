@@ -14,7 +14,11 @@ type ApiError = { code: string; message: string };
 
 type OverviewResponse = {
   ok: true;
-  fileId: string;
+  fileId?: string;
+  fileIds?: string[];
+  filesIncludedCount?: number;
+  txCountBeforeDedupe?: number;
+  dedupedCount?: number;
   accountId?: string;
   granularity: "month" | "week";
   templateType: string;
@@ -28,7 +32,16 @@ type OverviewResponse = {
     balanceContinuitySkippedReasons?: Record<string, number>;
     needsReviewReasons: string[];
   };
-  appliedFilters?: Record<string, unknown>;
+  appliedFilters?: {
+    scope?: string;
+    fileId?: string;
+    fileIds?: string[];
+    accountId?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    granularity?: "month" | "week";
+    balanceScope?: "file" | "account" | "none";
+  };
   totals: { income: number; spend: number; net: number };
   periods: Array<{
     period: string;
@@ -49,11 +62,16 @@ type OverviewResponse = {
     transactionIds: string[];
   }>;
   balanceSeries: Array<{ date: string; balance: number; transactionId: string }>;
+  balanceSeriesDisabledReason?: string;
 };
 
 type CompareResponse = {
   ok: true;
-  fileId: string;
+  fileId?: string;
+  fileIds?: string[];
+  filesIncludedCount?: number;
+  txCountBeforeDedupe?: number;
+  dedupedCount?: number;
   accountId?: string;
   mode: "month";
   appliedFilters?: Record<string, unknown>;
@@ -99,6 +117,7 @@ const PERCENT = new Intl.NumberFormat("en-AU", {
 function templateLabel(templateType: string) {
   if (templateType === "commbank_manual_amount_balance") return "manual";
   if (templateType === "commbank_auto_debit_credit") return "auto";
+  if (templateType === "mixed") return "mixed";
   return "unknown";
 }
 
@@ -166,7 +185,8 @@ function skippedSummary(quality?: OverviewResponse["quality"]) {
 
 export default function DashboardPage() {
   const [files, setFiles] = useState<FileMeta[]>([]);
-  const [selectedFileId, setSelectedFileId] = useState("");
+  const [scopeMode, setScopeMode] = useState<"all" | "selected">("all");
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [granularity, setGranularity] = useState<"month" | "week">("month");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -176,9 +196,12 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
-  const selectedFileName = useMemo(
-    () => files.find((f) => f.id === selectedFileId)?.originalName || "",
-    [files, selectedFileId]
+  const selectedFileNames = useMemo(
+    () =>
+      selectedFileIds
+        .map((id) => files.find((f) => f.id === id)?.originalName)
+        .filter(Boolean) as string[],
+    [files, selectedFileIds]
   );
 
   const fetchFiles = async () => {
@@ -190,34 +213,46 @@ export default function DashboardPage() {
       throw new Error(`${data.error.code}: ${data.error.message}`);
     }
     setFiles(data.files);
-    if (!selectedFileId && data.files.length > 0) {
-      setSelectedFileId(data.files[0].id);
+    if (selectedFileIds.length === 0 && data.files.length > 0) {
+      setSelectedFileIds([data.files[0].id]);
     }
   };
 
-  const fetchAnalytics = async (fileId: string) => {
-    if (!fileId) return;
+  const fetchAnalytics = async () => {
+    if (scopeMode === "selected" && selectedFileIds.length === 0) return;
     setIsLoading(true);
     setError(null);
 
     const common = new URLSearchParams({
-      fileId,
       granularity,
       ...(dateFrom ? { dateFrom } : {}),
       ...(dateTo ? { dateTo } : {}),
     });
+    if (scopeMode === "all") {
+      common.set("scope", "all");
+    } else {
+      for (const fileId of selectedFileIds) {
+        common.append("fileIds", fileId);
+      }
+    }
 
     try {
+      const compareParams = new URLSearchParams({
+        mode: "month",
+        ...(dateFrom ? { dateFrom } : {}),
+        ...(dateTo ? { dateTo } : {}),
+      });
+      if (scopeMode === "all") {
+        compareParams.set("scope", "all");
+      } else {
+        for (const fileId of selectedFileIds) {
+          compareParams.append("fileIds", fileId);
+        }
+      }
+
       const [overviewRes, compareRes] = await Promise.all([
         fetch(`/api/analysis/overview?${common.toString()}`),
-        fetch(
-          `/api/analysis/compare?${new URLSearchParams({
-            fileId,
-            mode: "month",
-            ...(dateFrom ? { dateFrom } : {}),
-            ...(dateTo ? { dateTo } : {}),
-          }).toString()}`
-        ),
+        fetch(`/api/analysis/compare?${compareParams.toString()}`),
       ]);
 
       const overviewData = (await overviewRes.json()) as
@@ -258,10 +293,10 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (!selectedFileId) return;
-    void fetchAnalytics(selectedFileId);
+    if (scopeMode === "selected" && selectedFileIds.length === 0) return;
+    void fetchAnalytics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedFileId, granularity]);
+  }, [scopeMode, selectedFileIds, granularity]);
 
   const maxPeriodTotal = useMemo(() => {
     if (!overview?.periods.length) return 0;
@@ -305,13 +340,29 @@ export default function DashboardPage() {
 
           <div className="mt-4 grid gap-3 md:grid-cols-5">
             <label className="space-y-1 text-xs font-medium text-slate-600">
-              File
+              Scope
               <select
-                value={selectedFileId}
-                onChange={(e) => setSelectedFileId(e.target.value)}
+                value={scopeMode}
+                onChange={(e) => setScopeMode(e.target.value as "all" | "selected")}
                 className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
               >
-                <option value="">Select a file</option>
+                <option value="all">All files</option>
+                <option value="selected">Selected files</option>
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600 md:col-span-2">
+              Files (multi-select)
+              <select
+                multiple
+                value={selectedFileIds}
+                onChange={(e) => {
+                  const values = Array.from(e.currentTarget.selectedOptions).map((opt) => opt.value);
+                  setSelectedFileIds(values);
+                }}
+                disabled={scopeMode !== "selected"}
+                className="h-[88px] w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 disabled:bg-slate-100"
+              >
                 {files.map((file) => (
                   <option key={file.id} value={file.id}>
                     {file.originalName}
@@ -355,11 +406,9 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => {
-                if (selectedFileId) {
-                  void fetchAnalytics(selectedFileId);
-                }
+                void fetchAnalytics();
               }}
-              disabled={isLoading || !selectedFileId}
+              disabled={isLoading || (scopeMode === "selected" && selectedFileIds.length === 0)}
               className="self-end rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
               {isLoading ? "Loading..." : "Refresh"}
@@ -386,8 +435,18 @@ export default function DashboardPage() {
                   : ""}
               </div>
               <div>
-                File: <span className="font-mono">{selectedFileId}</span>
-                {selectedFileName ? ` · ${selectedFileName}` : ""}
+                Scope: <span className="font-medium">{overview.appliedFilters?.scope || scopeMode}</span>
+                {scopeMode === "selected" && selectedFileIds.length
+                  ? ` · ${selectedFileIds.length} selected`
+                  : ""}
+              </div>
+              <div>
+                Files included: {overview.filesIncludedCount ?? 0}
+                {selectedFileNames.length ? ` · ${selectedFileNames.join(", ")}` : ""}
+              </div>
+              <div>
+                Tx before dedupe: {overview.txCountBeforeDedupe ?? 0} · deduped:{" "}
+                {overview.dedupedCount ?? 0}
               </div>
             </div>
           )}
@@ -513,7 +572,9 @@ export default function DashboardPage() {
                   <path d={balancePath} fill="none" stroke="#2563eb" strokeWidth="2.5" />
                 </svg>
               ) : (
-                <p className="text-sm text-slate-500">Not enough balance points to draw curve.</p>
+                <p className="text-sm text-slate-500">
+                  {overview?.balanceSeriesDisabledReason || "Not enough balance points to draw curve."}
+                </p>
               )}
             </div>
             <p className="mt-2 text-xs text-slate-500">

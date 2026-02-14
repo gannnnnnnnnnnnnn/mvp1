@@ -49,7 +49,11 @@ type TxRow = {
 
 type TransactionsResponse = {
   ok: true;
-  fileId: string;
+  fileId?: string;
+  fileIds?: string[];
+  filesIncludedCount?: number;
+  txCountBeforeDedupe?: number;
+  dedupedCount?: number;
   accountId?: string;
   templateType: string;
   needsReview: boolean;
@@ -62,7 +66,17 @@ type TransactionsResponse = {
     balanceContinuitySkippedReasons?: Record<string, number>;
     needsReviewReasons: string[];
   };
-  appliedFilters?: Record<string, unknown>;
+  appliedFilters?: {
+    scope?: string;
+    fileId?: string;
+    fileIds?: string[];
+    accountId?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    q?: string;
+    category?: string;
+    balanceScope?: "file" | "account" | "none";
+  };
   transactions: TxRow[];
   categories: Category[];
 };
@@ -76,6 +90,7 @@ const CURRENCY = new Intl.NumberFormat("en-AU", {
 function templateLabel(templateType: string) {
   if (templateType === "commbank_manual_amount_balance") return "manual";
   if (templateType === "commbank_auto_debit_credit") return "auto";
+  if (templateType === "mixed") return "mixed";
   return "unknown";
 }
 
@@ -98,7 +113,8 @@ function skippedSummary(quality?: TransactionsResponse["quality"]) {
 
 export default function TransactionsPage() {
   const [files, setFiles] = useState<FileMeta[]>([]);
-  const [selectedFileId, setSelectedFileId] = useState("");
+  const [scopeMode, setScopeMode] = useState<"all" | "selected">("all");
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
 
   const [q, setQ] = useState("");
   const [category, setCategory] = useState<string>("");
@@ -113,9 +129,12 @@ export default function TransactionsPage() {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [pendingCategories, setPendingCategories] = useState<Record<string, Category>>({});
 
-  const selectedFileName = useMemo(
-    () => files.find((f) => f.id === selectedFileId)?.originalName || "",
-    [files, selectedFileId]
+  const selectedFileNames = useMemo(
+    () =>
+      selectedFileIds
+        .map((id) => files.find((f) => f.id === id)?.originalName)
+        .filter(Boolean) as string[],
+    [files, selectedFileIds]
   );
 
   const fetchFiles = async () => {
@@ -129,24 +148,30 @@ export default function TransactionsPage() {
     }
 
     setFiles(data.files);
-    if (!selectedFileId && data.files.length > 0) {
-      setSelectedFileId(data.files[0].id);
+    if (selectedFileIds.length === 0 && data.files.length > 0) {
+      setSelectedFileIds([data.files[0].id]);
     }
   };
 
-  const fetchTransactions = async (fileId: string) => {
-    if (!fileId) return;
+  const fetchTransactions = async () => {
+    if (scopeMode === "selected" && selectedFileIds.length === 0) return;
     setIsLoading(true);
     setError(null);
     setSaveStatus("");
 
     const params = new URLSearchParams({
-      fileId,
       ...(q ? { q } : {}),
       ...(category ? { category } : {}),
       ...(dateFrom ? { dateFrom } : {}),
       ...(dateTo ? { dateTo } : {}),
     });
+    if (scopeMode === "all") {
+      params.set("scope", "all");
+    } else {
+      for (const id of selectedFileIds) {
+        params.append("fileIds", id);
+      }
+    }
 
     try {
       const res = await fetch(`/api/analysis/transactions?${params.toString()}`);
@@ -210,7 +235,7 @@ export default function TransactionsPage() {
           ? `Updated merchant mapping: ${tx.merchantNorm}`
           : `Updated category for tx ${tx.id}`
       );
-      await fetchTransactions(selectedFileId);
+      await fetchTransactions();
     } catch {
       setError({ code: "SAVE_FAILED", message: "Failed to save category override." });
     } finally {
@@ -226,10 +251,10 @@ export default function TransactionsPage() {
   }, []);
 
   useEffect(() => {
-    if (!selectedFileId) return;
-    void fetchTransactions(selectedFileId);
+    if (scopeMode === "selected" && selectedFileIds.length === 0) return;
+    void fetchTransactions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedFileId]);
+  }, [scopeMode, selectedFileIds]);
 
   const categoryList = result?.categories || [];
 
@@ -243,14 +268,30 @@ export default function TransactionsPage() {
           </p>
 
           <div className="mt-4 grid gap-3 md:grid-cols-6">
-            <label className="space-y-1 text-xs font-medium text-slate-600 md:col-span-2">
-              File
+            <label className="space-y-1 text-xs font-medium text-slate-600">
+              Scope
               <select
-                value={selectedFileId}
-                onChange={(e) => setSelectedFileId(e.target.value)}
+                value={scopeMode}
+                onChange={(e) => setScopeMode(e.target.value as "all" | "selected")}
                 className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
               >
-                <option value="">Select a file</option>
+                <option value="all">All files</option>
+                <option value="selected">Selected files</option>
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600 md:col-span-2">
+              Files (multi-select)
+              <select
+                multiple
+                value={selectedFileIds}
+                onChange={(e) => {
+                  const values = Array.from(e.currentTarget.selectedOptions).map((opt) => opt.value);
+                  setSelectedFileIds(values);
+                }}
+                disabled={scopeMode !== "selected"}
+                className="h-[88px] w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 disabled:bg-slate-100"
+              >
                 {files.map((file) => (
                   <option key={file.id} value={file.id}>
                     {file.originalName}
@@ -309,11 +350,9 @@ export default function TransactionsPage() {
           <div className="mt-3 flex flex-wrap gap-2">
             <button
               onClick={() => {
-                if (selectedFileId) {
-                  void fetchTransactions(selectedFileId);
-                }
+                void fetchTransactions();
               }}
-              disabled={isLoading || !selectedFileId}
+              disabled={isLoading || (scopeMode === "selected" && selectedFileIds.length === 0)}
               className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
               {isLoading ? "Loading..." : "Apply Filters"}
@@ -324,9 +363,7 @@ export default function TransactionsPage() {
                 setCategory("");
                 setDateFrom("");
                 setDateTo("");
-                if (selectedFileId) {
-                  void fetchTransactions(selectedFileId);
-                }
+                void fetchTransactions();
               }}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
             >
@@ -354,8 +391,18 @@ export default function TransactionsPage() {
                   : ""}
               </div>
               <div>
-                File: <span className="font-mono">{selectedFileId}</span>
-                {selectedFileName ? ` · ${selectedFileName}` : ""}
+                Scope: <span className="font-medium">{result.appliedFilters?.scope || scopeMode}</span>
+                {scopeMode === "selected" && selectedFileIds.length
+                  ? ` · ${selectedFileIds.length} selected`
+                  : ""}
+              </div>
+              <div>
+                Files included: {result.filesIncludedCount ?? 0}
+                {selectedFileNames.length ? ` · ${selectedFileNames.join(", ")}` : ""}
+              </div>
+              <div>
+                Tx before dedupe: {result.txCountBeforeDedupe ?? 0} · deduped:{" "}
+                {result.dedupedCount ?? 0}
               </div>
             </div>
           )}
@@ -373,7 +420,10 @@ export default function TransactionsPage() {
         </header>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm text-slate-600">Rows: {result?.transactions.length || 0}</div>
+          <div className="mb-3 text-sm text-slate-600">
+            Rows: {result?.transactions.length || 0}
+            {(result?.dedupedCount || 0) > 0 ? ` · Deduped ${result?.dedupedCount}` : ""}
+          </div>
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <table className="min-w-[1200px] w-full text-left text-xs text-slate-700">
               <thead className="bg-slate-50 text-slate-500">
