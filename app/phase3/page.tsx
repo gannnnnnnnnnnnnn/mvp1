@@ -147,20 +147,6 @@ export default function Phase3DatasetHomePage() {
     window.location.href = `/phase3/period?${params.toString()}`;
   };
 
-  useEffect(() => {
-    if (monthsByYear.length === 0) return;
-    setExpandedYears((prev) => {
-      const next = { ...prev };
-      const recentTwoYears = monthsByYear.slice(0, 2).map((item) => item.year);
-      for (const group of monthsByYear) {
-        if (next[group.year] === undefined) {
-          next[group.year] = recentTwoYears.includes(group.year);
-        }
-      }
-      return next;
-    });
-  }, [monthsByYear]);
-
   return (
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto max-w-[1280px] space-y-6">
