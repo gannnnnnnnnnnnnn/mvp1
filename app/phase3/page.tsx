@@ -90,14 +90,16 @@ export default function Phase3DatasetHomePage() {
 
   useEffect(() => {
     const parsed = parseScopeFromWindow();
+    const normalizedIds =
+      parsed.scopeMode === "selected" ? parsed.fileIds.slice(0, 1) : parsed.fileIds;
     setScopeMode(parsed.scopeMode);
-    setSelectedFileIds(parsed.fileIds);
+    setSelectedFileIds(normalizedIds);
 
     void fetchFiles().catch(() => {
       setError({ code: "FILES_FAILED", message: "Failed to load files list." });
     });
 
-    void fetchOverview(parsed.scopeMode, parsed.fileIds);
+    void fetchOverview(parsed.scopeMode, normalizedIds);
   }, []);
 
   useEffect(() => {
@@ -109,6 +111,17 @@ export default function Phase3DatasetHomePage() {
     () => [...(overview?.availableMonths || [])].sort().at(-1) || "",
     [overview?.availableMonths]
   );
+  const sortedFiles = useMemo(
+    () => [...files].sort((a, b) => a.originalName.localeCompare(b.originalName)),
+    [files]
+  );
+  const selectedFileId = selectedFileIds[0] || "";
+
+  function applyScopeAndFetch(nextScopeMode: ScopeMode, nextFileIds: string[]) {
+    setScopeMode(nextScopeMode);
+    setSelectedFileIds(nextFileIds);
+    void fetchOverview(nextScopeMode, nextFileIds);
+  }
 
   const navigateToMonth = (month: string) => {
     const params = buildScopeParams(scopeMode, selectedFileIds);
@@ -127,44 +140,56 @@ export default function Phase3DatasetHomePage() {
           </p>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-12">
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-3">
-              Scope
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-4">
+              Dataset scope
               <select
                 value={scopeMode}
-                onChange={(e) => setScopeMode(e.target.value as ScopeMode)}
+                onChange={(e) => {
+                  const nextScope = e.target.value as ScopeMode;
+                  if (nextScope === "all") {
+                    applyScopeAndFetch("all", []);
+                    return;
+                  }
+                  const fallbackId = selectedFileId || sortedFiles[0]?.id || "";
+                  applyScopeAndFetch("selected", fallbackId ? [fallbackId] : []);
+                }}
                 className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="all">All files</option>
-                <option value="selected">Selected files</option>
+                <option value="selected">Specific file</option>
               </select>
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-6">
-              Files (secondary)
-              <select
-                multiple
-                value={selectedFileIds}
-                disabled={scopeMode !== "selected"}
-                onChange={(e) => {
-                  const values = Array.from(e.currentTarget.selectedOptions).map((opt) => opt.value);
-                  setSelectedFileIds(values);
-                }}
-                className="h-[92px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100"
-              >
-                {files.map((file) => (
-                  <option key={file.id} value={file.id}>
-                    {file.originalName}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {scopeMode === "selected" && (
+              <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-6">
+                File
+                <select
+                  value={selectedFileId}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    applyScopeAndFetch("selected", nextId ? [nextId] : []);
+                  }}
+                  className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
+                >
+                  {sortedFiles.length === 0 ? (
+                    <option value="">No files available</option>
+                  ) : (
+                    sortedFiles.map((file) => (
+                      <option key={file.id} value={file.id}>
+                        {file.originalName}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </label>
+            )}
 
-            <div className="flex items-end lg:col-span-3">
+            <div className="flex items-end lg:col-span-2">
               <button
                 type="button"
                 onClick={() => void fetchOverview(scopeMode, selectedFileIds)}
-                disabled={isLoading || (scopeMode === "selected" && selectedFileIds.length === 0)}
-                className="h-10 w-full rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                disabled={isLoading || (scopeMode === "selected" && !selectedFileId)}
+                className="h-9 w-full rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
               >
                 {isLoading ? "Loading..." : "Refresh Dataset"}
               </button>
