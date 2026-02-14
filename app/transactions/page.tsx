@@ -12,13 +12,11 @@ type ApiError = { code: string; message: string };
 type Category =
   | "Groceries"
   | "Dining"
-  | "Food Delivery"
   | "Transport"
   | "Shopping"
   | "Bills&Utilities"
   | "Rent/Mortgage"
   | "Health"
-  | "Pet"
   | "Entertainment"
   | "Travel"
   | "Income"
@@ -83,6 +81,28 @@ type TransactionsResponse = {
   categories: Category[];
 };
 
+type UnknownMerchantItem = {
+  merchantNorm: string;
+  displayName: string;
+  txCount: number;
+  totalSpend: number;
+  lastDate: string;
+  sampleTransactions: Array<{
+    id: string;
+    date: string;
+    amount: number;
+    descriptionRaw: string;
+    fileId: string;
+  }>;
+};
+
+type TriageResponse = {
+  ok: true;
+  unknownMerchants: UnknownMerchantItem[];
+  unknownMerchantCount: number;
+  unknownTransactionsCount: number;
+};
+
 const CURRENCY = new Intl.NumberFormat("en-AU", {
   style: "currency",
   currency: "AUD",
@@ -120,6 +140,10 @@ export default function TransactionsPage() {
 
   const [q, setQ] = useState("");
   const [category, setCategory] = useState<string>("");
+  const [merchantQuery, setMerchantQuery] = useState("");
+  const [onlyOther, setOnlyOther] = useState(false);
+  const [onlyManual, setOnlyManual] = useState(false);
+  const [onlyLowConfidence, setOnlyLowConfidence] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -128,9 +152,14 @@ export default function TransactionsPage() {
   const [error, setError] = useState<ApiError | null>(null);
   const [saveStatus, setSaveStatus] = useState<string>("");
   const [savingId, setSavingId] = useState<string>("");
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [triageItems, setTriageItems] = useState<UnknownMerchantItem[]>([]);
+  const [selectedTriageMerchant, setSelectedTriageMerchant] = useState("");
+  const [triageCategory, setTriageCategory] = useState<Category>("Other");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [pendingCategories, setPendingCategories] = useState<Record<string, Category>>({});
   const [seededFromQuery, setSeededFromQuery] = useState(false);
+  const [page, setPage] = useState(1);
 
   const selectedFileNames = useMemo(
     () =>
@@ -139,6 +168,23 @@ export default function TransactionsPage() {
         .filter(Boolean) as string[],
     [files, selectedFileIds]
   );
+
+  const buildScopeParams = () => {
+    const params = new URLSearchParams({
+      ...(q ? { q } : {}),
+      ...(category ? { category } : {}),
+      ...(dateFrom ? { dateFrom } : {}),
+      ...(dateTo ? { dateTo } : {}),
+    });
+    if (scopeMode === "all") {
+      params.set("scope", "all");
+    } else {
+      for (const id of selectedFileIds) {
+        params.append("fileIds", id);
+      }
+    }
+    return params;
+  };
 
   useEffect(() => {
     if (seededFromQuery) return;
@@ -193,19 +239,7 @@ export default function TransactionsPage() {
     setError(null);
     setSaveStatus("");
 
-    const params = new URLSearchParams({
-      ...(q ? { q } : {}),
-      ...(category ? { category } : {}),
-      ...(dateFrom ? { dateFrom } : {}),
-      ...(dateTo ? { dateTo } : {}),
-    });
-    if (scopeMode === "all") {
-      params.set("scope", "all");
-    } else {
-      for (const id of selectedFileIds) {
-        params.append("fileIds", id);
-      }
-    }
+    const params = buildScopeParams();
 
     try {
       const res = await fetch(`/api/analysis/transactions?${params.toString()}`);
@@ -221,6 +255,7 @@ export default function TransactionsPage() {
       }
 
       setResult(data);
+      setPage(1);
       setPendingCategories(
         data.transactions.reduce<Record<string, Category>>((acc, tx) => {
           acc[tx.id] = tx.category;
@@ -233,6 +268,46 @@ export default function TransactionsPage() {
       setPendingCategories({});
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchTriage = async () => {
+    if (scopeMode === "selected" && selectedFileIds.length === 0) return;
+    setTriageLoading(true);
+    try {
+      const params = new URLSearchParams({
+        ...(dateFrom ? { dateFrom } : {}),
+        ...(dateTo ? { dateTo } : {}),
+      });
+      if (scopeMode === "all") {
+        params.set("scope", "all");
+      } else {
+        for (const id of selectedFileIds) {
+          params.append("fileIds", id);
+        }
+      }
+      const res = await fetch(`/api/analysis/triage/unknown-merchants?${params.toString()}`);
+      const data = (await res.json()) as TriageResponse | { ok: false; error: ApiError };
+      if (!data.ok) {
+        setError(data.error);
+        setTriageItems([]);
+        return;
+      }
+      setTriageItems(data.unknownMerchants);
+      if (
+        data.unknownMerchants.length > 0 &&
+        !data.unknownMerchants.some((item) => item.merchantNorm === selectedTriageMerchant)
+      ) {
+        setSelectedTriageMerchant(data.unknownMerchants[0].merchantNorm);
+      }
+      if (data.unknownMerchants.length === 0) {
+        setSelectedTriageMerchant("");
+      }
+    } catch {
+      setError({ code: "TRIAGE_FETCH_FAILED", message: "Failed to load unknown merchant triage." });
+      setTriageItems([]);
+    } finally {
+      setTriageLoading(false);
     }
   };
 
@@ -270,8 +345,38 @@ export default function TransactionsPage() {
           : `Updated category for tx ${tx.id}`
       );
       await fetchTransactions();
+      await fetchTriage();
     } catch {
       setError({ code: "SAVE_FAILED", message: "Failed to save category override." });
+    } finally {
+      setSavingId("");
+    }
+  };
+
+  const applyTriageMerchantCategory = async () => {
+    if (!selectedTriageMerchant) return;
+    setSavingId(`triage:${selectedTriageMerchant}`);
+    setSaveStatus("");
+    try {
+      const res = await fetch("/api/analysis/category-override", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: triageCategory,
+          merchantNorm: selectedTriageMerchant,
+          applyToMerchant: true,
+        }),
+      });
+      const data = (await res.json()) as { ok: true } | { ok: false; error: ApiError };
+      if (!data.ok) {
+        setError(data.error);
+        return;
+      }
+      setSaveStatus(`Updated merchant mapping: ${selectedTriageMerchant} -> ${triageCategory}`);
+      await fetchTransactions();
+      await fetchTriage();
+    } catch {
+      setError({ code: "TRIAGE_SAVE_FAILED", message: "Failed to apply triage category mapping." });
     } finally {
       setSavingId("");
     }
@@ -288,10 +393,39 @@ export default function TransactionsPage() {
     if (!seededFromQuery) return;
     if (scopeMode === "selected" && selectedFileIds.length === 0) return;
     void fetchTransactions();
+    void fetchTriage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeMode, selectedFileIds, seededFromQuery]);
+  }, [scopeMode, selectedFileIds, seededFromQuery, dateFrom, dateTo]);
 
   const categoryList = result?.categories || [];
+  const selectedTriage = triageItems.find((item) => item.merchantNorm === selectedTriageMerchant);
+
+  const filteredTransactions = useMemo(() => {
+    const rows = result?.transactions || [];
+    return rows.filter((tx) => {
+      if (merchantQuery && !tx.merchantNorm.toUpperCase().includes(merchantQuery.toUpperCase())) {
+        return false;
+      }
+      if (onlyOther && !(tx.category === "Other" && tx.categorySource === "default")) {
+        return false;
+      }
+      if (onlyManual && tx.categorySource !== "manual") {
+        return false;
+      }
+      if (onlyLowConfidence && tx.quality.confidence >= 0.6) {
+        return false;
+      }
+      return true;
+    });
+  }, [result?.transactions, merchantQuery, onlyOther, onlyManual, onlyLowConfidence]);
+
+  const pageSize = 100;
+  const pageCount = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pagedTransactions = filteredTransactions.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
 
   return (
     <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
@@ -386,6 +520,7 @@ export default function TransactionsPage() {
             <button
               onClick={() => {
                 void fetchTransactions();
+                void fetchTriage();
               }}
               disabled={isLoading || (scopeMode === "selected" && selectedFileIds.length === 0)}
               className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
@@ -396,14 +531,70 @@ export default function TransactionsPage() {
               onClick={() => {
                 setQ("");
                 setCategory("");
+                setMerchantQuery("");
+                setOnlyOther(false);
+                setOnlyManual(false);
+                setOnlyLowConfidence(false);
                 setDateFrom("");
                 setDateTo("");
                 void fetchTransactions();
+                void fetchTriage();
               }}
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
             >
               Clear Filters
             </button>
+          </div>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-4">
+            <label className="space-y-1 text-xs font-medium text-slate-600">
+              Merchant quick filter
+              <input
+                value={merchantQuery}
+                onChange={(e) => {
+                  setMerchantQuery(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="merchantNorm contains..."
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+              />
+            </label>
+
+            <label className="flex items-center gap-2 self-end text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={onlyOther}
+                onChange={(e) => {
+                  setOnlyOther(e.target.checked);
+                  setPage(1);
+                }}
+              />
+              onlyOther (default)
+            </label>
+
+            <label className="flex items-center gap-2 self-end text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={onlyManual}
+                onChange={(e) => {
+                  setOnlyManual(e.target.checked);
+                  setPage(1);
+                }}
+              />
+              onlyManual
+            </label>
+
+            <label className="flex items-center gap-2 self-end text-xs text-slate-700">
+              <input
+                type="checkbox"
+                checked={onlyLowConfidence}
+                onChange={(e) => {
+                  setOnlyLowConfidence(e.target.checked);
+                  setPage(1);
+                }}
+              />
+              onlyLowConfidence (&lt;0.6)
+            </label>
           </div>
 
           {result && (
@@ -455,9 +646,109 @@ export default function TransactionsPage() {
         </header>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm text-slate-600">
-            Rows: {result?.transactions.length || 0}
-            {(result?.dedupedCount || 0) > 0 ? ` · Deduped ${result?.dedupedCount}` : ""}
+          <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-slate-900">Other Inbox (Unknown merchants)</h2>
+              <div className="text-xs text-slate-600">
+                {triageLoading
+                  ? "Loading..."
+                  : `${triageItems.length} merchants · ${triageItems.reduce(
+                      (sum, item) => sum + item.txCount,
+                      0
+                    )} tx`}
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3 lg:grid-cols-[1.2fr_1fr]">
+              <div className="max-h-56 overflow-auto rounded border border-slate-200 bg-white">
+                {triageItems.map((item) => (
+                  <button
+                    key={item.merchantNorm}
+                    type="button"
+                    onClick={() => setSelectedTriageMerchant(item.merchantNorm)}
+                    className={`w-full border-b px-3 py-2 text-left text-xs hover:bg-slate-50 ${
+                      selectedTriageMerchant === item.merchantNorm ? "bg-blue-50" : "bg-white"
+                    }`}
+                  >
+                    <div className="font-medium text-slate-800">{item.displayName}</div>
+                    <div className="text-slate-500">
+                      spend {CURRENCY.format(item.totalSpend)} · {item.txCount} tx · last {item.lastDate}
+                    </div>
+                  </button>
+                ))}
+                {!triageItems.length && (
+                  <div className="px-3 py-2 text-xs text-slate-500">
+                    No unknown merchants in this scope/date range.
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded border border-slate-200 bg-white p-3 text-xs">
+                <div className="font-medium text-slate-800">
+                  {selectedTriage?.displayName || "Select a merchant"}
+                </div>
+                <div className="mt-2 space-y-1">
+                  {(selectedTriage?.sampleTransactions || []).map((tx) => (
+                    <div key={tx.id} className="rounded border border-slate-100 bg-slate-50 p-2">
+                      <div className="text-slate-700">
+                        {tx.date} · {CURRENCY.format(tx.amount)}
+                      </div>
+                      <div className="text-slate-500">{tx.descriptionRaw}</div>
+                    </div>
+                  ))}
+                  {selectedTriage && selectedTriage.sampleTransactions.length === 0 && (
+                    <div className="text-slate-500">No sample transactions.</div>
+                  )}
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <select
+                    value={triageCategory}
+                    onChange={(e) => setTriageCategory(e.target.value as Category)}
+                    className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                  >
+                    {categoryList.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void applyTriageMerchantCategory()}
+                    disabled={!selectedTriageMerchant || savingId.startsWith("triage:")}
+                    className="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-blue-300"
+                  >
+                    Apply to merchant
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="sticky top-0 z-10 mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white/95 px-3 py-2 backdrop-blur">
+            <div className="text-sm text-slate-600">
+              Rows: {filteredTransactions.length} / {result?.transactions.length || 0}
+              {(result?.dedupedCount || 0) > 0 ? ` · Deduped ${result?.dedupedCount}` : ""}
+              {pageCount > 1 ? ` · Page ${currentPage}/${pageCount}` : ""}
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                disabled={currentPage >= pageCount}
+                className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <table className="min-w-[1200px] w-full text-left text-xs text-slate-700">
@@ -474,11 +765,21 @@ export default function TransactionsPage() {
                 </tr>
               </thead>
               <tbody>
-                {(result?.transactions || []).map((tx) => (
-                  <tr key={tx.id} className="border-t align-top">
+                {pagedTransactions.map((tx, index) => (
+                  <tr key={tx.id} className={`border-t align-top ${index % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}>
                     <td className="px-3 py-2">{tx.date.slice(0, 10)}</td>
-                    <td className="px-3 py-2 max-w-[280px] whitespace-normal">{tx.descriptionRaw}</td>
-                    <td className="px-3 py-2 font-mono text-[11px]">{tx.merchantNorm}</td>
+                    <td className="px-3 py-2 max-w-[320px] whitespace-normal">
+                      <span title={tx.descriptionRaw}>
+                        {tx.descriptionRaw.length > 120
+                          ? `${tx.descriptionRaw.slice(0, 120)}...`
+                          : tx.descriptionRaw}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 font-mono text-[11px]">
+                      <span title={tx.merchantNorm}>
+                        {tx.merchantNorm.length > 28 ? `${tx.merchantNorm.slice(0, 28)}...` : tx.merchantNorm}
+                      </span>
+                    </td>
                     <td className={`px-3 py-2 ${tx.amount >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
                       {CURRENCY.format(tx.amount)}
                     </td>
@@ -556,7 +857,7 @@ export default function TransactionsPage() {
             </table>
           </div>
 
-          {(result?.transactions || []).map((tx) =>
+          {pagedTransactions.map((tx) =>
             expanded[tx.id] ? (
               <div key={`${tx.id}-raw`} className="mt-2 rounded border border-slate-200 bg-slate-50 p-2 text-xs">
                 <div className="font-mono text-[11px] text-slate-600">txId: {tx.id}</div>
