@@ -224,6 +224,10 @@ export default function Phase3MonthPage() {
       })),
     [spendRows]
   );
+  const selectedPieData = useMemo(
+    () => pieData.filter((row) => row.category === selectedCategory),
+    [pieData, selectedCategory]
+  );
   const selectedMerchantItem = useMemo(
     () => triageItems.find((item) => item.merchantNorm === selectedMerchant) || null,
     [triageItems, selectedMerchant]
@@ -603,6 +607,23 @@ export default function Phase3MonthPage() {
                       <Cell key={row.category} fill={row.fill} />
                     ))}
                   </Pie>
+                  <Pie
+                    data={selectedPieData}
+                    dataKey="amount"
+                    nameKey="category"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={96}
+                    isAnimationActive
+                    animationDuration={180}
+                    stroke="#ffffff"
+                    strokeWidth={1}
+                  >
+                    {selectedPieData.map((row) => (
+                      <Cell key={`${row.category}-active`} fill={row.fill} />
+                    ))}
+                  </Pie>
                   <Tooltip content={<CategoryPieTooltip />} wrapperStyle={{ zIndex: 70 }} />
                 </PieChart>
               </div>
@@ -612,7 +633,7 @@ export default function Phase3MonthPage() {
                     key={row.category}
                     type="button"
                     onClick={() => setSelectedCategory(row.category)}
-                    className={`w-full rounded border px-3 py-2 text-left text-xs ${selectedCategory === row.category ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"}`}
+                    className={`w-full rounded border px-3 py-2 text-left text-xs transition-all duration-200 ${selectedCategory === row.category ? "scale-[1.01] border-blue-300 bg-blue-50 shadow-sm ring-1 ring-blue-200" : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"}`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-slate-800">{row.category}</span>
