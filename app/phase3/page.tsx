@@ -1,6 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { FileMeta, OverviewResponse, ApiError } from "@/app/phase3/_lib/types";
 import {
   ScopeMode,
@@ -34,12 +44,12 @@ export default function Phase3DatasetHomePage() {
     () => overview?.datasetMonthlySeries || [],
     [overview?.datasetMonthlySeries]
   );
-  const maxDatasetBar = useMemo(
+  const chartSeries = useMemo(
     () =>
-      Math.max(
-        0,
-        ...datasetSeries.map((row) => Math.max(row.income, row.spend, Math.abs(row.net)))
-      ),
+      datasetSeries.map((row) => ({
+        ...row,
+        txCount: row.transactionIds.length,
+      })),
     [datasetSeries]
   );
 
@@ -95,6 +105,13 @@ export default function Phase3DatasetHomePage() {
   }, [scopeMode, selectedFileIds]);
 
   const monthChips = [...(overview?.availableMonths || [])].sort((a, b) => b.localeCompare(a));
+
+  const navigateToMonth = (month: string) => {
+    const params = buildScopeParams(scopeMode, selectedFileIds);
+    params.set("type", "month");
+    params.set("key", month);
+    window.location.href = `/phase3/period?${params.toString()}`;
+  };
 
   return (
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
@@ -201,50 +218,59 @@ export default function Phase3DatasetHomePage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Monthly Cashflow Trend</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Income / spend / net across the full selected dataset.
+            Hover for details. Click a month to open Period view.
           </p>
-          <div className="mt-4 space-y-3">
-            {datasetSeries.map((row) => (
-              <div key={row.month}>
-                <div className="flex items-center justify-between text-xs text-slate-600">
-                  <span className="font-medium text-slate-800">{row.month}</span>
-                  <span>{row.transactionIds.length} tx</span>
-                </div>
-                <div className="mt-1 flex items-center gap-2">
-                  <div className="h-2 flex-1 rounded-full bg-slate-100">
-                    <div
-                      className="h-2 rounded-full bg-emerald-500"
-                      style={{
-                        width:
-                          maxDatasetBar > 0
-                            ? `${Math.max(2, (row.income / maxDatasetBar) * 100)}%`
-                            : "0%",
-                      }}
-                    />
-                  </div>
-                  <span className="w-20 text-right text-[11px] text-slate-600">
-                    {CURRENCY.format(row.income)}
-                  </span>
-                </div>
-                <div className="mt-1 flex items-center gap-2">
-                  <div className="h-2 flex-1 rounded-full bg-slate-100">
-                    <div
-                      className="h-2 rounded-full bg-rose-500"
-                      style={{
-                        width:
-                          maxDatasetBar > 0
-                            ? `${Math.max(2, (row.spend / maxDatasetBar) * 100)}%`
-                            : "0%",
-                      }}
-                    />
-                  </div>
-                  <span className="w-20 text-right text-[11px] text-slate-600">
-                    {CURRENCY.format(row.spend)}
-                  </span>
-                </div>
-              </div>
-            ))}
-            {!datasetSeries.length && (
+          <div className="mt-4 h-64 w-full">
+            {chartSeries.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart
+                  data={chartSeries}
+                  onClick={(state) => {
+                    const month = (state as { activeLabel?: string })?.activeLabel;
+                    if (month) {
+                      navigateToMonth(month);
+                    }
+                  }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#64748b" }} />
+                  <YAxis tick={{ fontSize: 11, fill: "#64748b" }} />
+                  <RechartsTooltip
+                    contentStyle={{
+                      borderRadius: 10,
+                      borderColor: "#e2e8f0",
+                      boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+                    }}
+                    formatter={(value, name) => {
+                      if (name === "txCount") {
+                        return [String(value), "Tx count"];
+                      }
+                      const numeric =
+                        typeof value === "number" ? value : Number(value || 0);
+                      const label =
+                        name === "income"
+                          ? "Income"
+                          : name === "spend"
+                            ? "Spend"
+                            : "Net";
+                      return [CURRENCY.format(numeric), label];
+                    }}
+                    labelFormatter={(label, payload) => {
+                      const txCount =
+                        payload?.[0] &&
+                        "payload" in payload[0] &&
+                        typeof payload[0].payload?.txCount === "number"
+                          ? payload[0].payload.txCount
+                          : 0;
+                      return `${label} · ${txCount} tx`;
+                    }}
+                  />
+                  <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} barSize={12} />
+                  <Bar dataKey="spend" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={12} />
+                  <Line dataKey="net" stroke="#2563eb" strokeWidth={2} dot={false} type="monotone" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            ) : (
               <p className="text-sm text-slate-500">No monthly cashflow points available.</p>
             )}
           </div>
