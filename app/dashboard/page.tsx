@@ -104,9 +104,12 @@ function templateLabel(templateType: string) {
 
 function deltaText(value: { amount: number; percent: number }) {
   const sign = value.amount >= 0 ? "+" : "-";
-  return `${sign}${CURRENCY.format(Math.abs(value.amount))} (${sign}${PERCENT.format(
-    Math.abs(value.percent)
-  )})`;
+  const pctAbs = Math.abs(value.percent);
+  const percentLabel =
+    !Number.isFinite(pctAbs) || pctAbs >= 9.99
+      ? "n/a"
+      : `${sign}${PERCENT.format(pctAbs)}`;
+  return `${sign}${CURRENCY.format(Math.abs(value.amount))} (${percentLabel})`;
 }
 
 function makeDonutStyle(items: Array<{ share: number }>) {
@@ -409,7 +412,11 @@ export default function DashboardPage() {
             <div className="mt-3 text-3xl font-semibold text-emerald-700">
               {CURRENCY.format(overview?.totals.income || 0)}
             </div>
-            {compare && <div className="mt-2 text-xs text-slate-500">vs prev: {deltaText(compare.deltas.income)}</div>}
+            {compare && (
+              <div className="mt-3 text-xs text-slate-500">
+                vs selected comparison period: {deltaText(compare.deltas.income)}
+              </div>
+            )}
           </article>
 
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -417,7 +424,11 @@ export default function DashboardPage() {
             <div className="mt-3 text-3xl font-semibold text-rose-700">
               {CURRENCY.format(overview?.totals.spend || 0)}
             </div>
-            {compare && <div className="mt-2 text-xs text-slate-500">vs prev: {deltaText(compare.deltas.spend)}</div>}
+            {compare && (
+              <div className="mt-3 text-xs text-slate-500">
+                vs selected comparison period: {deltaText(compare.deltas.spend)}
+              </div>
+            )}
           </article>
 
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -427,13 +438,28 @@ export default function DashboardPage() {
             >
               {CURRENCY.format(overview?.totals.net || 0)}
             </div>
-            {compare && <div className="mt-2 text-xs text-slate-500">vs prev: {deltaText(compare.deltas.net)}</div>}
+            {compare && (
+              <div className="mt-3 text-xs text-slate-500">
+                vs selected comparison period: {deltaText(compare.deltas.net)}
+              </div>
+            )}
           </article>
         </section>
 
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Income / Spend / Net by Period</h2>
+            <p className="mt-1 text-sm text-slate-500">Period breakdown with linked transaction counts.</p>
+            <div className="mt-3 flex gap-3 text-xs text-slate-500">
+              <span className="inline-flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                Income
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-rose-500" />
+                Spend
+              </span>
+            </div>
             <div className="mt-4 space-y-3">
               {(overview?.periods || []).map((row) => (
                 <div key={row.period}>
@@ -482,6 +508,7 @@ export default function DashboardPage() {
 
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Spend by Category</h2>
+            <p className="mt-1 text-sm text-slate-500">Share and amount for top spending categories.</p>
             <div className="mt-4 grid gap-4 sm:grid-cols-[200px_1fr]">
               <div
                 className="mx-auto h-48 w-48 rounded-full border border-slate-200"
@@ -511,13 +538,18 @@ export default function DashboardPage() {
         <section className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Balance Curve</h2>
+            <p className="mt-1 text-sm text-slate-500">Running balance points sampled by statement date.</p>
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
               {balancePath ? (
                 <svg viewBox="0 0 720 220" className="h-56 w-full">
                   <path d={balancePath} fill="none" stroke="#2563eb" strokeWidth="2.5" />
                 </svg>
               ) : (
-                <p className="text-sm text-slate-500">Not enough balance points to draw curve.</p>
+                <p className="text-sm text-slate-500">
+                  {!selectedFileId
+                    ? "Balance series disabled for mixed scope. Select a single file/account."
+                    : "Not enough balance points to draw curve."}
+                </p>
               )}
             </div>
             <p className="mt-2 text-xs text-slate-500">
@@ -527,6 +559,7 @@ export default function DashboardPage() {
 
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Top Merchants (Spend)</h2>
+            <p className="mt-1 text-sm text-slate-500">Highest spending merchants in selected range.</p>
             <div className="mt-4 space-y-2">
               {(overview?.topMerchants || []).map((row, index, arr) => {
                 const max = arr.length > 0 ? arr[0].amount : 1;
