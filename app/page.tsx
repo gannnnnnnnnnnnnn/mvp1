@@ -622,20 +622,35 @@ export default function Home() {
     <main className="min-h-screen bg-slate-50 p-8">
       <div className="mx-auto max-w-5xl space-y-8">
         <header>
-          <h1 className="text-3xl font-semibold text-slate-900">
-            Web Dropbox 1.0 — Phase 2.3
-          </h1>
+          <h1 className="text-4xl font-semibold text-slate-900">Personal Cashflow</h1>
           <p className="mt-2 text-slate-600">
-            PDF-only pipeline：Extract Text → Segment → Parse Transactions。
+            Upload CommBank statements. We&apos;ll parse and build your dashboard.
           </p>
         </header>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-900">文件上传</h2>
-          <p className="mt-1 text-sm text-slate-600">仅支持 PDF / CSV，单个文件 20MB 以内。</p>
+        {files.length > 0 && (
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-900">Welcome back</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              You have {files.length} statement{files.length > 1 ? "s" : ""} already parsed.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href="/phase3"
+                className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Open Dashboard
+              </a>
+            </div>
+          </section>
+        )}
 
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700 hover:border-blue-500 hover:bg-blue-50">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-slate-900">Upload &amp; Parse</h2>
+          <p className="mt-1 text-sm text-slate-600">Drop PDFs here. PDF only, text-based.</p>
+
+          <div className="mt-4">
+            <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-sm text-slate-700 hover:border-blue-500 hover:bg-blue-50">
               <input
                 type="file"
                 accept=".pdf,.csv,application/pdf,text/csv"
@@ -647,10 +662,12 @@ export default function Home() {
                   setSuccessMsg(null);
                 }}
               />
-              <span className="font-medium">选择文件</span>
-              <span className="text-xs text-slate-500">支持 PDF / CSV</span>
+              <span className="text-base font-medium">Drop PDFs here</span>
+              <span className="text-xs text-slate-500">CommBank only for now. No OCR.</span>
             </label>
+          </div>
 
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="text-sm text-slate-700">{selectedSummary}</div>
 
             <button
@@ -658,22 +675,13 @@ export default function Home() {
               disabled={isUploading || isAutoPipelineRunning}
               className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
-              {isUploading || isAutoPipelineRunning ? "上传并解析中..." : "Upload (Auto Parse)"}
+              {isUploading || isAutoPipelineRunning ? "Uploading..." : "Upload & Parse"}
             </button>
-
-            {files.length > 0 && (
-              <a
-                href="/phase3"
-                className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Continue
-              </a>
-            )}
           </div>
 
           {error && (
             <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              错误（{error.code}）：{error.message}
+              {error.code}: {error.message}
             </div>
           )}
           {successMsg && (
@@ -703,23 +711,29 @@ export default function Home() {
           )}
 
           <div className="mt-3 text-xs text-slate-500">
-            session: {sessionUserId ? `${sessionUserId.slice(0, 8)}...` : "initializing"} ·
-            returning user: {files.length > 0 ? "yes" : "no"}
+            CommBank only for now. No OCR.
+          </div>
+          <div className="sr-only">
+            session {sessionUserId ? "ready" : "initializing"}
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <details className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-700">
+            Advanced: File Library &amp; Debug
+          </summary>
+          <section className="mt-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-semibold text-slate-900">已上传文件列表</h2>
-              <p className="text-sm text-slate-600">每次刷新或重新打开页面都会从 uploads/index.json 读取。</p>
+              <h2 className="text-xl font-semibold text-slate-900">File Library</h2>
+              <p className="text-sm text-slate-600">Download, delete, and re-run parse actions.</p>
             </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setShowAdvancedActions((prev) => !prev)}
                 className="text-sm font-medium text-slate-600 hover:text-slate-800"
               >
-                {showAdvancedActions ? "Hide Advanced" : "Show Advanced"}
+                {showAdvancedActions ? "Hide Debug actions" : "Show Debug actions"}
               </button>
               <button
                 onClick={() => {
@@ -731,7 +745,7 @@ export default function Home() {
                 {isClearingAll ? "Clearing..." : "Delete All"}
               </button>
               <button onClick={fetchFiles} className="text-sm font-medium text-blue-600 hover:text-blue-700">
-                刷新
+                Refresh
               </button>
             </div>
           </div>
@@ -750,11 +764,11 @@ export default function Home() {
               <tbody>
                 {isLoadingList ? (
                   <tr>
-                    <td colSpan={5} className="px-3 py-4 text-center text-slate-500">加载中...</td>
+                    <td colSpan={5} className="px-3 py-4 text-center text-slate-500">Loading...</td>
                   </tr>
                 ) : files.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-3 py-4 text-center text-slate-500">暂无文件，请先上传。</td>
+                    <td colSpan={5} className="px-3 py-4 text-center text-slate-500">No files yet.</td>
                   </tr>
                 ) : (
                   files.map((file) => (
@@ -766,11 +780,12 @@ export default function Home() {
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <a href={`/api/files/${file.id}/download`} className="text-blue-600 hover:underline">
-                            下载
+                            Download
                           </a>
 
                           {showAdvancedActions && isPdfFile(file) && (
                             <>
+                              <span className="text-[11px] text-slate-400">Debug actions:</span>
                               <button
                                 onClick={() => {
                                   void handleExtractText(file, false);
@@ -798,7 +813,7 @@ export default function Home() {
                                 disabled={parsingTxFileId === file.id}
                                 className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                {parsingTxFileId === file.id ? "Parsing..." : "Parse Transactions"}
+                                {parsingTxFileId === file.id ? "Parsing..." : "Re-run parse"}
                               </button>
                             </>
                           )}
@@ -823,19 +838,19 @@ export default function Home() {
 
           {extractError && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              文本抽取错误（{extractError.code}）：{extractError.message}
+              Extract error ({extractError.code}): {extractError.message}
             </div>
           )}
 
           {segmentError && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              分段错误（{segmentError.code}）：{segmentError.message}
+              Segment error ({segmentError.code}): {segmentError.message}
             </div>
           )}
 
           {txError && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              交易解析错误（{txError.code}）：{txError.message}
+              Parse error ({txError.code}): {txError.message}
             </div>
           )}
 
@@ -1062,7 +1077,8 @@ export default function Home() {
               )}
             </div>
           )}
-        </section>
+          </section>
+        </details>
       </div>
     </main>
   );
