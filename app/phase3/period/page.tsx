@@ -1,15 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bar,
   CartesianGrid,
-  Cell,
   ComposedChart,
   Legend,
   Line,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
   XAxis,
@@ -119,33 +116,6 @@ const CATEGORY_GROUPS: Array<{ label: string; options: CategoryOption[] }> = [
   { label: "Other / Uncategorized", options: ["Fees/Interest/Bank", "Other"] },
 ];
 
-const PIE_COLORS = [
-  "#0f766e",
-  "#0369a1",
-  "#2563eb",
-  "#7c3aed",
-  "#be185d",
-  "#dc2626",
-  "#ca8a04",
-  "#059669",
-];
-
-type PieRow = {
-  category: string;
-  amount: number;
-  share: number;
-  transactionIds: string[];
-  topMerchants?: Array<{ merchantNorm: string; amount: number }>;
-  recentTransactions?: Array<{
-    id: string;
-    date: string;
-    merchantNorm: string;
-    amount: number;
-    descriptionRaw: string;
-  }>;
-  fill: string;
-};
-
 type CashflowPoint = {
   xLabel: string;
   fullLabel: string;
@@ -211,30 +181,6 @@ function clampIndex(nextIndex: number, length: number) {
   return nextIndex;
 }
 
-function clampPieTooltip(params: {
-  chartX: number;
-  chartY: number;
-  containerWidth: number;
-  containerHeight: number;
-}) {
-  const offset = 18;
-  const tooltipWidth = 320;
-  const tooltipHeight = 170;
-  let x = params.chartX + offset;
-  let y = params.chartY + offset;
-
-  if (x + tooltipWidth > params.containerWidth - 8) {
-    x = params.chartX - tooltipWidth - offset;
-  }
-  if (y + tooltipHeight > params.containerHeight - 8) {
-    y = params.chartY - tooltipHeight - offset;
-  }
-
-  if (x < 8) x = 8;
-  if (y < 8) y = 8;
-  return { x, y };
-}
-
 function dayLabel(date: string) {
   return date.slice(8, 10);
 }
@@ -247,44 +193,6 @@ function addDays(base: Date, delta: number) {
 
 function monthKeyFromDate(date: Date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
-}
-
-function CategoryTooltipCard(props: { row: PieRow }) {
-  const row = props.row;
-  if (
-    process.env.NODE_ENV !== "production" &&
-    typeof window !== "undefined" &&
-    (window as { __PIE_TOOLTIP_DEBUG__?: boolean }).__PIE_TOOLTIP_DEBUG__
-  ) {
-    console.debug("[pie-tooltip]", row.category, row.amount, row.share);
-  }
-
-  return (
-    <div className="max-w-[320px] rounded-xl border border-slate-200 bg-white p-2 text-xs text-slate-700 shadow-lg">
-      <div className="font-semibold text-slate-900">{row.category}</div>
-      <div className="mt-1">
-        total {CURRENCY.format(row.amount)} · {row.transactionIds.length} tx · {PERCENT.format(row.share)}
-      </div>
-      <div className="mt-2 text-slate-500">Top merchants</div>
-      <div>
-        {(row.topMerchants || []).slice(0, 3).map((item) => (
-          <div key={item.merchantNorm}>
-            {item.merchantNorm}: {CURRENCY.format(item.amount)}
-          </div>
-        ))}
-        {!(row.topMerchants || []).length && <div>-</div>}
-      </div>
-      <div className="mt-2 text-slate-500">Recent transactions</div>
-      <div>
-        {(row.recentTransactions || []).slice(0, 5).map((item) => (
-          <div key={item.id} className="truncate">
-            {item.date} · {item.merchantNorm} · {CURRENCY.format(item.amount)}
-          </div>
-        ))}
-        {!(row.recentTransactions || []).length && <div>-</div>}
-      </div>
-    </div>
-  );
 }
 
 function GroupedCategorySelect(props: {
@@ -324,12 +232,6 @@ export default function Phase3PeriodPage() {
   const [error, setError] = useState<ApiError | null>(null);
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [pieTooltip, setPieTooltip] = useState<{
-    row: PieRow | null;
-    x: number;
-    y: number;
-    visible: boolean;
-  }>({ row: null, x: 0, y: 0, visible: false });
   const [drilldownRows, setDrilldownRows] = useState<DrilldownTx[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
   const [drilldownError, setDrilldownError] = useState<ApiError | null>(null);
@@ -343,7 +245,6 @@ export default function Phase3PeriodPage() {
   const [rowCategoryDraft, setRowCategoryDraft] = useState<Record<string, CategoryOption>>({});
   const [rowSavingTxId, setRowSavingTxId] = useState<string | null>(null);
   const [rowStatus, setRowStatus] = useState("");
-  const pieCardRef = useRef<HTMLDivElement | null>(null);
 
   const selectedFileNames = useMemo(
     () =>
@@ -440,19 +341,10 @@ export default function Phase3PeriodPage() {
     return Math.ceil(cashflowSeries.length / 8);
   }, [cashflowSeries.length]);
 
-  const spendRows = (overview?.spendByCategory || []).slice(0, 8);
-  const pieData = useMemo<PieRow[]>(
-    () =>
-      spendRows.map((row, index) => ({
-        ...row,
-        fill: PIE_COLORS[index % PIE_COLORS.length],
-      })),
+  const spendRows = (overview?.spendByCategory || []).slice(0, 10);
+  const maxCategoryAmount = useMemo(
+    () => Math.max(0, ...spendRows.map((row) => row.amount)),
     [spendRows]
-  );
-
-  const selectedPieData = useMemo(
-    () => pieData.filter((row) => row.category === selectedCategory),
-    [pieData, selectedCategory]
   );
 
   const selectedMerchantItem = useMemo(
@@ -464,40 +356,6 @@ export default function Phase3PeriodPage() {
     () => triageItems.reduce((sum, item) => sum + item.totalSpend, 0),
     [triageItems]
   );
-
-  const handlePieMouseMove = useCallback((state: unknown) => {
-    const event = state as {
-      chartX?: number;
-      chartY?: number;
-      activePayload?: Array<{ payload?: PieRow }>;
-    };
-
-    const row = event.activePayload?.[0]?.payload;
-    const chartX = event.chartX;
-    const chartY = event.chartY;
-    const container = pieCardRef.current;
-
-    if (!row || typeof chartX !== "number" || typeof chartY !== "number" || !container) {
-      setPieTooltip((prev) =>
-        prev.visible ? { ...prev, visible: false, row: null } : prev
-      );
-      return;
-    }
-
-    const next = clampPieTooltip({
-      chartX,
-      chartY,
-      containerWidth: container.clientWidth,
-      containerHeight: container.clientHeight,
-    });
-
-    setPieTooltip({
-      row,
-      x: next.x,
-      y: next.y,
-      visible: true,
-    });
-  }, []);
 
   const setTimelineIndex = useCallback(
     (nextIndex: number) => {
@@ -1069,74 +927,22 @@ export default function Phase3PeriodPage() {
                 Clear selection
               </button>
             </div>
-            <div className="mt-4 grid gap-4 sm:grid-cols-[240px_1fr]">
-              <div
-                ref={pieCardRef}
-                className="relative mx-auto h-56 w-56 overflow-visible"
-              >
-                <PieChart
-                  width={224}
-                  height={224}
-                  onMouseMove={handlePieMouseMove}
-                  onMouseLeave={() =>
-                    setPieTooltip((prev) =>
-                      prev.visible ? { ...prev, visible: false, row: null } : prev
-                    )
-                  }
-                >
-                  <Pie
-                    data={pieData}
-                    dataKey="amount"
-                    nameKey="category"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={88}
-                    isAnimationActive
-                    animationDuration={200}
-                    onClick={(_, index) => {
-                      const next = pieData[index];
-                      if (next) setSelectedCategory(next.category);
-                    }}
-                  >
-                    {pieData.map((row) => (
-                      <Cell key={row.category} fill={row.fill} />
-                    ))}
-                  </Pie>
-                  <Pie
-                    data={selectedPieData}
-                    dataKey="amount"
-                    nameKey="category"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={96}
-                    isAnimationActive
-                    animationDuration={180}
-                    stroke="#ffffff"
-                    strokeWidth={1}
-                  >
-                    {selectedPieData.map((row) => (
-                      <Cell key={`${row.category}-active`} fill={row.fill} />
-                    ))}
-                  </Pie>
-                </PieChart>
-                {pieTooltip.visible && pieTooltip.row && (
-                  <div
-                    className="pointer-events-none absolute z-50 transition-opacity duration-100"
-                    style={{ left: pieTooltip.x, top: pieTooltip.y }}
-                  >
-                    <CategoryTooltipCard row={pieTooltip.row} />
-                  </div>
-                )}
-              </div>
-              <div className="space-y-2">
-                {spendRows.map((row) => (
+            <div className="mt-4 space-y-2">
+              {spendRows.map((row) => {
+                const widthPct =
+                  maxCategoryAmount > 0
+                    ? Math.max(3, (row.amount / maxCategoryAmount) * 100)
+                    : 0;
+                return (
                   <button
                     key={row.category}
                     type="button"
                     onClick={() => setSelectedCategory(row.category)}
-                    className={`w-full rounded border px-3 py-2 text-left text-xs transition-all duration-200 ${selectedCategory === row.category ? "scale-[1.01] border-blue-300 bg-blue-50 shadow-sm ring-1 ring-blue-200" : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"}`}
+                    className={`w-full rounded border px-3 py-2 text-left text-xs transition ${
+                      selectedCategory === row.category
+                        ? "border-blue-300 bg-blue-50 ring-1 ring-blue-200"
+                        : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"
+                    }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-slate-800">{row.category}</span>
@@ -1145,10 +951,20 @@ export default function Phase3PeriodPage() {
                     <div className="mt-1 text-slate-500">
                       {PERCENT.format(row.share)} · {row.transactionIds.length} tx
                     </div>
+                    <div className="mt-2 h-2 w-full rounded bg-slate-200">
+                      <div
+                        className="h-2 rounded bg-blue-500"
+                        style={{ width: `${widthPct}%` }}
+                      />
+                    </div>
                   </button>
-                ))}
-                {!spendRows.length && <p className="text-sm text-slate-500">No spending categories in this period.</p>}
-              </div>
+                );
+              })}
+              {!spendRows.length && (
+                <p className="text-sm text-slate-500">
+                  No spending categories in this period.
+                </p>
+              )}
             </div>
           </article>
         </section>
@@ -1204,7 +1020,7 @@ export default function Phase3PeriodPage() {
                 <p className="text-sm text-slate-500">
                   {selectedCategory
                     ? "No transactions for selected category in this period."
-                    : "Select a category from the chart or list to open drilldown."}
+                    : "Select a category from the breakdown list to open drilldown."}
                 </p>
               )}
               {rowStatus && <p className="text-xs text-slate-600">{rowStatus}</p>}
