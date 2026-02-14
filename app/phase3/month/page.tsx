@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Cell,
+  Pie,
+  PieChart,
+  Tooltip,
+} from "recharts";
+import {
   ApiError,
   FileMeta,
   OverviewResponse,
@@ -96,35 +102,78 @@ function readScopeLabel(value: unknown, fallback: ScopeMode) {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
 
-function makeDonutStyle(items: Array<{ share: number }>) {
-  if (items.length === 0) {
-    return { background: "conic-gradient(#e2e8f0 0deg 360deg)" } as const;
+const PIE_COLORS = [
+  "#0f766e",
+  "#0369a1",
+  "#2563eb",
+  "#7c3aed",
+  "#be185d",
+  "#dc2626",
+  "#ca8a04",
+  "#059669",
+];
+
+type PieRow = {
+  category: string;
+  amount: number;
+  share: number;
+  transactionIds: string[];
+  topMerchants?: Array<{ merchantNorm: string; amount: number }>;
+  recentTransactions?: Array<{
+    id: string;
+    date: string;
+    merchantNorm: string;
+    amount: number;
+    descriptionRaw: string;
+  }>;
+  fill: string;
+};
+
+function CategoryPieTooltip(props: {
+  active?: boolean;
+  payload?: Array<{ payload?: PieRow }>;
+}) {
+  if (!props.active || !props.payload || props.payload.length === 0) {
+    return null;
   }
 
-  const palette = [
-    "#0f766e",
-    "#0369a1",
-    "#2563eb",
-    "#7c3aed",
-    "#be185d",
-    "#dc2626",
-    "#ca8a04",
-    "#059669",
-  ];
+  const row = props.payload[0]?.payload;
+  if (!row) return null;
 
-  let cursor = 0;
-  const pieces = items.map((item, index) => {
-    const start = cursor;
-    const end = cursor + item.share * 360;
-    cursor = end;
-    return `${palette[index % palette.length]} ${start}deg ${end}deg`;
-  });
-
-  if (cursor < 360) {
-    pieces.push(`#e2e8f0 ${cursor}deg 360deg`);
+  if (
+    process.env.NODE_ENV !== "production" &&
+    typeof window !== "undefined" &&
+    (window as { __PIE_TOOLTIP_DEBUG__?: boolean }).__PIE_TOOLTIP_DEBUG__
+  ) {
+    console.debug("[pie-tooltip]", row.category, row.amount, row.share);
   }
 
-  return { background: `conic-gradient(${pieces.join(", ")})` } as const;
+  return (
+    <div className="w-[320px] rounded-lg border border-slate-300 bg-white p-2 text-[11px] text-slate-700 shadow-xl">
+      <div className="font-semibold text-slate-900">{row.category}</div>
+      <div className="mt-1">
+        total {CURRENCY.format(row.amount)} · {row.transactionIds.length} tx · {PERCENT.format(row.share)}
+      </div>
+      <div className="mt-2 text-slate-500">Top merchants</div>
+      <div>
+        {(row.topMerchants || []).slice(0, 3).map((item) => (
+          <div key={item.merchantNorm}>
+            {item.merchantNorm}: {CURRENCY.format(item.amount)}
+          </div>
+        ))}
+        {!(row.topMerchants || []).length && <div>-</div>}
+      </div>
+      <div className="mt-2 text-slate-500">Recent transactions</div>
+      <div>
+        {(row.recentTransactions || []).slice(0, 5).map((item) => (
+          <div key={item.id} className="truncate">
+            {item.date} · {item.merchantNorm} · {CURRENCY.format(item.amount)}
+          </div>
+        ))}
+        {!(row.recentTransactions || []).length && <div>-</div>}
+      </div>
+    </div>
+  );
 }
 
 export default function Phase3MonthPage() {
@@ -167,7 +216,14 @@ export default function Phase3MonthPage() {
   );
 
   const spendRows = (overview?.spendByCategory || []).slice(0, 8);
-  const donutStyle = useMemo(() => makeDonutStyle(spendRows), [spendRows]);
+  const pieData = useMemo<PieRow[]>(
+    () =>
+      spendRows.map((row, index) => ({
+        ...row,
+        fill: PIE_COLORS[index % PIE_COLORS.length],
+      })),
+    [spendRows]
+  );
   const selectedMerchantItem = useMemo(
     () => triageItems.find((item) => item.merchantNorm === selectedMerchant) || null,
     [triageItems, selectedMerchant]
@@ -511,22 +567,41 @@ export default function Phase3MonthPage() {
             </div>
           </article>
 
-          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <article className="overflow-visible rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Spend by Category</h2>
             <p className="mt-1 text-sm text-slate-600">Hover for details. Click to open embedded drilldown.</p>
-            <div className="mt-4 grid gap-4 sm:grid-cols-[200px_1fr]">
-              <div
-                className="mx-auto h-48 w-48 rounded-full border border-slate-200"
-                style={donutStyle}
-                aria-label="Spend by category donut"
-              />
+            <div className="mt-4 grid gap-4 sm:grid-cols-[240px_1fr]">
+              <div className="relative mx-auto h-56 w-56 overflow-visible">
+                <PieChart width={224} height={224}>
+                  <Pie
+                    data={pieData}
+                    dataKey="amount"
+                    nameKey="category"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={50}
+                    outerRadius={88}
+                    isAnimationActive
+                    animationDuration={200}
+                    onClick={(_, index) => {
+                      const next = pieData[index];
+                      if (next) setSelectedCategory(next.category);
+                    }}
+                  >
+                    {pieData.map((row) => (
+                      <Cell key={row.category} fill={row.fill} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<CategoryPieTooltip />} wrapperStyle={{ zIndex: 70 }} />
+                </PieChart>
+              </div>
               <div className="space-y-2">
                 {spendRows.map((row) => (
                   <button
                     key={row.category}
                     type="button"
                     onClick={() => setSelectedCategory(row.category)}
-                    className={`group relative w-full rounded border px-3 py-2 text-left text-xs ${selectedCategory === row.category ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"}`}
+                    className={`w-full rounded border px-3 py-2 text-left text-xs ${selectedCategory === row.category ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"}`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-slate-800">{row.category}</span>
@@ -534,31 +609,6 @@ export default function Phase3MonthPage() {
                     </div>
                     <div className="mt-1 text-slate-500">
                       {PERCENT.format(row.share)} · {row.transactionIds.length} tx
-                    </div>
-
-                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-[320px] rounded-lg border border-slate-300 bg-white p-2 text-[11px] text-slate-700 shadow-xl group-hover:block">
-                      <div className="font-semibold text-slate-900">{row.category}</div>
-                      <div className="mt-1">
-                        total {CURRENCY.format(row.amount)} · {row.transactionIds.length} tx
-                      </div>
-                      <div className="mt-2 text-slate-500">Top merchants</div>
-                      <div>
-                        {(row.topMerchants || []).slice(0, 3).map((item) => (
-                          <div key={item.merchantNorm}>
-                            {item.merchantNorm}: {CURRENCY.format(item.amount)}
-                          </div>
-                        ))}
-                        {!(row.topMerchants || []).length && <div>-</div>}
-                      </div>
-                      <div className="mt-2 text-slate-500">Recent transactions</div>
-                      <div>
-                        {(row.recentTransactions || []).slice(0, 5).map((item) => (
-                          <div key={item.id} className="truncate">
-                            {item.date} · {item.merchantNorm} · {CURRENCY.format(item.amount)}
-                          </div>
-                        ))}
-                        {!(row.recentTransactions || []).length && <div>-</div>}
-                      </div>
                     </div>
                   </button>
                 ))}
