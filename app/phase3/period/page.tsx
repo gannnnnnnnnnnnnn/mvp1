@@ -247,6 +247,7 @@ export default function Phase3PeriodPage() {
   const [inboxPulse, setInboxPulse] = useState(false);
   const [rowCategoryDraft, setRowCategoryDraft] = useState<Record<string, CategoryOption>>({});
   const [rowSavingTxId, setRowSavingTxId] = useState<string | null>(null);
+  const [rowSavingMerchantNorm, setRowSavingMerchantNorm] = useState<string | null>(null);
   const [rowStatus, setRowStatus] = useState("");
   const triageSectionRef = useRef<HTMLElement | null>(null);
 
@@ -576,7 +577,7 @@ export default function Phase3PeriodPage() {
           return;
         }
 
-        setRowStatus(`Updated transaction category to ${category}.`);
+        setRowStatus(`Saved: fixed this transaction to ${category}.`);
         if (selectedCategory) {
           await fetchCategoryDrilldown(selectedCategory);
         }
@@ -585,6 +586,47 @@ export default function Phase3PeriodPage() {
         setRowStatus("Failed to update transaction category.");
       } finally {
         setRowSavingTxId(null);
+      }
+    },
+    [rowCategoryDraft, selectedCategory, fetchCategoryDrilldown, fetchTriage]
+  );
+
+  const applyMerchantCategoryFromRow = useCallback(
+    async (tx: DrilldownTx) => {
+      const category = rowCategoryDraft[tx.id] || "Other";
+      if (!tx.merchantNorm) {
+        setRowStatus("Cannot save merchant rule: missing merchant.");
+        return;
+      }
+
+      setRowSavingMerchantNorm(tx.merchantNorm);
+      setRowStatus("");
+      try {
+        const res = await fetch("/api/analysis/category-override", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            merchantNorm: tx.merchantNorm,
+            category,
+            applyToMerchant: true,
+          }),
+        });
+
+        const data = (await res.json()) as { ok: true } | { ok: false; error: ApiError };
+        if (!data.ok) {
+          setRowStatus(`${data.error.code}: ${data.error.message}`);
+          return;
+        }
+
+        setRowStatus(`Saved: learned rule ${tx.merchantNorm} → ${category}.`);
+        if (selectedCategory) {
+          await fetchCategoryDrilldown(selectedCategory);
+        }
+        await fetchTriage();
+      } catch {
+        setRowStatus("Failed to save merchant rule.");
+      } finally {
+        setRowSavingMerchantNorm(null);
       }
     },
     [rowCategoryDraft, selectedCategory, fetchCategoryDrilldown, fetchTriage]
@@ -994,6 +1036,9 @@ export default function Phase3PeriodPage() {
               <h2 className="text-lg font-semibold text-slate-900">Category Drilldown</h2>
               <span className="text-xs text-slate-500">{selectedCategory || "overview"}</span>
             </div>
+            <p className="mt-1 text-sm text-slate-600">
+              Wrong category? Pick the right one. We can fix this row or learn a rule for this merchant.
+            </p>
 
             {drilldownError && (
               <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -1011,8 +1056,23 @@ export default function Phase3PeriodPage() {
                     </span>
                   </div>
                   <div className="mt-1 truncate text-slate-700">{tx.descriptionRaw}</div>
-                  <div className="mt-1 text-[11px] text-slate-500">
-                    {tx.merchantNorm} · {tx.categorySource} · conf {tx.quality.confidence.toFixed(2)}
+                  <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
+                    <span>{tx.merchantNorm} · {tx.categorySource} · conf {tx.quality.confidence.toFixed(2)}</span>
+                    {(tx.categorySource === "default" || tx.category === "Other") && (
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                        Needs review: Uncategorized
+                      </span>
+                    )}
+                    {tx.quality.confidence < 0.6 && (
+                      <span className="rounded bg-rose-100 px-1.5 py-0.5 text-rose-800">
+                        Needs review: low confidence {tx.quality.confidence.toFixed(2)}
+                      </span>
+                    )}
+                    {tx.categorySource !== "default" && tx.category !== "Other" && tx.quality.confidence >= 0.6 && (
+                      <span className="rounded bg-slate-200 px-1.5 py-0.5 text-slate-700">
+                        In selected category
+                      </span>
+                    )}
                   </div>
                   <div className="mt-2 flex items-center gap-2">
                     <GroupedCategorySelect
@@ -1028,7 +1088,17 @@ export default function Phase3PeriodPage() {
                       disabled={rowSavingTxId === tx.id}
                       className="h-8 rounded bg-blue-600 px-2 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                     >
-                      {rowSavingTxId === tx.id ? "Saving..." : "Apply"}
+                      {rowSavingTxId === tx.id ? "Saving..." : "Fix this transaction"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void applyMerchantCategoryFromRow(tx)}
+                      disabled={rowSavingMerchantNorm === tx.merchantNorm}
+                      className="h-8 rounded border border-blue-300 bg-white px-2 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {rowSavingMerchantNorm === tx.merchantNorm
+                        ? "Saving..."
+                        : "Fix all from this merchant"}
                     </button>
                   </div>
                 </div>
