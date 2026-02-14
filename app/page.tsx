@@ -87,12 +87,23 @@ type ParseTransactionsResult = {
   debug?: SegmentDebug;
 };
 
+type PipelineStatus = {
+  fileId: string;
+  fileName: string;
+  stage: "uploading" | "parsing" | "done" | "failed";
+  message?: string;
+  txCount?: number;
+};
+
 export default function Home() {
   // Local UI state hooks.
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isAutoPipelineRunning, setIsAutoPipelineRunning] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [pipelineStatuses, setPipelineStatuses] = useState<PipelineStatus[]>([]);
+  const [showAdvancedActions, setShowAdvancedActions] = useState(false);
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
 
@@ -157,6 +168,90 @@ export default function Home() {
     }
   };
 
+  const upsertPipelineStatus = (next: PipelineStatus) => {
+    setPipelineStatuses((prev) => {
+      const idx = prev.findIndex((item) => item.fileId === next.fileId);
+      if (idx === -1) return [...prev, next];
+      const clone = [...prev];
+      clone[idx] = { ...clone[idx], ...next };
+      return clone;
+    });
+  };
+
+  const runAutoPipeline = async (file: FileMeta) => {
+    upsertPipelineStatus({
+      fileId: file.id,
+      fileName: file.originalName,
+      stage: "parsing",
+      message: "Running extract/segment/parse...",
+    });
+
+    const res = await fetch("/api/pipeline/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: file.id }),
+    });
+
+    const data = (await res.json()) as
+      | {
+          ok: true;
+          txCount?: number;
+          parsed?: {
+            ok: true;
+            templateType?: "commbank_manual_amount_balance" | "commbank_auto_debit_credit" | "unknown";
+            transactions: ParsedTransaction[];
+            warnings: ParseWarning[];
+            quality?: ParseQuality;
+            needsReview?: boolean;
+            reviewReasons?: string[];
+            sectionTextPreview?: string;
+            debug?: SegmentDebug;
+          };
+          cached?: { text?: boolean; segment?: boolean; parsed?: boolean };
+        }
+      | { ok: false; error: ApiError };
+
+    if (!data.ok) {
+      upsertPipelineStatus({
+        fileId: file.id,
+        fileName: file.originalName,
+        stage: "failed",
+        message: `${data.error.code}: ${data.error.message}`,
+      });
+      return;
+    }
+
+    if (data.parsed?.ok) {
+      setTxResult({
+        fileId: file.id,
+        originalName: file.originalName,
+        templateType: data.parsed.templateType ?? "unknown",
+        transactions: data.parsed.transactions,
+        warnings: data.parsed.warnings,
+        quality: data.parsed.quality,
+        needsReview: data.parsed.needsReview === true,
+        reviewReasons: Array.isArray(data.parsed.reviewReasons) ? data.parsed.reviewReasons : [],
+        sectionTextPreview:
+          typeof data.parsed.sectionTextPreview === "string"
+            ? data.parsed.sectionTextPreview
+            : "",
+        debug: data.parsed.debug,
+      });
+    }
+
+    const cacheHint = data.cached
+      ? `cache(text:${data.cached.text ? "Y" : "N"}, segment:${data.cached.segment ? "Y" : "N"}, parsed:${data.cached.parsed ? "Y" : "N"})`
+      : "";
+
+    upsertPipelineStatus({
+      fileId: file.id,
+      fileName: file.originalName,
+      stage: "done",
+      txCount: data.txCount,
+      message: `Pipeline complete. ${cacheHint}`.trim(),
+    });
+  };
+
   /**
    * Upload handler: validates presence of a selected file then POSTs to API.
    */
@@ -167,6 +262,7 @@ export default function Home() {
     }
 
     setIsUploading(true);
+    setIsAutoPipelineRunning(true);
     setError(null);
     setSuccessMsg(null);
 
@@ -185,13 +281,21 @@ export default function Home() {
         return;
       }
 
-      setSuccessMsg("上传成功！");
+      upsertPipelineStatus({
+        fileId: data.file.id,
+        fileName: data.file.originalName,
+        stage: "uploading",
+        message: "Uploaded. Queueing pipeline...",
+      });
+      setSuccessMsg("上传成功，正在自动执行解析流水线...");
+      await runAutoPipeline(data.file as FileMeta);
       setSelectedFile(null);
       await fetchFiles();
     } catch {
       setError({ code: "UPLOAD_FAILED", message: "上传失败，请稍后重试。" });
     } finally {
       setIsUploading(false);
+      setIsAutoPipelineRunning(false);
     }
   };
 
@@ -530,10 +634,10 @@ export default function Home() {
 
             <button
               onClick={handleUpload}
-              disabled={isUploading}
+              disabled={isUploading || isAutoPipelineRunning}
               className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
-              {isUploading ? "上传中..." : "Upload"}
+              {isUploading || isAutoPipelineRunning ? "上传并解析中..." : "Upload (Auto Parse)"}
             </button>
           </div>
 
@@ -547,6 +651,26 @@ export default function Home() {
               {successMsg}
             </div>
           )}
+
+          {pipelineStatuses.length > 0 && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Auto Pipeline Progress
+              </div>
+              <div className="mt-2 space-y-2 text-xs text-slate-700">
+                {pipelineStatuses.map((item) => (
+                  <div key={item.fileId} className="rounded border border-slate-200 bg-white p-2">
+                    <div className="font-medium text-slate-800">{item.fileName}</div>
+                    <div className="mt-1">
+                      stage: {item.stage}
+                      {typeof item.txCount === "number" ? ` · txCount: ${item.txCount}` : ""}
+                    </div>
+                    {item.message && <div className="mt-1 text-slate-600">{item.message}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -556,6 +680,12 @@ export default function Home() {
               <p className="text-sm text-slate-600">每次刷新或重新打开页面都会从 uploads/index.json 读取。</p>
             </div>
             <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowAdvancedActions((prev) => !prev)}
+                className="text-sm font-medium text-slate-600 hover:text-slate-800"
+              >
+                {showAdvancedActions ? "Hide Advanced" : "Show Advanced"}
+              </button>
               <button
                 onClick={() => {
                   void handleDeleteAll();
@@ -604,7 +734,7 @@ export default function Home() {
                             下载
                           </a>
 
-                          {isPdfFile(file) && (
+                          {showAdvancedActions && isPdfFile(file) && (
                             <>
                               <button
                                 onClick={() => {
