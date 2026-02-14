@@ -1,7 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Cell, Pie, PieChart } from "recharts";
+import {
+  Bar,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
+  Line,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import {
   ApiError,
   FileMeta,
@@ -118,6 +131,15 @@ type PieRow = {
   fill: string;
 };
 
+type CashflowPoint = {
+  xLabel: string;
+  fullLabel: string;
+  income: number;
+  spend: number;
+  net: number;
+  txCount: number;
+};
+
 function readScopeLabel(value: unknown, fallback: ScopeMode) {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
@@ -182,6 +204,20 @@ function clampPieTooltip(params: {
   if (x < 8) x = 8;
   if (y < 8) y = 8;
   return { x, y };
+}
+
+function dayLabel(date: string) {
+  return date.slice(8, 10);
+}
+
+function addDays(base: Date, delta: number) {
+  const copy = new Date(base);
+  copy.setUTCDate(copy.getUTCDate() + delta);
+  return copy;
+}
+
+function monthKeyFromDate(date: Date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function CategoryTooltipCard(props: { row: PieRow }) {
@@ -271,10 +307,65 @@ export default function Phase3PeriodPage() {
     [overview?.monthDailySeries]
   );
 
-  const maxPeriod = useMemo(
-    () => Math.max(0, ...dailySeries.map((row) => Math.max(row.income, row.spend))),
-    [dailySeries]
-  );
+  const cashflowSeries = useMemo<CashflowPoint[]>(() => {
+    if (!periodKey) return [];
+    const range = periodRange(periodType, periodKey);
+    if (!range) return [];
+
+    if (periodType === "month") {
+      const start = new Date(`${range.dateFrom}T00:00:00Z`);
+      const end = new Date(`${range.dateTo}T00:00:00Z`);
+      const map = new Map(
+        dailySeries.map((row) => [row.date, row] as const)
+      );
+      const points: CashflowPoint[] = [];
+      for (let cursor = start; cursor <= end; cursor = addDays(cursor, 1)) {
+        const key = cursor.toISOString().slice(0, 10);
+        const existing = map.get(key);
+        const income = existing?.income || 0;
+        const spend = existing?.spend || 0;
+        points.push({
+          xLabel: dayLabel(key),
+          fullLabel: key,
+          income,
+          spend,
+          net: income - spend,
+          txCount: existing?.transactionIds.length || 0,
+        });
+      }
+      return points;
+    }
+
+    const monthSeries = overview?.datasetMonthlySeries || [];
+    const monthMap = new Map(monthSeries.map((row) => [row.month, row] as const));
+    const start = new Date(`${range.dateFrom}T00:00:00Z`);
+    const end = new Date(`${range.dateTo}T00:00:00Z`);
+    const points: CashflowPoint[] = [];
+
+    for (
+      let cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+      cursor <= end;
+      cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1))
+    ) {
+      const monthKey = monthKeyFromDate(cursor);
+      const existing = monthMap.get(monthKey);
+      points.push({
+        xLabel: monthKey,
+        fullLabel: monthKey,
+        income: existing?.income || 0,
+        spend: existing?.spend || 0,
+        net: existing?.net || 0,
+        txCount: existing?.transactionIds.length || 0,
+      });
+    }
+
+    return points;
+  }, [periodKey, periodType, dailySeries, overview?.datasetMonthlySeries]);
+
+  const xTickInterval = useMemo(() => {
+    if (cashflowSeries.length <= 12) return 0;
+    return Math.ceil(cashflowSeries.length / 8);
+  }, [cashflowSeries.length]);
 
   const spendRows = (overview?.spendByCategory || []).slice(0, 8);
   const pieData = useMemo<PieRow[]>(
@@ -687,39 +778,68 @@ export default function Phase3PeriodPage() {
         <section className="grid gap-4 xl:grid-cols-2">
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Period Cashflow Trend</h2>
-            <p className="mt-1 text-sm text-slate-600">Income and spend buckets for selected period.</p>
-            <div className="mt-4 space-y-3">
-              {dailySeries.map((row) => (
-                <div key={row.date}>
-                  <div className="flex items-center justify-between text-xs text-slate-600">
-                    <span className="font-medium text-slate-800">{row.date}</span>
-                    <span>{row.transactionIds.length} tx</span>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <div className="h-2 flex-1 rounded-full bg-slate-100">
-                      <div
-                        className="h-2 rounded-full bg-emerald-500"
-                        style={{
-                          width: maxPeriod > 0 ? `${Math.max(2, (row.income / maxPeriod) * 100)}%` : "0%",
-                        }}
-                      />
-                    </div>
-                    <span className="w-20 text-right text-[11px] text-slate-600">{CURRENCY.format(row.income)}</span>
-                  </div>
-                  <div className="mt-1 flex items-center gap-2">
-                    <div className="h-2 flex-1 rounded-full bg-slate-100">
-                      <div
-                        className="h-2 rounded-full bg-rose-500"
-                        style={{
-                          width: maxPeriod > 0 ? `${Math.max(2, (row.spend / maxPeriod) * 100)}%` : "0%",
-                        }}
-                      />
-                    </div>
-                    <span className="w-20 text-right text-[11px] text-slate-600">{CURRENCY.format(row.spend)}</span>
-                  </div>
-                </div>
-              ))}
-              {!dailySeries.length && <p className="text-sm text-slate-500">No trend points available.</p>}
+            <p className="mt-1 text-sm text-slate-600">
+              Compact chart: income/spend bars with net line.
+            </p>
+            <div className="mt-4 h-64 w-full">
+              {cashflowSeries.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={cashflowSeries}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis
+                      dataKey="xLabel"
+                      interval={xTickInterval}
+                      tick={{ fontSize: 11, fill: "#64748b" }}
+                    />
+                    <YAxis tick={{ fontSize: 11, fill: "#64748b" }} />
+                    <RechartsTooltip
+                      contentStyle={{
+                        borderRadius: 10,
+                        borderColor: "#e2e8f0",
+                        boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+                      }}
+                      formatter={(value, name) => {
+                        const numeric =
+                          typeof value === "number" ? value : Number(value || 0);
+                        return [
+                          CURRENCY.format(numeric),
+                          name === "income"
+                            ? "Income"
+                            : name === "spend"
+                              ? "Spend"
+                              : "Net",
+                        ];
+                      }}
+                      labelFormatter={(label) => {
+                        const found = cashflowSeries.find((row) => row.xLabel === label);
+                        return found?.fullLabel || String(label);
+                      }}
+                    />
+                    <Legend />
+                    <Bar
+                      dataKey="income"
+                      fill="#10b981"
+                      radius={[4, 4, 0, 0]}
+                      barSize={periodType === "month" ? 8 : 16}
+                    />
+                    <Bar
+                      dataKey="spend"
+                      fill="#f43f5e"
+                      radius={[4, 4, 0, 0]}
+                      barSize={periodType === "month" ? 8 : 16}
+                    />
+                    <Line
+                      dataKey="net"
+                      stroke="#2563eb"
+                      strokeWidth={2}
+                      dot={false}
+                      type="monotone"
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-slate-500">No trend points available.</p>
+              )}
             </div>
           </article>
 
