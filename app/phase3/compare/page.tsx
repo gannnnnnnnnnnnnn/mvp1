@@ -34,58 +34,78 @@ type CompareMode =
   | "year_prev"
   | "custom_month";
 
-function periodFromMode(
-  mode: CompareMode,
-  overview: OverviewResponse,
-  customA: string,
-  customB: string
-) {
-  const months = overview.availableMonths || [];
-  const quarters = overview.availableQuarters || [];
-  const years = overview.availableYears || [];
+type DateRange = { dateFrom: string; dateTo: string };
+
+function previousAvailable(values: string[], current: string) {
+  const sorted = [...values].sort();
+  const idx = sorted.indexOf(current);
+  if (idx <= 0) return null;
+  return sorted[idx - 1];
+}
+
+function previousYearMonth(values: string[], current: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(current);
+  if (!match) return null;
+  const target = `${Number(match[1]) - 1}-${match[2]}`;
+  return values.includes(target) ? target : null;
+}
+
+function derivePeriods(params: {
+  mode: CompareMode;
+  overview: OverviewResponse;
+  customA: string;
+  customB: string;
+}): { a: DateRange; b: DateRange; label: string } | null {
+  const months = [...(params.overview.availableMonths || [])].sort();
+  const quarters = [...(params.overview.availableQuarters || [])].sort();
+  const years = [...(params.overview.availableYears || [])].sort();
+
   const latestMonth = months[months.length - 1] || "";
   const latestQuarter = quarters[quarters.length - 1] || "";
   const latestYear = years[years.length - 1] || "";
 
-  if (mode === "custom_month") {
-    const a = monthRange(customA || latestMonth);
-    const b = monthRange(customB || latestMonth);
-    return a && b ? { a, b, label: `Custom ${customA} vs ${customB}` } : null;
+  if (params.mode === "custom_month") {
+    const monthA = params.customA || latestMonth;
+    const monthB =
+      params.customB || previousAvailable(months, monthA) || latestMonth;
+    const a = monthRange(monthA);
+    const b = monthRange(monthB);
+    return a && b ? { a, b, label: `Custom ${monthA} vs ${monthB}` } : null;
   }
 
-  if (mode === "month_last_year") {
+  if (params.mode === "month_last_year") {
     const a = monthRange(latestMonth);
-    if (!a || !latestMonth) return null;
-    const [yearText, monthText] = latestMonth.split("-");
-    const b = monthRange(`${Number(yearText) - 1}-${monthText}`);
-    return b ? { a, b, label: "This month vs same month last year" } : null;
+    const monthB = previousYearMonth(months, latestMonth);
+    const b = monthB ? monthRange(monthB) : null;
+    return a && b
+      ? { a, b, label: "Latest month vs same month last year" }
+      : null;
   }
 
-  if (mode === "quarter_prev") {
+  if (params.mode === "quarter_prev") {
+    const prevQuarter = previousAvailable(quarters, latestQuarter);
     const a = quarterRange(latestQuarter);
-    if (!a || !latestQuarter) return null;
-    const match = /^(\d{4})-Q([1-4])$/.exec(latestQuarter);
-    if (!match) return null;
-    const year = Number(match[1]);
-    const quarter = Number(match[2]);
-    const prevQuarter = quarter === 1 ? `${year - 1}-Q4` : `${year}-Q${quarter - 1}`;
-    const b = quarterRange(prevQuarter);
-    return b ? { a, b, label: "This quarter vs last quarter" } : null;
+    const b = prevQuarter ? quarterRange(prevQuarter) : null;
+    return a && b
+      ? { a, b, label: "Latest quarter vs previous available quarter" }
+      : null;
   }
 
-  if (mode === "year_prev") {
+  if (params.mode === "year_prev") {
+    const prevYear = previousAvailable(years, latestYear);
     const a = yearRange(latestYear);
-    const b = yearRange(String(Number(latestYear || "0") - 1));
-    return a && b ? { a, b, label: "This year vs last year" } : null;
+    const b = prevYear ? yearRange(prevYear) : null;
+    return a && b
+      ? { a, b, label: "Latest year vs previous available year" }
+      : null;
   }
 
+  const prevMonth = previousAvailable(months, latestMonth);
   const a = monthRange(latestMonth);
-  if (!a) return null;
-  const d = new Date(`${a.dateFrom}T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() - 1);
-  const prevMonth = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-  const b = monthRange(prevMonth);
-  return b ? { a, b, label: "This month vs last month" } : null;
+  const b = prevMonth ? monthRange(prevMonth) : null;
+  return a && b
+    ? { a, b, label: "Latest available month vs previous available month" }
+    : null;
 }
 
 function deltaLabel(value: { amount: number; percent: number }) {
@@ -106,6 +126,8 @@ export default function Phase3ComparePage() {
 
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [compare, setCompare] = useState<CompareResponse | null>(null);
+  const [compareLabel, setCompareLabel] = useState("Period A vs Period B");
+  const [friendlyNote, setFriendlyNote] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -129,6 +151,7 @@ export default function Phase3ComparePage() {
   const fetchCompare = useCallback(async (nextScope: ScopeMode, nextIds: string[]) => {
     setIsLoading(true);
     setError(null);
+    setFriendlyNote("");
 
     try {
       const overviewParams = buildScopeParams(nextScope, nextIds);
@@ -146,16 +169,33 @@ export default function Phase3ComparePage() {
       }
 
       setOverview(overviewData);
-      const periods = periodFromMode(compareMode, overviewData, customMonthA, customMonthB);
+      const periods = derivePeriods({
+        mode: compareMode,
+        overview: overviewData,
+        customA: customMonthA,
+        customB: customMonthB,
+      });
+
       if (!periods) {
         setCompare(null);
-        setError({
-          code: "COMPARE_RANGE_UNAVAILABLE",
-          message: "Could not derive comparison periods from current settings.",
-        });
+        setCompareLabel("Period A vs Period B");
+        if (compareMode !== "custom_month") {
+          const months = [...(overviewData.availableMonths || [])].sort();
+          const latestMonth = months[months.length - 1] || "";
+          const previousMonth = previousAvailable(months, latestMonth) || latestMonth;
+          setCustomMonthA(latestMonth);
+          setCustomMonthB(previousMonth);
+          setCompareMode("custom_month");
+          setFriendlyNote(
+            "No valid range for this mode in current dataset. Switched to custom month comparison."
+          );
+        } else {
+          setFriendlyNote("Please pick two available months to compare.");
+        }
         return;
       }
 
+      setCompareLabel(periods.label);
       const compareParams = buildScopeParams(nextScope, nextIds);
       compareParams.set("periodAStart", periods.a.dateFrom);
       compareParams.set("periodAEnd", periods.a.dateTo);
@@ -163,7 +203,9 @@ export default function Phase3ComparePage() {
       compareParams.set("periodBEnd", periods.b.dateTo);
 
       const compareRes = await fetch(`/api/analysis/compare?${compareParams.toString()}`);
-      const compareData = (await compareRes.json()) as CompareResponse | { ok: false; error: ApiError };
+      const compareData = (await compareRes.json()) as
+        | CompareResponse
+        | { ok: false; error: ApiError };
 
       if (!compareData.ok) {
         setCompare(null);
@@ -207,7 +249,7 @@ export default function Phase3ComparePage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold text-slate-900">Compare View</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Period A vs Period B comparison driven by your selected dataset scope.
+            Period A vs Period B comparison driven by available periods in your dataset.
           </p>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-12">
@@ -250,10 +292,10 @@ export default function Phase3ComparePage() {
                 onChange={(e) => setCompareMode(e.target.value as CompareMode)}
                 className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               >
-                <option value="month_prev">This month vs last month</option>
-                <option value="month_last_year">This month vs same month last year</option>
-                <option value="quarter_prev">This quarter vs last quarter</option>
-                <option value="year_prev">This year vs last year</option>
+                <option value="month_prev">Latest month vs previous available month</option>
+                <option value="month_last_year">Latest month vs same month last year</option>
+                <option value="quarter_prev">Latest quarter vs previous available quarter</option>
+                <option value="year_prev">Latest year vs previous available year</option>
                 <option value="custom_month">Custom (month vs month)</option>
               </select>
             </label>
@@ -313,6 +355,12 @@ export default function Phase3ComparePage() {
             </div>
           )}
 
+          {friendlyNote && !error && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              {friendlyNote}
+            </div>
+          )}
+
           {error && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {error.code}: {error.message}
@@ -342,7 +390,11 @@ export default function Phase3ComparePage() {
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Category Movers</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-slate-900">Category Movers</h2>
+            <span className="text-xs text-slate-500">{compareLabel}</span>
+          </div>
+
           <div className="mt-4 grid gap-2 md:grid-cols-2">
             {(compare?.categoryDeltas || []).slice(0, 10).map((row) => (
               <div key={row.category} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
