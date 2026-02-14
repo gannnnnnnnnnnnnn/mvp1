@@ -250,6 +250,8 @@ export default function Phase3PeriodPage() {
   const [rowSavingMerchantNorm, setRowSavingMerchantNorm] = useState<string | null>(null);
   const [rowStatus, setRowStatus] = useState("");
   const triageSectionRef = useRef<HTMLElement | null>(null);
+  const hasExplicitPeriodFromUrlRef = useRef(false);
+  const hasAppliedDefaultPeriodRef = useRef(false);
 
   const selectedFileNames = useMemo(
     () =>
@@ -635,6 +637,8 @@ export default function Phase3PeriodPage() {
   useEffect(() => {
     const parsed = parseScopeFromWindow();
     const period = readPeriodFromUrl();
+    hasExplicitPeriodFromUrlRef.current = Boolean(period.key);
+    hasAppliedDefaultPeriodRef.current = false;
     setScopeMode(parsed.scopeMode);
     setSelectedFileIds(parsed.fileIds);
     setPeriodType(period.type);
@@ -658,12 +662,22 @@ export default function Phase3PeriodPage() {
   }, [scopeMode, selectedFileIds, periodType, periodKey]);
 
   useEffect(() => {
+    if (availablePeriodKeys.length === 0) {
+      return;
+    }
+
     if (!periodKey && availablePeriodKeys.length > 0) {
-      setPeriodKey(availablePeriodKeys[availablePeriodKeys.length - 1]);
+      if (!hasExplicitPeriodFromUrlRef.current && !hasAppliedDefaultPeriodRef.current) {
+        hasAppliedDefaultPeriodRef.current = true;
+        setPeriodKey(availablePeriodKeys[availablePeriodKeys.length - 1]);
+      }
       return;
     }
 
     if (periodKey && !availablePeriodKeys.includes(periodKey)) {
+      if (hasExplicitPeriodFromUrlRef.current) {
+        return;
+      }
       setPeriodKey(availablePeriodKeys[availablePeriodKeys.length - 1] || "");
     }
   }, [periodKey, availablePeriodKeys]);
