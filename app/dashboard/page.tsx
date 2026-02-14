@@ -23,6 +23,9 @@ type OverviewResponse = {
     headerFound: boolean;
     balanceContinuityPassRate: number;
     balanceContinuityChecked: number;
+    balanceContinuityTotalRows?: number;
+    balanceContinuitySkipped?: number;
+    balanceContinuitySkippedReasons?: Record<string, number>;
     needsReviewReasons: string[];
   };
   appliedFilters?: Record<string, unknown>;
@@ -142,6 +145,23 @@ function buildLinePath(points: Array<{ x: number; y: number }>) {
   return points
     .map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`)
     .join(" ");
+}
+
+function continuitySummary(quality?: OverviewResponse["quality"]) {
+  if (!quality || typeof quality.balanceContinuityPassRate !== "number") return "-";
+  const checked = quality.balanceContinuityChecked ?? 0;
+  const total = quality.balanceContinuityTotalRows ?? checked;
+  return `${(quality.balanceContinuityPassRate * 100).toFixed(1)}% (checked ${checked}/${total})`;
+}
+
+function skippedSummary(quality?: OverviewResponse["quality"]) {
+  if (!quality) return "-";
+  const skipped = quality.balanceContinuitySkipped ?? 0;
+  const reasons = quality.balanceContinuitySkippedReasons || {};
+  const reasonText = Object.entries(reasons)
+    .map(([reason, count]) => `${reason}:${count}`)
+    .join(", ");
+  return skipped > 0 ? `${skipped}${reasonText ? ` · ${reasonText}` : ""}` : "0";
 }
 
 export default function DashboardPage() {
@@ -354,11 +374,10 @@ export default function DashboardPage() {
               </div>
               <div>
                 Header: {overview.quality?.headerFound ? "found" : "not found"} | Continuity:{" "}
-                {typeof overview.quality?.balanceContinuityPassRate === "number"
-                  ? `${(overview.quality.balanceContinuityPassRate * 100).toFixed(1)}%`
-                  : "-"}
-                {" · checked: "}
-                {overview.quality?.balanceContinuityChecked ?? 0}
+                {continuitySummary(overview.quality)}
+              </div>
+              <div>
+                Continuity skipped: {skippedSummary(overview.quality)}
               </div>
               <div>
                 Review: {overview.needsReview ? "yes" : "no"}

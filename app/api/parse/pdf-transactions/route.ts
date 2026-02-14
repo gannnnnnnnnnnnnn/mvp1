@@ -24,6 +24,9 @@ type ParseQuality = {
   headerFound: boolean;
   balanceContinuityPassRate: number;
   balanceContinuityChecked: number;
+  balanceContinuityTotalRows: number;
+  balanceContinuitySkipped: number;
+  balanceContinuitySkippedReasons: Record<string, number>;
   needsReviewReasons: string[];
   nonBlockingWarnings?: string[];
   statementTotalsCheck?: {
@@ -47,28 +50,51 @@ function round2(value: number) {
  * So we validate current row by previous balance + current amount ~= current balance.
  */
 function assessBalanceContinuity(
-  transactions: Array<{ amount: number; balance?: number; debit?: number; credit?: number }>,
+  transactions: Array<{
+    amount: number;
+    amountSource?: "parsed_token" | "balance_diff_inferred";
+    balance?: number;
+    debit?: number;
+    credit?: number;
+  }>,
   templateType: ReturnType<typeof detectCommBankTemplate>
 ) {
   if (transactions.length < 2) {
-    return { checked: 0, passRate: 0 };
+    return {
+      checked: 0,
+      totalRows: 0,
+      skipped: 0,
+      passRate: 0,
+      skippedReasons: {},
+    };
   }
 
   let pass = 0;
   let checked = 0;
+  let totalRows = 0;
+  const skippedReasons: Record<string, number> = {};
+  const markSkip = (reason: string) => {
+    skippedReasons[reason] = (skippedReasons[reason] || 0) + 1;
+  };
 
   // Start from i=1 because the first row has no previous row to reconcile against.
   for (let i = 1; i < transactions.length; i += 1) {
+    totalRows += 1;
     const previous = transactions[i - 1];
     const current = transactions[i];
     const previousBalance = previous.balance;
     const currentBalance = current.balance;
 
-    if (
-      typeof previousBalance !== "number" ||
-      typeof currentBalance !== "number" ||
-      !Number.isFinite(current.amount as number)
-    ) {
+    if (typeof previousBalance !== "number") {
+      markSkip("PREV_BALANCE_MISSING");
+      continue;
+    }
+    if (typeof currentBalance !== "number") {
+      markSkip("CURR_BALANCE_MISSING");
+      continue;
+    }
+    if (!Number.isFinite(current.amount as number)) {
+      markSkip("AMOUNT_NOT_FINITE");
       continue;
     }
 
@@ -77,8 +103,10 @@ function assessBalanceContinuity(
     if (
       templateType === "commbank_auto_debit_credit" &&
       typeof current.debit !== "number" &&
-      typeof current.credit !== "number"
+      typeof current.credit !== "number" &&
+      current.amountSource !== "balance_diff_inferred"
     ) {
+      markSkip("AUTO_AMOUNT_SIDE_MISSING");
       continue;
     }
     checked += 1;
@@ -91,12 +119,21 @@ function assessBalanceContinuity(
   }
 
   if (checked === 0) {
-    return { checked: 0, passRate: 0 };
+    return {
+      checked: 0,
+      totalRows,
+      skipped: totalRows,
+      passRate: 0,
+      skippedReasons,
+    };
   }
 
   return {
     checked,
+    totalRows,
+    skipped: totalRows - checked,
     passRate: pass / checked,
+    skippedReasons,
   };
 }
 
@@ -258,7 +295,7 @@ export async function POST(request: Request) {
     const continuity =
       templateConfig?.quality.enableContinuityGate === true
         ? assessBalanceContinuity(parsed.transactions, templateType)
-        : { checked: 0, passRate: 0 };
+        : { checked: 0, passRate: 0, totalRows: 0, skipped: 0, skippedReasons: {} };
     const statementTotalsCheck =
       templateType === "commbank_auto_debit_credit"
         ? assessStatementTotals(text)
@@ -385,6 +422,9 @@ export async function POST(request: Request) {
       headerFound: segmented.debug.headerFound,
       balanceContinuityPassRate: continuity.passRate,
       balanceContinuityChecked: continuity.checked,
+      balanceContinuityTotalRows: continuity.totalRows,
+      balanceContinuitySkipped: continuity.skipped,
+      balanceContinuitySkippedReasons: continuity.skippedReasons,
       needsReviewReasons: [...needsReviewReasons],
       nonBlockingWarnings: [...nonBlockingWarnings],
       statementTotalsCheck:

@@ -49,6 +49,7 @@ type ParsedTransaction = {
   date: string;
   description: string;
   amount: number;
+  amountSource?: "parsed_token" | "balance_diff_inferred";
   debit?: number;
   credit?: number;
   balance?: number;
@@ -67,6 +68,9 @@ type ParseQuality = {
   headerFound: boolean;
   balanceContinuityPassRate: number;
   balanceContinuityChecked: number;
+  balanceContinuityTotalRows?: number;
+  balanceContinuitySkipped?: number;
+  balanceContinuitySkippedReasons?: Record<string, number>;
   needsReviewReasons: string[];
 };
 
@@ -470,6 +474,25 @@ export default function Home() {
     }
   };
 
+  const continuitySummary = (quality?: ParseQuality) => {
+    if (!quality || typeof quality.balanceContinuityPassRate !== "number") {
+      return "-";
+    }
+    const checked = quality.balanceContinuityChecked ?? 0;
+    const total = quality.balanceContinuityTotalRows ?? checked;
+    return `${(quality.balanceContinuityPassRate * 100).toFixed(1)}% (checked ${checked}/${total})`;
+  };
+
+  const skippedSummary = (quality?: ParseQuality) => {
+    if (!quality) return "-";
+    const skipped = quality.balanceContinuitySkipped ?? 0;
+    const reasons = quality.balanceContinuitySkippedReasons || {};
+    const reasonText = Object.entries(reasons)
+      .map(([reason, count]) => `${reason}:${count}`)
+      .join(", ");
+    return skipped > 0 ? `${skipped}${reasonText ? ` · ${reasonText}` : ""}` : "0";
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 p-8">
       <div className="mx-auto max-w-5xl space-y-8">
@@ -735,12 +758,10 @@ export default function Home() {
                 </p>
                 <p>Header: {txResult.quality?.headerFound ? "found" : "not found"}</p>
                 <p>
-                  Continuity:{" "}
-                  {typeof txResult.quality?.balanceContinuityPassRate === "number"
-                    ? `${(txResult.quality.balanceContinuityPassRate * 100).toFixed(1)}%`
-                    : "-"}
-                  {" · checked: "}
-                  {txResult.quality?.balanceContinuityChecked ?? 0}
+                  Continuity: {continuitySummary(txResult.quality)}
+                </p>
+                <p>
+                  Continuity skipped: {skippedSummary(txResult.quality)}
                 </p>
                 <p>Review Required: {txResult.needsReview ? "yes" : "no"}</p>
                 {txResult.needsReview && (
@@ -762,12 +783,10 @@ export default function Home() {
                     ))}
                   </ul>
                   <div className="mt-2">
-                    Continuity:{" "}
-                    {typeof txResult.quality?.balanceContinuityPassRate === "number"
-                      ? `${(txResult.quality.balanceContinuityPassRate * 100).toFixed(1)}%`
-                      : "-"}
-                    {" · checked: "}
-                    {txResult.quality?.balanceContinuityChecked ?? 0}
+                    Continuity: {continuitySummary(txResult.quality)}
+                  </div>
+                  <div className="mt-1">
+                    Continuity skipped: {skippedSummary(txResult.quality)}
                   </div>
                   <div className="mt-2 font-medium">Section Preview</div>
                   <div className="mt-1 max-h-48 overflow-auto rounded border border-red-200 bg-white p-2 font-mono text-[11px] leading-5 whitespace-pre-wrap text-slate-700">
@@ -810,11 +829,15 @@ export default function Home() {
                             <td className="px-3 py-2">
                               {typeof tx.debit === "number"
                                 ? `${Math.abs(tx.debit).toFixed(2)} ${tx.currency || ""}`
+                                : tx.amountSource === "balance_diff_inferred" && tx.amount < 0
+                                  ? `${Math.abs(tx.amount).toFixed(2)} ${tx.currency || ""} (inferred)`
                                 : "-"}
                             </td>
                             <td className="px-3 py-2">
                               {typeof tx.credit === "number"
                                 ? `${Math.abs(tx.credit).toFixed(2)} ${tx.currency || ""}`
+                                : tx.amountSource === "balance_diff_inferred" && tx.amount >= 0
+                                  ? `${Math.abs(tx.amount).toFixed(2)} ${tx.currency || ""} (inferred)`
                                 : "-"}
                             </td>
                           </>
@@ -851,6 +874,7 @@ export default function Home() {
                         parsed: debit={typeof tx.debit === "number" ? tx.debit.toFixed(2) : "-"} ·
                         credit={typeof tx.credit === "number" ? tx.credit.toFixed(2) : "-"} ·
                         amount={Number.isFinite(tx.amount) ? tx.amount.toFixed(2) : "-"} ·
+                        amountSource={tx.amountSource || "parsed_token"} ·
                         balance={typeof tx.balance === "number" ? tx.balance.toFixed(2) : "-"}
                       </div>
                     )}

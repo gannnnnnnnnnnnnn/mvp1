@@ -57,6 +57,9 @@ type TransactionsResponse = {
     headerFound: boolean;
     balanceContinuityPassRate: number;
     balanceContinuityChecked: number;
+    balanceContinuityTotalRows?: number;
+    balanceContinuitySkipped?: number;
+    balanceContinuitySkippedReasons?: Record<string, number>;
     needsReviewReasons: string[];
   };
   appliedFilters?: Record<string, unknown>;
@@ -74,6 +77,23 @@ function templateLabel(templateType: string) {
   if (templateType === "commbank_manual_amount_balance") return "manual";
   if (templateType === "commbank_auto_debit_credit") return "auto";
   return "unknown";
+}
+
+function continuitySummary(quality?: TransactionsResponse["quality"]) {
+  if (!quality || typeof quality.balanceContinuityPassRate !== "number") return "-";
+  const checked = quality.balanceContinuityChecked ?? 0;
+  const total = quality.balanceContinuityTotalRows ?? checked;
+  return `${(quality.balanceContinuityPassRate * 100).toFixed(1)}% (checked ${checked}/${total})`;
+}
+
+function skippedSummary(quality?: TransactionsResponse["quality"]) {
+  if (!quality) return "-";
+  const skipped = quality.balanceContinuitySkipped ?? 0;
+  const reasons = quality.balanceContinuitySkippedReasons || {};
+  const reasonText = Object.entries(reasons)
+    .map(([reason, count]) => `${reason}:${count}`)
+    .join(", ");
+  return skipped > 0 ? `${skipped}${reasonText ? ` · ${reasonText}` : ""}` : "0";
 }
 
 export default function TransactionsPage() {
@@ -322,11 +342,10 @@ export default function TransactionsPage() {
               </div>
               <div>
                 Header: {result.quality?.headerFound ? "found" : "not found"} | Continuity:{" "}
-                {typeof result.quality?.balanceContinuityPassRate === "number"
-                  ? `${(result.quality.balanceContinuityPassRate * 100).toFixed(1)}%`
-                  : "-"}
-                {" · checked: "}
-                {result.quality?.balanceContinuityChecked ?? 0}
+                {continuitySummary(result.quality)}
+              </div>
+              <div>
+                Continuity skipped: {skippedSummary(result.quality)}
               </div>
               <div>
                 Review: {result.needsReview ? "yes" : "no"}
