@@ -128,6 +128,7 @@ export default function TransactionsPage() {
   const [savingId, setSavingId] = useState<string>("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [pendingCategories, setPendingCategories] = useState<Record<string, Category>>({});
+  const [seededFromQuery, setSeededFromQuery] = useState(false);
 
   const selectedFileNames = useMemo(
     () =>
@@ -136,6 +137,37 @@ export default function TransactionsPage() {
         .filter(Boolean) as string[],
     [files, selectedFileIds]
   );
+
+  useEffect(() => {
+    if (seededFromQuery) return;
+    if (typeof window === "undefined") return;
+    const searchParams = new URLSearchParams(window.location.search);
+
+    const scope = (searchParams.get("scope") || "").trim();
+    if (scope === "all") {
+      setScopeMode("all");
+    }
+
+    const fromQuery = searchParams
+      .getAll("fileIds")
+      .flatMap((value) => value.split(","))
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (fromQuery.length > 0) {
+      setScopeMode("selected");
+      setSelectedFileIds([...new Set(fromQuery)]);
+    }
+
+    const qParam = (searchParams.get("q") || "").trim();
+    const categoryParam = (searchParams.get("category") || "").trim();
+    const dateFromParam = (searchParams.get("dateFrom") || "").trim();
+    const dateToParam = (searchParams.get("dateTo") || "").trim();
+    if (qParam) setQ(qParam);
+    if (categoryParam) setCategory(categoryParam);
+    if (dateFromParam) setDateFrom(dateFromParam);
+    if (dateToParam) setDateTo(dateToParam);
+    setSeededFromQuery(true);
+  }, [seededFromQuery]);
 
   const fetchFiles = async () => {
     const res = await fetch("/api/files");
@@ -148,7 +180,7 @@ export default function TransactionsPage() {
     }
 
     setFiles(data.files);
-    if (selectedFileIds.length === 0 && data.files.length > 0) {
+    if (scopeMode === "selected" && selectedFileIds.length === 0 && data.files.length > 0) {
       setSelectedFileIds([data.files[0].id]);
     }
   };
@@ -251,10 +283,11 @@ export default function TransactionsPage() {
   }, []);
 
   useEffect(() => {
+    if (!seededFromQuery) return;
     if (scopeMode === "selected" && selectedFileIds.length === 0) return;
     void fetchTransactions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeMode, selectedFileIds]);
+  }, [scopeMode, selectedFileIds, seededFromQuery]);
 
   const categoryList = result?.categories || [];
 

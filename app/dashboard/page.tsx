@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type FileMeta = {
   id: string;
@@ -55,6 +56,18 @@ type OverviewResponse = {
     amount: number;
     share: number;
     transactionIds: string[];
+    topMerchants?: Array<{ merchantNorm: string; amount: number }>;
+    recentTransactions?: Array<{
+      id: string;
+      date: string;
+      merchantNorm: string;
+      amount: number;
+      descriptionRaw: string;
+    }>;
+  }>;
+  categoryTrendMonthly?: Array<{
+    category: string;
+    points: Array<{ period: string; amount: number; transactionIds: string[] }>;
   }>;
   topMerchants: Array<{
     merchantNorm: string;
@@ -191,7 +204,19 @@ function skippedSummary(quality?: OverviewResponse["quality"]) {
   return skipped > 0 ? `${skipped}${reasonText ? ` · ${reasonText}` : ""}` : "0";
 }
 
+function monthRange(period: string) {
+  const match = /^(\\d{4})-(\\d{2})$/.exec(period);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 0));
+  const toDate = (d: Date) => d.toISOString().slice(0, 10);
+  return { dateFrom: toDate(start), dateTo: toDate(end) };
+}
+
 export default function DashboardPage() {
+  const router = useRouter();
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [scopeMode, setScopeMode] = useState<"all" | "selected">("all");
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
@@ -206,6 +231,7 @@ export default function DashboardPage() {
   const [compare, setCompare] = useState<CompareResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [selectedTrendCategory, setSelectedTrendCategory] = useState<string>("");
 
   const selectedFileNames = useMemo(
     () =>
@@ -214,6 +240,37 @@ export default function DashboardPage() {
         .filter(Boolean) as string[],
     [files, selectedFileIds]
   );
+
+  const buildSharedScopeParams = () => {
+    const params = new URLSearchParams();
+    if (scopeMode === "all") {
+      params.set("scope", "all");
+    } else {
+      for (const fileId of selectedFileIds) {
+        params.append("fileIds", fileId);
+      }
+    }
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    return params;
+  };
+
+  const goToCategoryDrilldown = (categoryName: string) => {
+    const params = buildSharedScopeParams();
+    params.set("category", categoryName);
+    router.push(`/transactions?${params.toString()}`);
+  };
+
+  const goToCategoryMonthDrilldown = (categoryName: string, period: string) => {
+    const params = buildSharedScopeParams();
+    params.set("category", categoryName);
+    const range = monthRange(period);
+    if (range) {
+      params.set("dateFrom", range.dateFrom);
+      params.set("dateTo", range.dateTo);
+    }
+    router.push(`/transactions?${params.toString()}`);
+  };
 
   const fetchFiles = async () => {
     const res = await fetch("/api/files");
@@ -224,7 +281,7 @@ export default function DashboardPage() {
       throw new Error(`${data.error.code}: ${data.error.message}`);
     }
     setFiles(data.files);
-    if (selectedFileIds.length === 0 && data.files.length > 0) {
+    if (scopeMode === "selected" && selectedFileIds.length === 0 && data.files.length > 0) {
       setSelectedFileIds([data.files[0].id]);
     }
   };
@@ -339,6 +396,31 @@ export default function DashboardPage() {
   const donutStyle = useMemo(
     () => makeDonutStyle((overview?.spendByCategory || []).slice(0, 8)),
     [overview]
+  );
+
+  useEffect(() => {
+    if (!overview?.spendByCategory?.length) {
+      setSelectedTrendCategory("");
+      return;
+    }
+    if (!selectedTrendCategory) {
+      setSelectedTrendCategory(overview.spendByCategory[0].category);
+      return;
+    }
+    if (!overview.spendByCategory.some((row) => row.category === selectedTrendCategory)) {
+      setSelectedTrendCategory(overview.spendByCategory[0].category);
+    }
+  }, [overview, selectedTrendCategory]);
+
+  const trendPoints = useMemo(() => {
+    if (!overview?.categoryTrendMonthly || !selectedTrendCategory) return [];
+    const found = overview.categoryTrendMonthly.find((row) => row.category === selectedTrendCategory);
+    return found?.points || [];
+  }, [overview, selectedTrendCategory]);
+
+  const maxTrendAmount = useMemo(
+    () => Math.max(0, ...trendPoints.map((item) => item.amount)),
+    [trendPoints]
   );
 
   return (
@@ -600,7 +682,12 @@ export default function DashboardPage() {
               />
               <div className="space-y-2">
                 {(overview?.spendByCategory || []).slice(0, 8).map((row) => (
-                  <div key={row.category} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                  <button
+                    key={row.category}
+                    type="button"
+                    onClick={() => goToCategoryDrilldown(row.category)}
+                    className="group relative w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs hover:border-blue-300 hover:bg-blue-50"
+                  >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-slate-800">{row.category}</span>
                       <span className="text-slate-600">{CURRENCY.format(row.amount)}</span>
@@ -608,7 +695,31 @@ export default function DashboardPage() {
                     <div className="mt-1 text-slate-500">
                       {PERCENT.format(row.share)} · <span title={row.transactionIds.join(", ")}>{row.transactionIds.length} tx</span>
                     </div>
-                  </div>
+                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-[320px] rounded-lg border border-slate-300 bg-white p-2 text-[11px] text-slate-700 shadow-xl group-hover:block">
+                      <div className="font-semibold text-slate-900">{row.category}</div>
+                      <div className="mt-1">
+                        total {CURRENCY.format(row.amount)} · {row.transactionIds.length} tx
+                      </div>
+                      <div className="mt-2 text-slate-500">Top merchants</div>
+                      <div>
+                        {(row.topMerchants || []).map((item) => (
+                          <div key={item.merchantNorm}>
+                            {item.merchantNorm}: {CURRENCY.format(item.amount)}
+                          </div>
+                        ))}
+                        {!(row.topMerchants || []).length && <div>-</div>}
+                      </div>
+                      <div className="mt-2 text-slate-500">Recent transactions</div>
+                      <div>
+                        {(row.recentTransactions || []).map((item) => (
+                          <div key={item.id}>
+                            {item.date} · {item.merchantNorm} · {CURRENCY.format(item.amount)}
+                          </div>
+                        ))}
+                        {!(row.recentTransactions || []).length && <div>-</div>}
+                      </div>
+                    </div>
+                  </button>
                 ))}
                 {!(overview?.spendByCategory.length) && (
                   <p className="text-sm text-slate-500">No spending rows in range.</p>
@@ -663,6 +774,53 @@ export default function DashboardPage() {
               {!overview?.topMerchants.length && <p className="text-sm text-slate-500">No merchants in range.</p>}
             </div>
           </article>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-slate-900">Category Trend (Monthly)</h2>
+            <select
+              value={selectedTrendCategory}
+              onChange={(e) => setSelectedTrendCategory(e.target.value)}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800"
+            >
+              {(overview?.spendByCategory || []).map((row) => (
+                <option key={row.category} value={row.category}>
+                  {row.category}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mt-3 space-y-2">
+            {trendPoints.map((point) => (
+              <button
+                key={point.period}
+                type="button"
+                onClick={() => goToCategoryMonthDrilldown(selectedTrendCategory, point.period)}
+                className="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs hover:border-blue-300 hover:bg-blue-50"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-800">{point.period}</span>
+                  <span className="text-slate-600">{CURRENCY.format(point.amount)}</span>
+                </div>
+                <div className="mt-1 h-2 rounded-full bg-slate-200">
+                  <div
+                    className="h-2 rounded-full bg-blue-500"
+                    style={{
+                      width:
+                        maxTrendAmount > 0
+                          ? `${Math.max(3, (point.amount / maxTrendAmount) * 100)}%`
+                          : "0%",
+                    }}
+                  />
+                </div>
+                <div className="mt-1 text-[11px] text-slate-500">{point.transactionIds.length} tx</div>
+              </button>
+            ))}
+            {trendPoints.length === 0 && (
+              <p className="text-sm text-slate-500">No monthly points for this category.</p>
+            )}
+          </div>
         </section>
       </div>
     </main>
