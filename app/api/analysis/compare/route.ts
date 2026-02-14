@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { CATEGORY_TAXONOMY } from "@/lib/analysis/types";
 import {
-  buildPeriodComparison,
-  CompareGranularity,
+  buildExplicitPeriodComparison,
   loadCategorizedTransactionsForScope,
 } from "@/lib/analysis/analytics";
 
@@ -25,27 +25,38 @@ function parseFileIds(searchParams: URLSearchParams) {
   return [...new Set(direct)];
 }
 
+function isCategory(value: string) {
+  return CATEGORY_TAXONOMY.includes(value as (typeof CATEGORY_TAXONOMY)[number]);
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const fileId = (searchParams.get("fileId") || "").trim();
   const fileIds = parseFileIds(searchParams);
   const scopeRaw = (searchParams.get("scope") || "").trim();
   const scope = scopeRaw === "all" ? "all" : fileId ? "file" : fileIds.length > 0 ? "selected" : "service";
-  const mode = (searchParams.get("mode") || "current_vs_previous").trim();
-  const granularityRaw = (searchParams.get("granularity") || "month").trim();
-  const granularity: CompareGranularity =
-    granularityRaw === "quarter" || granularityRaw === "year" ? granularityRaw : "month";
+  const periodAStart = (searchParams.get("periodAStart") || "").trim();
+  const periodAEnd = (searchParams.get("periodAEnd") || "").trim();
+  const periodBStart = (searchParams.get("periodBStart") || "").trim();
+  const periodBEnd = (searchParams.get("periodBEnd") || "").trim();
 
   if (!fileId && fileIds.length === 0 && scope !== "all") {
     return errorJson(400, "BAD_REQUEST", "fileId or fileIds (or scope=all) is required.");
   }
 
-  if (mode !== "current_vs_previous") {
-    return errorJson(400, "BAD_REQUEST", "Only mode=current_vs_previous is supported.");
+  if (!periodAStart || !periodAEnd || !periodBStart || !periodBEnd) {
+    return errorJson(
+      400,
+      "BAD_REQUEST",
+      "periodAStart, periodAEnd, periodBStart, periodBEnd are required."
+    );
   }
 
-  const dateFrom = (searchParams.get("dateFrom") || "").trim() || undefined;
-  const dateTo = (searchParams.get("dateTo") || "").trim() || undefined;
+  const q = (searchParams.get("q") || "").trim() || undefined;
+  const categoryRaw = (searchParams.get("category") || "").trim() || undefined;
+  if (categoryRaw && !isCategory(categoryRaw)) {
+    return errorJson(400, "BAD_REQUEST", `Unsupported category: ${categoryRaw}`);
+  }
 
   try {
     const result = await loadCategorizedTransactionsForScope({
@@ -53,13 +64,16 @@ export async function GET(request: Request) {
       fileIds,
       scope,
       accountId: (searchParams.get("accountId") || "").trim() || undefined,
-      dateFrom,
-      dateTo,
+      q,
+      category: categoryRaw as (typeof CATEGORY_TAXONOMY)[number] | undefined,
     });
 
-    const comparison = buildPeriodComparison({
+    const comparison = buildExplicitPeriodComparison({
       transactions: result.transactions,
-      granularity,
+      periodAStart,
+      periodAEnd,
+      periodBStart,
+      periodBEnd,
     });
 
     return NextResponse.json({
@@ -69,16 +83,24 @@ export async function GET(request: Request) {
       filesIncludedCount: result.filesIncludedCount,
       txCountBeforeDedupe: result.txCountBeforeDedupe,
       dedupedCount: result.dedupedCount,
+      datasetDateMin: result.datasetDateMin,
+      datasetDateMax: result.datasetDateMax,
+      availableMonths: result.availableMonths,
+      availableQuarters: result.availableQuarters,
+      availableYears: result.availableYears,
+      accountIds: result.accountIds,
       accountId: result.accountId,
-      mode,
-      granularity,
       templateType: result.templateType,
       needsReview: result.needsReview,
       quality: result.quality,
       appliedFilters: {
         ...result.appliedFilters,
-        mode,
-        granularity,
+        periodAStart,
+        periodAEnd,
+        periodBStart,
+        periodBEnd,
+        q,
+        category: categoryRaw,
       },
       txCount: result.transactions.length,
       ...comparison,

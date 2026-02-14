@@ -110,6 +110,44 @@ function uniqueStrings(values: Array<string | undefined | null>) {
   return [...new Set(values.map((item) => String(item || "").trim()).filter(Boolean))];
 }
 
+function monthKeyFromDate(dateIso: string) {
+  const d = new Date(dateIso);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function quarterKeyFromDate(dateIso: string) {
+  const d = new Date(dateIso);
+  return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+}
+
+function buildDatasetCoverage(transactions: NormalizedTransaction[]) {
+  if (transactions.length === 0) {
+    return {
+      datasetDateMin: "",
+      datasetDateMax: "",
+      availableMonths: [] as string[],
+      availableQuarters: [] as string[],
+      availableYears: [] as string[],
+      accountIds: [] as string[],
+    };
+  }
+
+  const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
+  const availableMonths = [...new Set(sorted.map((tx) => monthKeyFromDate(tx.date)))].sort();
+  const availableQuarters = [...new Set(sorted.map((tx) => quarterKeyFromDate(tx.date)))].sort();
+  const availableYears = [...new Set(sorted.map((tx) => tx.date.slice(0, 4)))].sort();
+  const accountIds = [...new Set(sorted.map((tx) => tx.accountId))].sort();
+
+  return {
+    datasetDateMin: sorted[0].date.slice(0, 10),
+    datasetDateMax: sorted[sorted.length - 1].date.slice(0, 10),
+    availableMonths,
+    availableQuarters,
+    availableYears,
+    accountIds,
+  };
+}
+
 function dedupeTransactions(transactions: NormalizedTransaction[]) {
   const dedupedByKey = new Map<string, NormalizedTransaction>();
   for (const tx of transactions) {
@@ -261,6 +299,7 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
   const txCountBeforeDedupe = allNormalized.length;
   const dedupedTransactions = dedupeTransactions(allNormalized);
   const dedupedCount = txCountBeforeDedupe - dedupedTransactions.length;
+  const datasetCoverage = buildDatasetCoverage(dedupedTransactions);
 
   const core = runAnalysisCore({
     transactions: dedupedTransactions,
@@ -280,6 +319,7 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
     filesIncludedCount: targetFileIds.length,
     txCountBeforeDedupe,
     dedupedCount,
+    ...datasetCoverage,
     accountId: params.accountId || (uniqueAccountIds.length === 1 ? uniqueAccountIds[0] : undefined),
     templateType: templateTypes.size === 1 ? [...templateTypes][0] : "mixed",
     warnings: allWarnings,
@@ -527,6 +567,87 @@ function summarizePeriod(transactions: NormalizedTransaction[]) {
   };
 }
 
+function buildDeltaRows(current: ReturnType<typeof summarizePeriod>, previous: ReturnType<typeof summarizePeriod>) {
+  const byCategoryCurrent = new Map(current.categories.map((row) => [row.category, row.amount]));
+  const byCategoryPrevious = new Map(previous.categories.map((row) => [row.category, row.amount]));
+  const allCategories = new Set([...byCategoryCurrent.keys(), ...byCategoryPrevious.keys()]);
+
+  const categoryDeltas = [...allCategories]
+    .map((category) => {
+      const currentAmount = byCategoryCurrent.get(category) || 0;
+      const previousAmount = byCategoryPrevious.get(category) || 0;
+      return {
+        category,
+        current: currentAmount,
+        previous: previousAmount,
+        delta: currentAmount - previousAmount,
+        percent: previousAmount === 0 ? 0 : (currentAmount - previousAmount) / previousAmount,
+      };
+    })
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  const byMerchantCurrent = new Map(current.merchants.map((row) => [row.merchantNorm, row.amount]));
+  const byMerchantPrevious = new Map(previous.merchants.map((row) => [row.merchantNorm, row.amount]));
+  const allMerchants = new Set([...byMerchantCurrent.keys(), ...byMerchantPrevious.keys()]);
+
+  const merchantDeltas = [...allMerchants]
+    .map((merchantNorm) => {
+      const currentAmount = byMerchantCurrent.get(merchantNorm) || 0;
+      const previousAmount = byMerchantPrevious.get(merchantNorm) || 0;
+      return {
+        merchantNorm,
+        current: currentAmount,
+        previous: previousAmount,
+        delta: currentAmount - previousAmount,
+        percent: previousAmount === 0 ? 0 : (currentAmount - previousAmount) / previousAmount,
+      };
+    })
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+    .slice(0, 10);
+
+  return { categoryDeltas, merchantDeltas };
+}
+
+export function buildExplicitPeriodComparison(params: {
+  transactions: NormalizedTransaction[];
+  periodAStart: string;
+  periodAEnd: string;
+  periodBStart: string;
+  periodBEnd: string;
+}) {
+  const { transactions, periodAStart, periodAEnd, periodBStart, periodBEnd } = params;
+  const sorted = [...transactions].sort((a, b) => a.date.localeCompare(b.date));
+
+  const periodA = sorted.filter((tx) => between(tx.date, periodAStart, periodAEnd));
+  const periodB = sorted.filter((tx) => between(tx.date, periodBStart, periodBEnd));
+
+  const totalsA = summarizePeriod(periodA);
+  const totalsB = summarizePeriod(periodB);
+
+  const delta = (a: number, b: number) => ({
+    amount: a - b,
+    percent: b === 0 ? 0 : (a - b) / b,
+  });
+
+  const { categoryDeltas, merchantDeltas } = buildDeltaRows(totalsA, totalsB);
+
+  return {
+    periodA: { start: periodAStart, end: periodAEnd },
+    periodB: { start: periodBStart, end: periodBEnd },
+    totalsA: totalsA,
+    totalsB: totalsB,
+    delta: {
+      income: delta(totalsA.income, totalsB.income),
+      spend: delta(totalsA.spend, totalsB.spend),
+      net: delta(totalsA.net, totalsB.net),
+    },
+    categoryBreakdownA: totalsA.categories,
+    categoryBreakdownB: totalsB.categories,
+    categoryDeltas,
+    merchantDeltas,
+  };
+}
+
 function resolvePeriodWindow(lastDate: Date, granularity: CompareGranularity) {
   if (granularity === "year") {
     const currentStart = startOfYear(lastDate);
@@ -582,48 +703,12 @@ export function buildPeriodComparison(params: {
 
   const current = summarizePeriod(currentPeriod);
   const previous = summarizePeriod(previousPeriod);
+  const { categoryDeltas, merchantDeltas } = buildDeltaRows(current, previous);
 
   const delta = (cur: number, prev: number) => ({
     amount: cur - prev,
     percent: prev === 0 ? 0 : (cur - prev) / prev,
   });
-
-  const byCategoryCurrent = new Map(current.categories.map((row) => [row.category, row.amount]));
-  const byCategoryPrevious = new Map(previous.categories.map((row) => [row.category, row.amount]));
-  const allCategories = new Set([...byCategoryCurrent.keys(), ...byCategoryPrevious.keys()]);
-
-  const categoryDeltas = [...allCategories]
-    .map((category) => {
-      const currentAmount = byCategoryCurrent.get(category) || 0;
-      const previousAmount = byCategoryPrevious.get(category) || 0;
-      return {
-        category,
-        current: currentAmount,
-        previous: previousAmount,
-        delta: currentAmount - previousAmount,
-        percent: previousAmount === 0 ? 0 : (currentAmount - previousAmount) / previousAmount,
-      };
-    })
-    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-
-  const byMerchantCurrent = new Map(current.merchants.map((row) => [row.merchantNorm, row.amount]));
-  const byMerchantPrevious = new Map(previous.merchants.map((row) => [row.merchantNorm, row.amount]));
-  const allMerchants = new Set([...byMerchantCurrent.keys(), ...byMerchantPrevious.keys()]);
-
-  const merchantDeltas = [...allMerchants]
-    .map((merchantNorm) => {
-      const currentAmount = byMerchantCurrent.get(merchantNorm) || 0;
-      const previousAmount = byMerchantPrevious.get(merchantNorm) || 0;
-      return {
-        merchantNorm,
-        current: currentAmount,
-        previous: previousAmount,
-        delta: currentAmount - previousAmount,
-        percent: previousAmount === 0 ? 0 : (currentAmount - previousAmount) / previousAmount,
-      };
-    })
-    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
-    .slice(0, 10);
 
   return {
     current,

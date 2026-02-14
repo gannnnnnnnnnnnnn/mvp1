@@ -20,6 +20,12 @@ type OverviewResponse = {
   filesIncludedCount?: number;
   txCountBeforeDedupe?: number;
   dedupedCount?: number;
+  datasetDateMin?: string;
+  datasetDateMax?: string;
+  availableMonths?: string[];
+  availableQuarters?: string[];
+  availableYears?: string[];
+  accountIds?: string[];
   accountId?: string;
   granularity: "month" | "week";
   templateType: string;
@@ -85,29 +91,37 @@ type CompareResponse = {
   filesIncludedCount?: number;
   txCountBeforeDedupe?: number;
   dedupedCount?: number;
+  datasetDateMin?: string;
+  datasetDateMax?: string;
+  availableMonths?: string[];
+  availableQuarters?: string[];
+  availableYears?: string[];
+  accountIds?: string[];
   accountId?: string;
-  mode: "current_vs_previous";
-  granularity: "month" | "quarter" | "year";
+  periodA: { start: string; end: string };
+  periodB: { start: string; end: string };
   appliedFilters?: Record<string, unknown>;
-  current: {
+  totalsA: {
     income: number;
     spend: number;
     net: number;
     transactionIds: string[];
     categories: Array<{ category: string; amount: number }>;
   };
-  previous: {
+  totalsB: {
     income: number;
     spend: number;
     net: number;
     transactionIds: string[];
     categories: Array<{ category: string; amount: number }>;
   };
-  deltas: {
+  delta: {
     income: { amount: number; percent: number };
     spend: { amount: number; percent: number };
     net: { amount: number; percent: number };
   };
+  categoryBreakdownA: Array<{ category: string; amount: number }>;
+  categoryBreakdownB: Array<{ category: string; amount: number }>;
   categoryDeltas: Array<{
     category: string;
     current: number;
@@ -215,15 +229,38 @@ function monthRange(period: string) {
   return { dateFrom: toDate(start), dateTo: toDate(end) };
 }
 
+function quarterRange(period: string) {
+  const match = /^(\\d{4})-Q([1-4])$/.exec(period);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const quarter = Number(match[2]);
+  const startMonth = (quarter - 1) * 3;
+  const start = new Date(Date.UTC(year, startMonth, 1));
+  const end = new Date(Date.UTC(year, startMonth + 3, 0));
+  const toDate = (d: Date) => d.toISOString().slice(0, 10);
+  return { dateFrom: toDate(start), dateTo: toDate(end) };
+}
+
+function yearRange(yearText: string) {
+  const year = Number(yearText);
+  if (!Number.isInteger(year)) return null;
+  const start = new Date(Date.UTC(year, 0, 1));
+  const end = new Date(Date.UTC(year, 11, 31));
+  const toDate = (d: Date) => d.toISOString().slice(0, 10);
+  return { dateFrom: toDate(start), dateTo: toDate(end) };
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [scopeMode, setScopeMode] = useState<"all" | "selected">("all");
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [granularity, setGranularity] = useState<"month" | "week">("month");
-  const [compareGranularity, setCompareGranularity] = useState<"month" | "quarter" | "year">(
-    "month"
-  );
+  const [compareMode, setCompareMode] = useState<
+    "month_prev" | "month_last_year" | "quarter_prev" | "year_prev" | "custom_month"
+  >("month_prev");
+  const [customMonthA, setCustomMonthA] = useState("");
+  const [customMonthB, setCustomMonthB] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -241,6 +278,81 @@ export default function DashboardPage() {
     [files, selectedFileIds]
   );
 
+  const availableMonths = useMemo(() => overview?.availableMonths || [], [overview?.availableMonths]);
+  const availableQuarters = useMemo(
+    () => overview?.availableQuarters || [],
+    [overview?.availableQuarters]
+  );
+  const availableYears = useMemo(() => overview?.availableYears || [], [overview?.availableYears]);
+
+  useEffect(() => {
+    if (availableMonths.length === 0) return;
+    if (!customMonthA) setCustomMonthA(availableMonths[availableMonths.length - 1]);
+    if (!customMonthB) {
+      const fallback =
+        availableMonths.length > 1
+          ? availableMonths[availableMonths.length - 2]
+          : availableMonths[availableMonths.length - 1];
+      setCustomMonthB(fallback);
+    }
+  }, [availableMonths, customMonthA, customMonthB]);
+
+  const comparePeriods = useMemo(() => {
+    const latestMonth = availableMonths[availableMonths.length - 1];
+    const latestQuarter = availableQuarters[availableQuarters.length - 1];
+    const latestYear = availableYears[availableYears.length - 1];
+
+    if (compareMode === "custom_month") {
+      const a = monthRange(customMonthA || latestMonth || "");
+      const b = monthRange(customMonthB || latestMonth || "");
+      return a && b ? { a, b, label: `Custom: ${customMonthA} vs ${customMonthB}` } : null;
+    }
+
+    if (compareMode === "month_prev") {
+      const a = monthRange(latestMonth || "");
+      if (!a) return null;
+      const previousDate = new Date(`${a.dateFrom}T00:00:00Z`);
+      previousDate.setUTCMonth(previousDate.getUTCMonth() - 1);
+      const prevMonth = `${previousDate.getUTCFullYear()}-${String(previousDate.getUTCMonth() + 1).padStart(2, "0")}`;
+      const b = monthRange(prevMonth);
+      return b ? { a, b, label: "This month vs last month" } : null;
+    }
+
+    if (compareMode === "month_last_year") {
+      const a = monthRange(latestMonth || "");
+      if (!a || !latestMonth) return null;
+      const [yearText, monthText] = latestMonth.split("-");
+      const lastYearMonth = `${Number(yearText) - 1}-${monthText}`;
+      if (!availableMonths.includes(lastYearMonth)) return null;
+      const b = monthRange(lastYearMonth);
+      return b ? { a, b, label: "This month vs same month last year" } : null;
+    }
+
+    if (compareMode === "quarter_prev") {
+      const a = quarterRange(latestQuarter || "");
+      if (!a || !latestQuarter) return null;
+      const qMatch = /^(\\d{4})-Q([1-4])$/.exec(latestQuarter);
+      if (!qMatch) return null;
+      const year = Number(qMatch[1]);
+      const quarter = Number(qMatch[2]);
+      const prevQuarter = quarter === 1 ? `${year - 1}-Q4` : `${year}-Q${quarter - 1}`;
+      const b = quarterRange(prevQuarter);
+      return b ? { a, b, label: "This quarter vs last quarter" } : null;
+    }
+
+    const a = yearRange(latestYear || "");
+    if (!a || !latestYear) return null;
+    const b = yearRange(String(Number(latestYear) - 1));
+    return b ? { a, b, label: "This year vs last year" } : null;
+  }, [
+    availableMonths,
+    availableQuarters,
+    availableYears,
+    compareMode,
+    customMonthA,
+    customMonthB,
+  ]);
+
   const buildSharedScopeParams = () => {
     const params = new URLSearchParams();
     if (scopeMode === "all") {
@@ -253,12 +365,6 @@ export default function DashboardPage() {
     if (dateFrom) params.set("dateFrom", dateFrom);
     if (dateTo) params.set("dateTo", dateTo);
     return params;
-  };
-
-  const goToCategoryDrilldown = (categoryName: string) => {
-    const params = buildSharedScopeParams();
-    params.set("category", categoryName);
-    router.push(`/transactions?${params.toString()}`);
   };
 
   const goToCategoryMonthDrilldown = (categoryName: string, period: string) => {
@@ -305,30 +411,10 @@ export default function DashboardPage() {
     }
 
     try {
-      const compareParams = new URLSearchParams({
-        mode: "current_vs_previous",
-        granularity: compareGranularity,
-        ...(dateFrom ? { dateFrom } : {}),
-        ...(dateTo ? { dateTo } : {}),
-      });
-      if (scopeMode === "all") {
-        compareParams.set("scope", "all");
-      } else {
-        for (const fileId of selectedFileIds) {
-          compareParams.append("fileIds", fileId);
-        }
-      }
-
-      const [overviewRes, compareRes] = await Promise.all([
-        fetch(`/api/analysis/overview?${common.toString()}`),
-        fetch(`/api/analysis/compare?${compareParams.toString()}`),
-      ]);
+      const overviewRes = await fetch(`/api/analysis/overview?${common.toString()}`);
 
       const overviewData = (await overviewRes.json()) as
         | OverviewResponse
-        | { ok: false; error: ApiError };
-      const compareData = (await compareRes.json()) as
-        | CompareResponse
         | { ok: false; error: ApiError };
 
       if (!overviewData.ok) {
@@ -338,6 +424,77 @@ export default function DashboardPage() {
         return;
       }
 
+      const months = overviewData.availableMonths || [];
+      const quarters = overviewData.availableQuarters || [];
+      const years = overviewData.availableYears || [];
+      const latestMonth = months[months.length - 1];
+      const latestQuarter = quarters[quarters.length - 1];
+      const latestYear = years[years.length - 1];
+
+      const fallbackPeriods = (() => {
+        if (compareMode === "custom_month") {
+          const a = monthRange(customMonthA || latestMonth || "");
+          const b = monthRange(customMonthB || latestMonth || "");
+          return a && b ? { a, b } : null;
+        }
+        if (compareMode === "month_last_year") {
+          const a = monthRange(latestMonth || "");
+          if (!a || !latestMonth) return null;
+          const [y, m] = latestMonth.split("-");
+          const b = monthRange(`${Number(y) - 1}-${m}`);
+          return b ? { a, b } : null;
+        }
+        if (compareMode === "quarter_prev") {
+          const a = quarterRange(latestQuarter || "");
+          if (!a || !latestQuarter) return null;
+          const qMatch = /^(\\d{4})-Q([1-4])$/.exec(latestQuarter);
+          if (!qMatch) return null;
+          const year = Number(qMatch[1]);
+          const quarter = Number(qMatch[2]);
+          const prevQuarter = quarter === 1 ? `${year - 1}-Q4` : `${year}-Q${quarter - 1}`;
+          const b = quarterRange(prevQuarter);
+          return b ? { a, b } : null;
+        }
+        if (compareMode === "year_prev") {
+          const a = yearRange(latestYear || "");
+          const b = yearRange(String(Number(latestYear || "0") - 1));
+          return a && b ? { a, b } : null;
+        }
+        const a = monthRange(latestMonth || "");
+        if (!a) return null;
+        const previousDate = new Date(`${a.dateFrom}T00:00:00Z`);
+        previousDate.setUTCMonth(previousDate.getUTCMonth() - 1);
+        const prevMonth = `${previousDate.getUTCFullYear()}-${String(previousDate.getUTCMonth() + 1).padStart(2, "0")}`;
+        const b = monthRange(prevMonth);
+        return b ? { a, b } : null;
+      })();
+
+      if (!fallbackPeriods) {
+        setOverview(overviewData);
+        setCompare(null);
+        setError({
+          code: "COMPARE_RANGE_UNAVAILABLE",
+          message: "Comparison periods are not available for current dataset scope.",
+        });
+        return;
+      }
+
+      const compareParams = new URLSearchParams({
+        periodAStart: fallbackPeriods.a.dateFrom,
+        periodAEnd: fallbackPeriods.a.dateTo,
+        periodBStart: fallbackPeriods.b.dateFrom,
+        periodBEnd: fallbackPeriods.b.dateTo,
+      });
+      if (scopeMode === "all") {
+        compareParams.set("scope", "all");
+      } else {
+        for (const fileId of selectedFileIds) {
+          compareParams.append("fileIds", fileId);
+        }
+      }
+
+      const compareRes = await fetch(`/api/analysis/compare?${compareParams.toString()}`);
+      const compareData = (await compareRes.json()) as CompareResponse | { ok: false; error: ApiError };
       if (!compareData.ok) {
         setError(compareData.error);
         setOverview(overviewData);
@@ -365,7 +522,7 @@ export default function DashboardPage() {
     if (scopeMode === "selected" && selectedFileIds.length === 0) return;
     void fetchAnalytics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeMode, selectedFileIds, granularity, compareGranularity]);
+  }, [scopeMode, selectedFileIds, granularity, compareMode, customMonthA, customMonthB]);
 
   const maxPeriodTotal = useMemo(() => {
     if (!overview?.periods.length) return 0;
@@ -478,19 +635,73 @@ export default function DashboardPage() {
             </label>
 
             <label className="space-y-1 text-xs font-medium text-slate-600">
-              Compare Basis
+              Compare Mode
               <select
-                value={compareGranularity}
+                value={compareMode}
                 onChange={(e) =>
-                  setCompareGranularity(e.target.value as "month" | "quarter" | "year")
+                  setCompareMode(
+                    e.target.value as
+                      | "month_prev"
+                      | "month_last_year"
+                      | "quarter_prev"
+                      | "year_prev"
+                      | "custom_month"
+                  )
                 }
                 className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
               >
-                <option value="month">Month</option>
-                <option value="quarter">Quarter</option>
-                <option value="year">Year</option>
+                <option value="month_prev">This month vs last month</option>
+                <option
+                  value="month_last_year"
+                  disabled={
+                    !overview?.availableMonths?.some((month) => {
+                      const latest = overview.availableMonths?.[overview.availableMonths.length - 1];
+                      if (!latest) return false;
+                      const [y, m] = latest.split("-");
+                      return month === `${Number(y) - 1}-${m}`;
+                    })
+                  }
+                >
+                  This month vs same month last year
+                </option>
+                <option value="quarter_prev">This quarter vs last quarter</option>
+                <option value="year_prev">This year vs last year</option>
+                <option value="custom_month">Custom (Month A vs Month B)</option>
               </select>
             </label>
+
+            {compareMode === "custom_month" && (
+              <>
+                <label className="space-y-1 text-xs font-medium text-slate-600">
+                  Month A
+                  <select
+                    value={customMonthA}
+                    onChange={(e) => setCustomMonthA(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                  >
+                    {(overview?.availableMonths || []).map((month) => (
+                      <option key={month} value={month}>
+                        {month}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-1 text-xs font-medium text-slate-600">
+                  Month B
+                  <select
+                    value={customMonthB}
+                    onChange={(e) => setCustomMonthB(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                  >
+                    {(overview?.availableMonths || []).map((month) => (
+                      <option key={month} value={month}>
+                        {month}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
 
             <label className="space-y-1 text-xs font-medium text-slate-600">
               Date From
@@ -526,6 +737,10 @@ export default function DashboardPage() {
 
           {overview && (
             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+              <div className="mb-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
+                Dataset covers: {overview.datasetDateMin || "-"} → {overview.datasetDateMax || "-"} | Months:{" "}
+                {overview.availableMonths?.length || 0} | Files: {overview.filesIncludedCount || 0}
+              </div>
               <div>
                 Template: <span className="font-medium">{templateLabel(overview.templateType)}</span> (
                 {overview.templateType})
@@ -557,6 +772,12 @@ export default function DashboardPage() {
                 Tx before dedupe: {overview.txCountBeforeDedupe ?? 0} · deduped:{" "}
                 {overview.dedupedCount ?? 0}
               </div>
+              {comparePeriods && (
+                <div>
+                  Compare window: {comparePeriods.label} · A {comparePeriods.a.dateFrom} →{" "}
+                  {comparePeriods.a.dateTo} · B {comparePeriods.b.dateFrom} → {comparePeriods.b.dateTo}
+                </div>
+              )}
             </div>
           )}
 
@@ -573,7 +794,7 @@ export default function DashboardPage() {
             <div className="mt-2 text-2xl font-semibold text-emerald-700">
               {CURRENCY.format(overview?.totals.income || 0)}
             </div>
-            {compare && <div className="mt-2 text-xs text-slate-500">vs prev: {deltaText(compare.deltas.income)}</div>}
+            {compare && <div className="mt-2 text-xs text-slate-500">vs B period: {deltaText(compare.delta.income)}</div>}
           </article>
 
           <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -581,7 +802,7 @@ export default function DashboardPage() {
             <div className="mt-2 text-2xl font-semibold text-rose-700">
               {CURRENCY.format(overview?.totals.spend || 0)}
             </div>
-            {compare && <div className="mt-2 text-xs text-slate-500">vs prev: {deltaText(compare.deltas.spend)}</div>}
+            {compare && <div className="mt-2 text-xs text-slate-500">vs B period: {deltaText(compare.delta.spend)}</div>}
           </article>
 
           <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -591,14 +812,14 @@ export default function DashboardPage() {
             >
               {CURRENCY.format(overview?.totals.net || 0)}
             </div>
-            {compare && <div className="mt-2 text-xs text-slate-500">vs prev: {deltaText(compare.deltas.net)}</div>}
+            {compare && <div className="mt-2 text-xs text-slate-500">vs B period: {deltaText(compare.delta.net)}</div>}
           </article>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-slate-900">Compare: Top Category Movers</h2>
-            <div className="text-xs text-slate-500">Basis: {compareGranularity}</div>
+            <div className="text-xs text-slate-500">{comparePeriods?.label || "Period A vs Period B"}</div>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-2">
             {(compare?.categoryDeltas || []).slice(0, 5).map((row) => (
@@ -611,7 +832,7 @@ export default function DashboardPage() {
                   </span>
                 </div>
                 <div className="mt-1 text-slate-500">
-                  current {CURRENCY.format(row.current)} · previous {CURRENCY.format(row.previous)} ·{" "}
+                  A {CURRENCY.format(row.current)} · B {CURRENCY.format(row.previous)} ·{" "}
                   {row.percent >= 0 ? "+" : "-"}
                   {PERCENT.format(Math.abs(row.percent))}
                 </div>
@@ -682,10 +903,8 @@ export default function DashboardPage() {
               />
               <div className="space-y-2">
                 {(overview?.spendByCategory || []).slice(0, 8).map((row) => (
-                  <button
+                  <div
                     key={row.category}
-                    type="button"
-                    onClick={() => goToCategoryDrilldown(row.category)}
                     className="group relative w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs hover:border-blue-300 hover:bg-blue-50"
                   >
                     <div className="flex items-center justify-between">
@@ -719,7 +938,7 @@ export default function DashboardPage() {
                         {!(row.recentTransactions || []).length && <div>-</div>}
                       </div>
                     </div>
-                  </button>
+                  </div>
                 ))}
                 {!(overview?.spendByCategory.length) && (
                   <p className="text-sm text-slate-500">No spending rows in range.</p>
