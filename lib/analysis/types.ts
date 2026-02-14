@@ -22,6 +22,8 @@ export type CategorySource = "rule" | "manual" | "default";
 
 export type NormalizedTransaction = {
   id: string;
+  // Cross-file dedupe key. Keep id unique per source, dedupeKey stable by business fields.
+  dedupeKey: string;
   accountId: string;
   date: string;
   descriptionRaw: string;

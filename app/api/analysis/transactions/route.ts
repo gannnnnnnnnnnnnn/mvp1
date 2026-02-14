@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { CATEGORY_TAXONOMY } from "@/lib/analysis/types";
-import { loadCategorizedTransactions } from "@/lib/analysis/analytics";
+import { loadCategorizedTransactionsForScope } from "@/lib/analysis/analytics";
 
 function errorJson(status: number, code: string, message: string) {
   return NextResponse.json(
@@ -16,12 +16,25 @@ function isCategory(value: string) {
   return CATEGORY_TAXONOMY.includes(value as (typeof CATEGORY_TAXONOMY)[number]);
 }
 
+function parseFileIds(searchParams: URLSearchParams) {
+  const direct = searchParams.getAll("fileIds").flatMap((value) =>
+    value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+  );
+  return [...new Set(direct)];
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const fileId = (searchParams.get("fileId") || "").trim();
+  const fileIds = parseFileIds(searchParams);
+  const scopeRaw = (searchParams.get("scope") || "").trim();
+  const scope = scopeRaw === "all" ? "all" : fileId ? "file" : fileIds.length > 0 ? "selected" : "service";
 
-  if (!fileId) {
-    return errorJson(400, "BAD_REQUEST", "fileId is required.");
+  if (!fileId && fileIds.length === 0 && scope !== "all") {
+    return errorJson(400, "BAD_REQUEST", "fileId or fileIds (or scope=all) is required.");
   }
 
   const dateFrom = (searchParams.get("dateFrom") || "").trim() || undefined;
@@ -35,8 +48,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await loadCategorizedTransactions({
+    const result = await loadCategorizedTransactionsForScope({
       fileId,
+      fileIds,
+      scope,
       accountId: (searchParams.get("accountId") || "").trim() || undefined,
       dateFrom,
       dateTo,
@@ -46,7 +61,11 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      fileId,
+      fileId: result.fileId,
+      fileIds: result.fileIds,
+      filesIncludedCount: result.filesIncludedCount,
+      txCountBeforeDedupe: result.txCountBeforeDedupe,
+      dedupedCount: result.dedupedCount,
       templateType: result.templateType,
       accountId: result.accountId,
       needsReview: result.needsReview,
@@ -59,6 +78,10 @@ export async function GET(request: Request) {
       categories: CATEGORY_TAXONOMY,
     });
   } catch (err: unknown) {
+    if (err instanceof Error && err.message === "NO_FILES_SELECTED") {
+      return errorJson(400, "BAD_REQUEST", "No files selected for analysis.");
+    }
+
     if (err instanceof Error && err.message === "BAD_FILE_ID") {
       return errorJson(400, "BAD_REQUEST", "Invalid fileId format.");
     }
