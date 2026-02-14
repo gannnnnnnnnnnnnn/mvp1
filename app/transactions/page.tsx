@@ -234,21 +234,22 @@ export default function TransactionsPage() {
   const categoryList = result?.categories || [];
 
   return (
-    <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h1 className="text-2xl font-semibold text-slate-900">Transactions</h1>
-          <p className="mt-1 text-sm text-slate-600">
+    <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
+      <div className="mx-auto max-w-[1280px] space-y-6">
+        <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h1 className="text-3xl font-semibold text-slate-900">Transactions</h1>
+          <p className="mt-2 text-sm text-slate-600">
             Search, filter, and assign categories. All analytics remain traceable to tx IDs.
           </p>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-6">
-            <label className="space-y-1 text-xs font-medium text-slate-600 md:col-span-2">
+          <div className="mt-5 text-sm font-semibold text-slate-800">Filter Bar</div>
+          <div className="mt-3 grid gap-4 lg:grid-cols-12">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-4">
               File
               <select
                 value={selectedFileId}
                 onChange={(e) => setSelectedFileId(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="">Select a file</option>
                 {files.map((file) => (
@@ -259,22 +260,22 @@ export default function TransactionsPage() {
               </select>
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
               Search
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="merchant / description"
-                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               />
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
               Category
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="">All</option>
                 {categoryList.map((item) => (
@@ -285,28 +286,28 @@ export default function TransactionsPage() {
               </select>
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
               Date From
               <input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               />
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
               Date To
               <input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               />
             </label>
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             <button
               onClick={() => {
                 if (selectedFileId) {
@@ -314,7 +315,7 @@ export default function TransactionsPage() {
                 }
               }}
               disabled={isLoading || !selectedFileId}
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+              className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
               {isLoading ? "Loading..." : "Apply Filters"}
             </button>
@@ -328,16 +329,17 @@ export default function TransactionsPage() {
                   void fetchTransactions(selectedFileId);
                 }
               }}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100"
+              className="h-10 rounded-lg border border-slate-300 px-4 text-sm text-slate-700 hover:bg-slate-100"
             >
               Clear Filters
             </button>
           </div>
 
           {result && (
-            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+              <div className="mb-1 font-medium uppercase tracking-wide text-slate-500">Debug</div>
               <div>
-                Template: <span className="font-medium">{templateLabel(result.templateType)}</span> (
+                Template: <span className="text-slate-700">{templateLabel(result.templateType)}</span> (
                 {result.templateType})
               </div>
               <div>
@@ -354,7 +356,7 @@ export default function TransactionsPage() {
                   : ""}
               </div>
               <div>
-                File: <span className="font-mono">{selectedFileId}</span>
+                File: <span className="font-mono text-slate-700">{selectedFileId}</span>
                 {selectedFileName ? ` · ${selectedFileName}` : ""}
               </div>
             </div>

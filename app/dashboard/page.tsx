@@ -297,19 +297,22 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto max-w-[1280px] space-y-6">
-        <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h1 className="text-3xl font-semibold text-slate-900">Phase 3 Dashboard</h1>
           <p className="mt-2 text-sm text-slate-600">
             Category analytics and period comparisons for CommBank parsed transactions.
           </p>
+        </section>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-5">
-            <label className="space-y-1 text-xs font-medium text-slate-600">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4 text-sm font-semibold text-slate-800">Filter Bar</div>
+          <div className="grid gap-4 lg:grid-cols-12">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-4">
               File
               <select
                 value={selectedFileId}
                 onChange={(e) => setSelectedFileId(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="">Select a file</option>
                 {files.map((file) => (
@@ -320,65 +323,66 @@ export default function DashboardPage() {
               </select>
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
               Granularity
               <select
                 value={granularity}
                 onChange={(e) => setGranularity(e.target.value as "month" | "week")}
-                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="month">Month</option>
                 <option value="week">Week</option>
               </select>
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
               Date From
               <input
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
                 type="date"
-                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               />
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
               Date To
               <input
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
                 type="date"
-                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               />
             </label>
 
-            <button
-              type="button"
-              onClick={() => {
-                if (selectedFileId) {
-                  void fetchAnalytics(selectedFileId);
-                }
-              }}
-              disabled={isLoading || !selectedFileId}
-              className="self-end rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-            >
-              {isLoading ? "Loading..." : "Refresh"}
-            </button>
+            <div className="flex items-end lg:col-span-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedFileId) {
+                    void fetchAnalytics(selectedFileId);
+                  }
+                }}
+                disabled={isLoading || !selectedFileId}
+                className="h-10 w-full rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+              >
+                {isLoading ? "Loading..." : "Apply"}
+              </button>
+            </div>
           </div>
 
           {overview && (
-            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+              <div className="mb-1 font-medium uppercase tracking-wide text-slate-500">Debug</div>
               <div>
-                Template: <span className="font-medium">{templateLabel(overview.templateType)}</span> (
+                Template: <span className="text-slate-700">{templateLabel(overview.templateType)}</span> (
                 {overview.templateType})
               </div>
               <div>
                 Header: {overview.quality?.headerFound ? "found" : "not found"} | Continuity:{" "}
                 {continuitySummary(overview.quality)}
               </div>
-              <div>
-                Continuity skipped: {skippedSummary(overview.quality)}
-              </div>
+              <div>Continuity skipped: {skippedSummary(overview.quality)}</div>
               <div>
                 Review: {overview.needsReview ? "yes" : "no"}
                 {overview.needsReview && overview.quality?.needsReviewReasons?.length
@@ -386,18 +390,18 @@ export default function DashboardPage() {
                   : ""}
               </div>
               <div>
-                File: <span className="font-mono">{selectedFileId}</span>
+                File: <span className="font-mono text-slate-700">{selectedFileId}</span>
                 {selectedFileName ? ` · ${selectedFileName}` : ""}
               </div>
             </div>
           )}
 
           {error && (
-            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {error.code}: {error.message}
             </div>
           )}
-        </header>
+        </section>
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
