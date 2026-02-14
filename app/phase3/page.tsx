@@ -105,6 +105,10 @@ export default function Phase3DatasetHomePage() {
   }, [scopeMode, selectedFileIds]);
 
   const monthChips = [...(overview?.availableMonths || [])].sort((a, b) => b.localeCompare(a));
+  const latestMonth = useMemo(
+    () => [...(overview?.availableMonths || [])].sort().at(-1) || "",
+    [overview?.availableMonths]
+  );
 
   const navigateToMonth = (month: string) => {
     const params = buildScopeParams(scopeMode, selectedFileIds);
@@ -198,20 +202,46 @@ export default function Phase3DatasetHomePage() {
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Dataset Coverage</h2>
-          <p className="mt-2 text-sm text-slate-600">
-            {overview?.datasetDateMin || "-"} → {overview?.datasetDateMax || "-"} · Months: {overview?.availableMonths?.length || 0} · Files: {overview?.filesIncludedCount || 0}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            Selected file names: {selectedFileNames.length ? selectedFileNames.join(", ") : "All files"}
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <a
-              href={`/phase3/compare?${buildScopeParams(scopeMode, selectedFileIds).toString()}`}
-              className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
-            >
-              Open Compare View
-            </a>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Dataset Coverage</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {overview?.datasetDateMin || "-"} → {overview?.datasetDateMax || "-"} ·{" "}
+                {overview?.availableMonths?.length || 0} months ·{" "}
+                {overview?.filesIncludedCount || 0} files
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Scope: {scopeMode === "all" ? "All files" : selectedFileNames.join(", ") || "Selected files"}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {latestMonth && (
+                <a
+                  href={`/phase3/period?${(() => {
+                    const params = buildScopeParams(scopeMode, selectedFileIds);
+                    params.set("type", "month");
+                    params.set("key", latestMonth);
+                    return params.toString();
+                  })()}`}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                >
+                  Explore latest period
+                </a>
+              )}
+              <a
+                href={`/phase3/compare?${buildScopeParams(scopeMode, selectedFileIds).toString()}`}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Compare
+              </a>
+              <a
+                href="/transactions"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Workspace
+              </a>
+            </div>
           </div>
         </section>
 
