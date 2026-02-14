@@ -34,14 +34,21 @@ export default function RootLayout({
               <div className="text-sm font-semibold text-slate-900">
                 Personal Cashflow MVP
               </div>
-              <nav className="flex items-center gap-4 text-sm text-slate-600">
+              <nav className="flex items-center gap-5 text-sm text-slate-600">
+                <Link href="/phase3" className="font-medium text-slate-900 hover:text-blue-700">
+                  Dataset Home
+                </Link>
+                <Link href="/phase3/compare" className="font-medium text-slate-900 hover:text-blue-700">
+                  Compare
+                </Link>
                 <Link href="/" className="hover:text-slate-900">
                   Workspace
                 </Link>
-                <Link href="/dashboard" className="hover:text-slate-900">
+                <span className="text-xs text-slate-400">Legacy:</span>
+                <Link href="/dashboard" className="text-xs text-slate-500 hover:text-slate-800">
                   Dashboard
                 </Link>
-                <Link href="/transactions" className="hover:text-slate-900">
+                <Link href="/transactions" className="text-xs text-slate-500 hover:text-slate-800">
                   Transactions
                 </Link>
               </nav>

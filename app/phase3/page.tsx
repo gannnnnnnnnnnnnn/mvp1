@@ -188,6 +188,14 @@ export default function Phase3DatasetHomePage() {
           <p className="mt-1 text-xs text-slate-500">
             Selected file names: {selectedFileNames.length ? selectedFileNames.join(", ") : "All files"}
           </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a
+              href={`/phase3/compare?${buildScopeParams(scopeMode, selectedFileIds).toString()}`}
+              className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+            >
+              Open Compare View
+            </a>
+          </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
