@@ -251,16 +251,17 @@ export default function Phase3DatasetHomePage() {
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Month Navigation</h2>
-          <p className="mt-1 text-sm text-slate-600">Click a month to open Month View.</p>
+          <h2 className="text-lg font-semibold text-slate-900">Period Navigation</h2>
+          <p className="mt-1 text-sm text-slate-600">Click a month to open Specific Period View.</p>
           <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
             {monthChips.map((month) => {
               const params = buildScopeParams(scopeMode, selectedFileIds);
-              params.set("m", month);
+              params.set("type", "month");
+              params.set("key", month);
               return (
                 <a
                   key={month}
-                  href={`/phase3/month?${params.toString()}`}
+                  href={`/phase3/period?${params.toString()}`}
                   className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-center text-sm font-medium text-slate-800 hover:border-blue-300 hover:bg-blue-50"
                 >
                   {month}
