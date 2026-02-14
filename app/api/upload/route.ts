@@ -15,6 +15,8 @@ import {
   ensureUploadsDir,
   FileMeta,
   findByContentHash,
+  readIndex,
+  replaceIndex,
   uploadsDirAbsolute,
 } from "@/lib/fileStore";
 
@@ -124,7 +126,35 @@ export async function POST(request: Request) {
     // Write the file to disk.
     const buffer = await fileToBuffer(file);
     const contentHash = createHash("sha256").update(buffer).digest("hex");
-    const existing = await findByContentHash(contentHash);
+    let existing = await findByContentHash(contentHash);
+    if (!existing) {
+      // Backward compatibility: old index rows may not have contentHash.
+      // We lazily compute and backfill missing hashes to keep dedupe reliable.
+      const current = await readIndex();
+      let touched = false;
+      for (const row of current) {
+        if (row.contentHash) {
+          continue;
+        }
+        const candidatePath = path.join(uploadsDirAbsolute, row.storedName);
+        try {
+          const candidateBuffer = await fs.readFile(candidatePath);
+          const candidateHash = createHash("sha256")
+            .update(candidateBuffer)
+            .digest("hex");
+          row.contentHash = candidateHash;
+          touched = true;
+          if (candidateHash === contentHash) {
+            existing = row;
+          }
+        } catch {
+          // Ignore unreadable old file rows and continue dedupe scan.
+        }
+      }
+      if (touched) {
+        await replaceIndex(current);
+      }
+    }
     if (existing) {
       return NextResponse.json(
         {
