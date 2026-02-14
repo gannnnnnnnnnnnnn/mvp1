@@ -12,11 +12,13 @@ type ApiError = { code: string; message: string };
 type Category =
   | "Groceries"
   | "Dining"
+  | "Food Delivery"
   | "Transport"
   | "Shopping"
   | "Bills&Utilities"
   | "Rent/Mortgage"
   | "Health"
+  | "Pet"
   | "Entertainment"
   | "Travel"
   | "Income"

@@ -29,9 +29,23 @@ const RULES: CategoryRule[] = [
     amountSign: "negative",
   },
   {
+    id: "food-delivery",
+    category: "Food Delivery",
+    merchantIncludes: [
+      "HUNGRYPANDA",
+      "EASI",
+      "UBER EATS",
+      "UBEREATS",
+      "DOORDASH",
+      "MENULOG",
+      "DELIVEROO",
+    ],
+    amountSign: "negative",
+  },
+  {
     id: "dining",
     category: "Dining",
-    merchantIncludes: ["MCDONALD", "KFC", "SUBWAY", "UBER EATS", "DOORDASH", "CAFE"],
+    merchantIncludes: ["MCDONALD", "KFC", "SUBWAY", "CAFE"],
     amountSign: "negative",
   },
   {
@@ -62,6 +76,20 @@ const RULES: CategoryRule[] = [
     id: "health",
     category: "Health",
     merchantIncludes: ["CHEMIST", "PHARMACY", "MEDICAL", "HOSPITAL", "DENTAL"],
+    amountSign: "negative",
+  },
+  {
+    id: "pet",
+    category: "Pet",
+    merchantIncludes: [
+      "VET",
+      "VETERINARY",
+      "PETSTOCK",
+      "PET BARN",
+      "PET CIRCLE",
+      "PET FOOD",
+      "GROOMING",
+    ],
     amountSign: "negative",
   },
   {

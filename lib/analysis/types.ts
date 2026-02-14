@@ -1,11 +1,13 @@
 export const CATEGORY_TAXONOMY = [
   "Groceries",
   "Dining",
+  "Food Delivery",
   "Transport",
   "Shopping",
   "Bills&Utilities",
   "Rent/Mortgage",
   "Health",
+  "Pet",
   "Entertainment",
   "Travel",
   "Income",
