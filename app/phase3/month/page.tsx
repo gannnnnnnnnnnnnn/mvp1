@@ -36,6 +36,56 @@ type DrilldownTx = {
   source: { fileId: string };
 };
 
+type UnknownMerchantItem = {
+  merchantNorm: string;
+  displayName: string;
+  txCount: number;
+  totalSpend: number;
+  lastDate: string;
+  sampleTransactions: Array<{
+    id: string;
+    date: string;
+    amount: number;
+    descriptionRaw: string;
+    fileId: string;
+  }>;
+};
+
+type CategoryOption =
+  | "Groceries"
+  | "Dining"
+  | "Food Delivery"
+  | "Transport"
+  | "Shopping"
+  | "Bills&Utilities"
+  | "Rent/Mortgage"
+  | "Health"
+  | "Pet"
+  | "Entertainment"
+  | "Travel"
+  | "Income"
+  | "Transfers"
+  | "Fees/Interest/Bank"
+  | "Other";
+
+const CATEGORY_OPTIONS: CategoryOption[] = [
+  "Groceries",
+  "Dining",
+  "Food Delivery",
+  "Transport",
+  "Shopping",
+  "Bills&Utilities",
+  "Rent/Mortgage",
+  "Health",
+  "Pet",
+  "Entertainment",
+  "Travel",
+  "Income",
+  "Transfers",
+  "Fees/Interest/Bank",
+  "Other",
+];
+
 function readMonthFromUrl() {
   if (typeof window === "undefined") return "";
   const query = new URLSearchParams(window.location.search);
@@ -91,6 +141,13 @@ export default function Phase3MonthPage() {
   const [drilldownRows, setDrilldownRows] = useState<DrilldownTx[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
   const [drilldownError, setDrilldownError] = useState<ApiError | null>(null);
+  const [triageItems, setTriageItems] = useState<UnknownMerchantItem[]>([]);
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [triageError, setTriageError] = useState<ApiError | null>(null);
+  const [selectedMerchant, setSelectedMerchant] = useState("");
+  const [triageCategory, setTriageCategory] = useState<CategoryOption>("Other");
+  const [triageSaving, setTriageSaving] = useState(false);
+  const [triageStatus, setTriageStatus] = useState("");
 
   const selectedFileNames = useMemo(
     () =>
@@ -111,6 +168,14 @@ export default function Phase3MonthPage() {
 
   const spendRows = (overview?.spendByCategory || []).slice(0, 8);
   const donutStyle = useMemo(() => makeDonutStyle(spendRows), [spendRows]);
+  const selectedMerchantItem = useMemo(
+    () => triageItems.find((item) => item.merchantNorm === selectedMerchant) || null,
+    [triageItems, selectedMerchant]
+  );
+  const unknownOtherSpend = useMemo(
+    () => triageItems.reduce((sum, item) => sum + item.totalSpend, 0),
+    [triageItems]
+  );
 
   async function fetchFiles() {
     const res = await fetch("/api/files");
@@ -185,6 +250,87 @@ export default function Phase3MonthPage() {
     }
   }, [scopeMode, selectedFileIds, month]);
 
+  const fetchTriage = useCallback(async () => {
+    setTriageLoading(true);
+    setTriageError(null);
+    try {
+      const params = buildScopeParams(scopeMode, selectedFileIds);
+      const range = monthRange(month);
+      if (range) {
+        params.set("dateFrom", range.dateFrom);
+        params.set("dateTo", range.dateTo);
+      }
+      const res = await fetch(`/api/analysis/triage/unknown-merchants?${params.toString()}`);
+      const data = (await res.json()) as
+        | { ok: true; unknownMerchants: UnknownMerchantItem[] }
+        | { ok: false; error: ApiError };
+      if (!data.ok) {
+        setTriageItems([]);
+        setTriageError(data.error);
+        return;
+      }
+      setTriageItems(data.unknownMerchants);
+      if (data.unknownMerchants.length > 0) {
+        setSelectedMerchant((prev) =>
+          prev && data.unknownMerchants.some((item) => item.merchantNorm === prev)
+            ? prev
+            : data.unknownMerchants[0].merchantNorm
+        );
+      } else {
+        setSelectedMerchant("");
+      }
+    } catch {
+      setTriageItems([]);
+      setTriageError({ code: "FETCH_FAILED", message: "Failed to load Other Inbox data." });
+    } finally {
+      setTriageLoading(false);
+    }
+  }, [scopeMode, selectedFileIds, month]);
+
+  const applyMerchantCategory = useCallback(async () => {
+    if (!selectedMerchant) return;
+    setTriageSaving(true);
+    setTriageStatus("");
+    try {
+      const res = await fetch("/api/analysis/category-override", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          merchantNorm: selectedMerchant,
+          category: triageCategory,
+          applyToMerchant: true,
+        }),
+      });
+      const data = (await res.json()) as { ok: true } | { ok: false; error: ApiError };
+      if (!data.ok) {
+        setTriageStatus(`${data.error.code}: ${data.error.message}`);
+        return;
+      }
+
+      setTriageStatus(`Applied ${triageCategory} to ${selectedMerchant}.`);
+      await Promise.all([
+        fetchMonthOverview(scopeMode, selectedFileIds, month),
+        fetchTriage(),
+      ]);
+      if (selectedCategory) {
+        await fetchCategoryDrilldown(selectedCategory);
+      }
+    } catch {
+      setTriageStatus("Failed to apply merchant override.");
+    } finally {
+      setTriageSaving(false);
+    }
+  }, [
+    selectedMerchant,
+    triageCategory,
+    scopeMode,
+    selectedFileIds,
+    month,
+    fetchTriage,
+    selectedCategory,
+    fetchCategoryDrilldown,
+  ]);
+
   useEffect(() => {
     const parsed = parseScopeFromWindow();
     const initialMonth = readMonthFromUrl();
@@ -220,6 +366,11 @@ export default function Phase3MonthPage() {
     if (!selectedCategory) return;
     void fetchCategoryDrilldown(selectedCategory);
   }, [selectedCategory, fetchCategoryDrilldown]);
+
+  useEffect(() => {
+    if (!month) return;
+    void fetchTriage();
+  }, [month, scopeMode, selectedFileIds, fetchTriage]);
 
   return (
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
@@ -455,9 +606,88 @@ export default function Phase3MonthPage() {
 
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Other Inbox (Month)</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Unknown merchants (`Other/default`) are listed in the next milestone with inline label actions.
+            <p className="mt-1 text-sm text-slate-600">
+              Label unknown merchants quickly and remove them from `Other/default`.
             </p>
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+              Unknown merchants: <span className="font-medium text-slate-900">{triageItems.length}</span> ·
+              Other/default spend: <span className="font-medium text-slate-900">{CURRENCY.format(unknownOtherSpend)}</span>
+            </div>
+
+            {triageError && (
+              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {triageError.code}: {triageError.message}
+              </div>
+            )}
+
+            <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
+              <div className="space-y-2">
+                {triageItems.map((item) => (
+                  <button
+                    key={item.merchantNorm}
+                    type="button"
+                    onClick={() => setSelectedMerchant(item.merchantNorm)}
+                    className={`w-full rounded border px-3 py-2 text-left text-xs ${selectedMerchant === item.merchantNorm ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"}`}
+                  >
+                    <div className="font-medium text-slate-800">{item.displayName}</div>
+                    <div className="mt-1 text-slate-500">
+                      {item.txCount} tx · {CURRENCY.format(item.totalSpend)} · last {item.lastDate}
+                    </div>
+                  </button>
+                ))}
+                {triageLoading && <p className="text-sm text-slate-500">Loading inbox...</p>}
+                {!triageLoading && triageItems.length === 0 && (
+                  <p className="text-sm text-slate-500">No unknown merchants in this month. Good signal quality.</p>
+                )}
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-medium text-slate-700">
+                  Selected: {selectedMerchantItem?.displayName || "-"}
+                </div>
+                <div className="mt-2 text-xs text-slate-500">Sample transactions</div>
+                <div className="mt-1 space-y-1 text-xs text-slate-600">
+                  {(selectedMerchantItem?.sampleTransactions || []).slice(0, 5).map((tx) => (
+                    <div key={tx.id} className="rounded border border-slate-200 bg-white px-2 py-1">
+                      <div className="flex items-center justify-between">
+                        <span>{tx.date}</span>
+                        <span className={tx.amount >= 0 ? "text-emerald-700" : "text-rose-700"}>
+                          {CURRENCY.format(tx.amount)}
+                        </span>
+                      </div>
+                      <div className="truncate text-[11px] text-slate-500">{tx.descriptionRaw}</div>
+                    </div>
+                  ))}
+                  {!(selectedMerchantItem?.sampleTransactions || []).length && <div>-</div>}
+                </div>
+
+                <label className="mt-3 block space-y-1 text-xs font-medium text-slate-600">
+                  Category
+                  <select
+                    value={triageCategory}
+                    onChange={(e) => setTriageCategory(e.target.value as CategoryOption)}
+                    className="h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-slate-900"
+                  >
+                    {CATEGORY_OPTIONS.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => void applyMerchantCategory()}
+                  disabled={!selectedMerchant || triageSaving}
+                  className="mt-3 h-9 w-full rounded bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                >
+                  {triageSaving ? "Applying..." : "Apply to merchant"}
+                </button>
+
+                {triageStatus && <div className="mt-2 text-xs text-slate-600">{triageStatus}</div>}
+              </div>
+            </div>
           </article>
         </section>
 
