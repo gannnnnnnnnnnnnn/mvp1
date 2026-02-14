@@ -104,6 +104,21 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
   "Other",
 ];
 
+const CATEGORY_GROUPS: Array<{ label: string; options: CategoryOption[] }> = [
+  { label: "Income", options: ["Income"] },
+  { label: "Transfers", options: ["Transfers"] },
+  {
+    label: "Essential Spend",
+    options: ["Groceries", "Bills&Utilities", "Transport", "Rent/Mortgage"],
+  },
+  {
+    label: "Lifestyle Spend",
+    options: ["Dining", "Food Delivery", "Entertainment", "Shopping", "Travel"],
+  },
+  { label: "Health & Pet", options: ["Health", "Pet"] },
+  { label: "Other / Uncategorized", options: ["Fees/Interest/Bank", "Other"] },
+];
+
 const PIE_COLORS = [
   "#0f766e",
   "#0369a1",
@@ -142,6 +157,13 @@ type CashflowPoint = {
 
 function readScopeLabel(value: unknown, fallback: ScopeMode) {
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function toCategoryOption(value: string | undefined): CategoryOption {
+  if (value && CATEGORY_OPTIONS.includes(value as CategoryOption)) {
+    return value as CategoryOption;
+  }
+  return "Other";
 }
 
 function readPeriodFromUrl(): { type: PeriodType; key: string } {
@@ -258,6 +280,30 @@ function CategoryTooltipCard(props: { row: PieRow }) {
   );
 }
 
+function GroupedCategorySelect(props: {
+  value: CategoryOption;
+  onChange: (next: CategoryOption) => void;
+  className?: string;
+}) {
+  return (
+    <select
+      value={props.value}
+      onChange={(e) => props.onChange(e.target.value as CategoryOption)}
+      className={props.className}
+    >
+      {CATEGORY_GROUPS.map((group) => (
+        <optgroup key={group.label} label={group.label}>
+          {group.options.map((category) => (
+            <option key={category} value={category}>
+              {category}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
+
 export default function Phase3PeriodPage() {
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [scopeMode, setScopeMode] = useState<ScopeMode>("all");
@@ -287,6 +333,9 @@ export default function Phase3PeriodPage() {
   const [triageCategory, setTriageCategory] = useState<CategoryOption>("Other");
   const [triageSaving, setTriageSaving] = useState(false);
   const [triageStatus, setTriageStatus] = useState("");
+  const [rowCategoryDraft, setRowCategoryDraft] = useState<Record<string, CategoryOption>>({});
+  const [rowSavingTxId, setRowSavingTxId] = useState<string | null>(null);
+  const [rowStatus, setRowStatus] = useState("");
   const pieCardRef = useRef<HTMLDivElement | null>(null);
 
   const selectedFileNames = useMemo(
@@ -596,6 +645,44 @@ export default function Phase3PeriodPage() {
     fetchCategoryDrilldown,
   ]);
 
+  const applyTransactionCategory = useCallback(
+    async (transactionId: string) => {
+      if (!transactionId) return;
+      const category = rowCategoryDraft[transactionId] || "Other";
+      setRowSavingTxId(transactionId);
+      setRowStatus("");
+
+      try {
+        const res = await fetch("/api/analysis/category-override", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            transactionId,
+            category,
+            applyToMerchant: false,
+          }),
+        });
+
+        const data = (await res.json()) as { ok: true } | { ok: false; error: ApiError };
+        if (!data.ok) {
+          setRowStatus(`${data.error.code}: ${data.error.message}`);
+          return;
+        }
+
+        setRowStatus(`Updated transaction category to ${category}.`);
+        if (selectedCategory) {
+          await fetchCategoryDrilldown(selectedCategory);
+        }
+        await fetchTriage();
+      } catch {
+        setRowStatus("Failed to update transaction category.");
+      } finally {
+        setRowSavingTxId(null);
+      }
+    },
+    [rowCategoryDraft, selectedCategory, fetchCategoryDrilldown, fetchTriage]
+  );
+
   useEffect(() => {
     const parsed = parseScopeFromWindow();
     const period = readPeriodFromUrl();
@@ -646,6 +733,23 @@ export default function Phase3PeriodPage() {
     }
     void fetchCategoryDrilldown(selectedCategory);
   }, [selectedCategory, fetchCategoryDrilldown]);
+
+  useEffect(() => {
+    if (drilldownRows.length === 0) {
+      setRowCategoryDraft({});
+      return;
+    }
+
+    setRowCategoryDraft((prev) => {
+      const next = { ...prev };
+      for (const row of drilldownRows) {
+        if (!next[row.id]) {
+          next[row.id] = toCategoryOption(row.category);
+        }
+      }
+      return next;
+    });
+  }, [drilldownRows]);
 
   useEffect(() => {
     if (!periodKey) return;
@@ -966,6 +1070,23 @@ export default function Phase3PeriodPage() {
                   <div className="mt-1 text-[11px] text-slate-500">
                     {tx.merchantNorm} · {tx.categorySource} · conf {tx.quality.confidence.toFixed(2)}
                   </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <GroupedCategorySelect
+                      value={rowCategoryDraft[tx.id] || toCategoryOption(tx.category)}
+                      onChange={(next) =>
+                        setRowCategoryDraft((prev) => ({ ...prev, [tx.id]: next }))
+                      }
+                      className="h-8 flex-1 rounded border border-slate-300 bg-white px-2 text-xs text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void applyTransactionCategory(tx.id)}
+                      disabled={rowSavingTxId === tx.id}
+                      className="h-8 rounded bg-blue-600 px-2 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                    >
+                      {rowSavingTxId === tx.id ? "Saving..." : "Apply"}
+                    </button>
+                  </div>
                 </div>
               ))}
 
@@ -977,6 +1098,7 @@ export default function Phase3PeriodPage() {
                     : "Select a category from the chart or list to open drilldown."}
                 </p>
               )}
+              {rowStatus && <p className="text-xs text-slate-600">{rowStatus}</p>}
             </div>
           </article>
 
@@ -1039,17 +1161,11 @@ export default function Phase3PeriodPage() {
 
                 <label className="mt-3 block space-y-1 text-xs font-medium text-slate-600">
                   Category
-                  <select
+                  <GroupedCategorySelect
                     value={triageCategory}
-                    onChange={(e) => setTriageCategory(e.target.value as CategoryOption)}
+                    onChange={(next) => setTriageCategory(next)}
                     className="h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-slate-900"
-                  >
-                    {CATEGORY_OPTIONS.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </label>
 
                 <button
