@@ -22,6 +22,10 @@ export default function Phase3DatasetHomePage() {
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [unknownSummary, setUnknownSummary] = useState<{
+    merchantCount: number;
+    transactionCount: number;
+  }>({ merchantCount: 0, transactionCount: 0 });
 
   const selectedFileNames = useMemo(
     () =>
@@ -66,12 +70,30 @@ export default function Phase3DatasetHomePage() {
       const data = (await res.json()) as OverviewResponse | { ok: false; error: ApiError };
       if (!data.ok) {
         setOverview(null);
+        setUnknownSummary({ merchantCount: 0, transactionCount: 0 });
         setError(data.error);
         return;
       }
       setOverview(data);
+
+      const triageParams = buildScopeParams(nextScopeMode, nextSelectedFileIds);
+      const triageRes = await fetch(
+        `/api/analysis/triage/unknown-merchants?${triageParams.toString()}`
+      );
+      const triageData = (await triageRes.json()) as
+        | { ok: true; unknownMerchantCount?: number; unknownTransactionsCount?: number }
+        | { ok: false; error: ApiError };
+      if (triageData.ok) {
+        setUnknownSummary({
+          merchantCount: triageData.unknownMerchantCount || 0,
+          transactionCount: triageData.unknownTransactionsCount || 0,
+        });
+      } else {
+        setUnknownSummary({ merchantCount: 0, transactionCount: 0 });
+      }
     } catch {
       setOverview(null);
+      setUnknownSummary({ merchantCount: 0, transactionCount: 0 });
       setError({ code: "FETCH_FAILED", message: "Failed to load dataset home data." });
     } finally {
       setIsLoading(false);
@@ -156,6 +178,26 @@ export default function Phase3DatasetHomePage() {
             </div>
           )}
         </section>
+
+        {unknownSummary.merchantCount > 0 && (
+          <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Help improve categories: review {unknownSummary.merchantCount} unknown merchants (
+            {unknownSummary.transactionCount} transactions).
+            <a
+              href={`/phase3/period?${(() => {
+                const params = buildScopeParams(scopeMode, selectedFileIds);
+                const latestMonth = monthChips[0];
+                params.set("type", "month");
+                if (latestMonth) params.set("key", latestMonth);
+                params.set("openInbox", "1");
+                return params.toString();
+              })()}`}
+              className="ml-2 font-semibold underline hover:text-amber-700"
+            >
+              Open latest period inbox
+            </a>
+          </section>
+        )}
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
