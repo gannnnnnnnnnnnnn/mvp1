@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 /**
  * Metadata shape from the backend. Duplicated here for clarity and type safety.
@@ -96,6 +96,18 @@ type PipelineStatus = {
   txCount?: number;
 };
 
+function monthRangeFromKey(key: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(key);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return null;
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 0));
+  const toDate = (date: Date) => date.toISOString().slice(0, 10);
+  return { dateFrom: toDate(start), dateTo: toDate(end) };
+}
+
 export default function Home() {
   // Local UI state hooks.
   const [sessionUserId, setSessionUserId] = useState<string>("");
@@ -106,6 +118,8 @@ export default function Home() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [pipelineStatuses, setPipelineStatuses] = useState<PipelineStatus[]>([]);
   const [showAdvancedActions, setShowAdvancedActions] = useState(false);
+  const [unknownMerchantCount, setUnknownMerchantCount] = useState(0);
+  const [latestAvailableMonth, setLatestAvailableMonth] = useState("");
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
 
@@ -179,6 +193,44 @@ export default function Home() {
       return clone;
     });
   };
+
+  const fetchUnknownMerchantSummary = useCallback(async () => {
+    try {
+      const overviewRes = await fetch("/api/analysis/overview?scope=all&granularity=month");
+      const overviewData = (await overviewRes.json()) as
+        | { ok: true; availableMonths?: string[] }
+        | { ok: false; error: ApiError };
+      if (!overviewData.ok) {
+        setUnknownMerchantCount(0);
+        setLatestAvailableMonth("");
+        return;
+      }
+
+      const months = [...(overviewData.availableMonths || [])].sort();
+      const latest = months[months.length - 1] || "";
+      setLatestAvailableMonth(latest);
+      const range = monthRangeFromKey(latest);
+      if (!range) {
+        setUnknownMerchantCount(0);
+        return;
+      }
+
+      const triageRes = await fetch(
+        `/api/analysis/triage/unknown-merchants?scope=all&dateFrom=${range.dateFrom}&dateTo=${range.dateTo}`
+      );
+      const triageData = (await triageRes.json()) as
+        | { ok: true; unknownMerchantCount?: number }
+        | { ok: false; error: ApiError };
+      if (!triageData.ok) {
+        setUnknownMerchantCount(0);
+        return;
+      }
+      setUnknownMerchantCount(triageData.unknownMerchantCount || 0);
+    } catch {
+      setUnknownMerchantCount(0);
+      setLatestAvailableMonth("");
+    }
+  }, []);
 
   const runAutoPipeline = async (file: FileMeta, key: string) => {
     upsertPipelineStatus({
@@ -590,6 +642,15 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (files.length === 0) {
+      setUnknownMerchantCount(0);
+      setLatestAvailableMonth("");
+      return;
+    }
+    void fetchUnknownMerchantSummary();
+  }, [files.length, fetchUnknownMerchantSummary]);
+
+  useEffect(() => {
     const cookieName = "pc_user_id";
     const existing = document.cookie
       .split(";")
@@ -686,6 +747,14 @@ export default function Home() {
               >
                 Open Dashboard
               </a>
+              {unknownMerchantCount > 0 && latestAvailableMonth && (
+                <a
+                  href={`/phase3/period?type=month&key=${encodeURIComponent(latestAvailableMonth)}&openInbox=1`}
+                  className="inline-flex items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100"
+                >
+                  Review Unknown Merchants ({unknownMerchantCount})
+                </a>
+              )}
             </div>
           </section>
         )}
