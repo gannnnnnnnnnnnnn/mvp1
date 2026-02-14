@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type FileMeta = {
   id: string;
@@ -168,6 +169,7 @@ function skippedSummary(quality?: OverviewResponse["quality"]) {
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [selectedFileId, setSelectedFileId] = useState("");
   const [granularity, setGranularity] = useState<"month" | "week">("month");
@@ -183,6 +185,17 @@ export default function DashboardPage() {
     () => files.find((f) => f.id === selectedFileId)?.originalName || "",
     [files, selectedFileId]
   );
+
+  const drilldownToTransactions = (categoryName: string) => {
+    if (!selectedFileId) return;
+    const params = new URLSearchParams({
+      fileId: selectedFileId,
+      category: categoryName,
+      ...(dateFrom ? { dateFrom } : {}),
+      ...(dateTo ? { dateTo } : {}),
+    });
+    router.push(`/transactions?${params.toString()}`);
+  };
 
   const fetchFiles = async () => {
     const res = await fetch("/api/files");
@@ -517,7 +530,12 @@ export default function DashboardPage() {
               />
               <div className="space-y-2">
                 {(overview?.spendByCategory || []).slice(0, 8).map((row) => (
-                  <div key={row.category} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                  <button
+                    key={row.category}
+                    type="button"
+                    onClick={() => drilldownToTransactions(row.category)}
+                    className="group relative w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs transition hover:border-blue-300 hover:bg-blue-50"
+                  >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-slate-800">{row.category}</span>
                       <span className="text-slate-600">{CURRENCY.format(row.amount)}</span>
@@ -525,7 +543,15 @@ export default function DashboardPage() {
                     <div className="mt-1 text-slate-500">
                       {PERCENT.format(row.share)} · <span title={row.transactionIds.join(", ")}>{row.transactionIds.length} tx</span>
                     </div>
-                  </div>
+                    <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-[320px] rounded-xl border border-slate-200 bg-white p-3 text-[11px] text-slate-600 shadow-lg group-hover:block">
+                      <div className="text-sm font-semibold text-slate-900">{row.category}</div>
+                      <div className="mt-1">
+                        Total {CURRENCY.format(row.amount)} · {PERCENT.format(row.share)}
+                      </div>
+                      <div className="mt-2">Transactions: {row.transactionIds.length}</div>
+                      <div className="mt-2 text-blue-700">Click card to view transactions</div>
+                    </div>
+                  </button>
                 ))}
                 {!(overview?.spendByCategory.length) && (
                   <p className="text-sm text-slate-500">No spending rows in range.</p>

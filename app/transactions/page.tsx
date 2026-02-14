@@ -112,6 +112,7 @@ export default function TransactionsPage() {
   const [savingId, setSavingId] = useState<string>("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [pendingCategories, setPendingCategories] = useState<Record<string, Category>>({});
+  const [page, setPage] = useState(1);
 
   const selectedFileName = useMemo(
     () => files.find((f) => f.id === selectedFileId)?.originalName || "",
@@ -162,6 +163,7 @@ export default function TransactionsPage() {
       }
 
       setResult(data);
+      setPage(1);
       setPendingCategories(
         data.transactions.reduce<Record<string, Category>>((acc, tx) => {
           acc[tx.id] = tx.category;
@@ -232,6 +234,14 @@ export default function TransactionsPage() {
   }, [selectedFileId]);
 
   const categoryList = result?.categories || [];
+  const pageSize = 100;
+  const totalRows = result?.transactions.length || 0;
+  const pageCount = Math.max(1, Math.ceil(totalRows / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pagedTransactions = (result?.transactions || []).slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
 
   return (
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
@@ -325,6 +335,7 @@ export default function TransactionsPage() {
                 setCategory("");
                 setDateFrom("");
                 setDateTo("");
+                setPage(1);
                 if (selectedFileId) {
                   void fetchTransactions(selectedFileId);
                 }
@@ -375,27 +386,62 @@ export default function TransactionsPage() {
         </header>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 text-sm text-slate-600">Rows: {result?.transactions.length || 0}</div>
+          <div className="sticky top-0 z-10 mb-3 flex items-center justify-between rounded-lg border border-slate-200 bg-white/90 px-3 py-2 text-sm text-slate-600 backdrop-blur">
+            <div>
+              Rows: {totalRows}
+              {pageCount > 1 ? ` · Page ${currentPage}/${pageCount}` : ""}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                disabled={currentPage <= 1}
+                className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((prev) => Math.min(pageCount, prev + 1))}
+                disabled={currentPage >= pageCount}
+                className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <table className="min-w-[1200px] w-full text-left text-xs text-slate-700">
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Description</th>
-                  <th className="px-3 py-2">Merchant</th>
-                  <th className="px-3 py-2">Amount</th>
-                  <th className="px-3 py-2">Balance</th>
-                  <th className="px-3 py-2">Category</th>
+                  <th className="w-[110px] px-3 py-2">Date</th>
+                  <th className="w-[360px] px-3 py-2">Description</th>
+                  <th className="w-[220px] px-3 py-2">Merchant</th>
+                  <th className="w-[140px] px-3 py-2">Amount</th>
+                  <th className="w-[140px] px-3 py-2">Balance</th>
+                  <th className="w-[220px] px-3 py-2">Category</th>
                   <th className="px-3 py-2">Confidence</th>
                   <th className="px-3 py-2">Raw</th>
                 </tr>
               </thead>
               <tbody>
-                {(result?.transactions || []).map((tx) => (
-                  <tr key={tx.id} className="border-t align-top">
+                {pagedTransactions.map((tx, index) => (
+                  <tr key={tx.id} className={`border-t align-top ${index % 2 === 0 ? "bg-white" : "bg-slate-50/40"}`}>
                     <td className="px-3 py-2">{tx.date.slice(0, 10)}</td>
-                    <td className="px-3 py-2 max-w-[280px] whitespace-normal">{tx.descriptionRaw}</td>
-                    <td className="px-3 py-2 font-mono text-[11px]">{tx.merchantNorm}</td>
+                    <td className="max-w-[360px] px-3 py-2 whitespace-normal">
+                      <span title={tx.descriptionRaw}>
+                        {tx.descriptionRaw.length > 120
+                          ? `${tx.descriptionRaw.slice(0, 120)}...`
+                          : tx.descriptionRaw}
+                      </span>
+                    </td>
+                    <td className="max-w-[220px] px-3 py-2 font-mono text-[11px]">
+                      <span title={tx.merchantNorm}>
+                        {tx.merchantNorm.length > 28
+                          ? `${tx.merchantNorm.slice(0, 28)}...`
+                          : tx.merchantNorm}
+                      </span>
+                    </td>
                     <td className={`px-3 py-2 ${tx.amount >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
                       {CURRENCY.format(tx.amount)}
                     </td>
@@ -473,7 +519,7 @@ export default function TransactionsPage() {
             </table>
           </div>
 
-          {(result?.transactions || []).map((tx) =>
+          {pagedTransactions.map((tx) =>
             expanded[tx.id] ? (
               <div key={`${tx.id}-raw`} className="mt-2 rounded border border-slate-200 bg-slate-50 p-2 text-xs">
                 <div className="font-mono text-[11px] text-slate-600">txId: {tx.id}</div>
