@@ -367,6 +367,12 @@ export default function DashboardPage() {
     return params;
   };
 
+  const goToCategoryDrilldown = (categoryName: string) => {
+    const params = buildSharedScopeParams();
+    params.set("category", categoryName);
+    router.push(`/transactions?${params.toString()}`);
+  };
+
   const goToCategoryMonthDrilldown = (categoryName: string, period: string) => {
     const params = buildSharedScopeParams();
     params.set("category", categoryName);
@@ -914,7 +920,7 @@ export default function DashboardPage() {
                     <div className="mt-1 text-slate-500">
                       {PERCENT.format(row.share)} · <span title={row.transactionIds.join(", ")}>{row.transactionIds.length} tx</span>
                     </div>
-                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-[320px] rounded-lg border border-slate-300 bg-white p-2 text-[11px] text-slate-700 shadow-xl group-hover:block">
+                    <div className="absolute left-0 top-full z-20 mt-1 hidden w-[320px] rounded-lg border border-slate-300 bg-white p-2 text-[11px] text-slate-700 shadow-xl group-hover:block">
                       <div className="font-semibold text-slate-900">{row.category}</div>
                       <div className="mt-1">
                         total {CURRENCY.format(row.amount)} · {row.transactionIds.length} tx
@@ -937,6 +943,16 @@ export default function DashboardPage() {
                         ))}
                         {!(row.recentTransactions || []).length && <div>-</div>}
                       </div>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          goToCategoryDrilldown(row.category);
+                        }}
+                        className="mt-2 rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        View transactions
+                      </button>
                     </div>
                   </div>
                 ))}
