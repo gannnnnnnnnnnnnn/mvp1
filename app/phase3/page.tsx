@@ -29,7 +29,6 @@ export default function Phase3DatasetHomePage() {
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [scopeMode, setScopeMode] = useState<ScopeMode>("all");
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
-  const [expandedYears, setExpandedYears] = useState<Record<string, boolean>>({});
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -107,23 +106,6 @@ export default function Phase3DatasetHomePage() {
     pushScopeIntoUrl(scopeMode, selectedFileIds);
   }, [scopeMode, selectedFileIds]);
 
-  const monthChips = [...(overview?.availableMonths || [])].sort((a, b) => b.localeCompare(a));
-  const monthsByYear = useMemo(() => {
-    const grouped = new Map<string, string[]>();
-    for (const month of monthChips) {
-      const year = month.slice(0, 4);
-      if (!grouped.has(year)) {
-        grouped.set(year, []);
-      }
-      grouped.get(year)?.push(month);
-    }
-    return [...grouped.entries()]
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([year, months]) => ({
-        year,
-        months: [...months].sort((a, b) => b.localeCompare(a)),
-      }));
-  }, [monthChips]);
   const latestMonth = useMemo(
     () => [...(overview?.availableMonths || [])].sort().at(-1) || "",
     [overview?.availableMonths]
@@ -348,52 +330,6 @@ export default function Phase3DatasetHomePage() {
               </ResponsiveContainer>
             ) : (
               <p className="text-sm text-slate-500">No monthly cashflow points available.</p>
-            )}
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Period Navigation</h2>
-          <p className="mt-1 text-sm text-slate-600">Grouped by year for faster scanning.</p>
-          <div className="mt-4 space-y-3">
-            {monthsByYear.map((group) => (
-              <div key={group.year} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setExpandedYears((prev) => ({
-                      ...prev,
-                      [group.year]: !prev[group.year],
-                    }))
-                  }
-                  className="flex w-full items-center justify-between text-left text-sm font-semibold text-slate-800"
-                >
-                  <span>{group.year}</span>
-                  <span className="text-xs text-slate-500">
-                    {group.months.length} months · {expandedYears[group.year] ? "collapse" : "expand"}
-                  </span>
-                </button>
-                {expandedYears[group.year] && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {group.months.map((month) => (
-                      <button
-                        key={month}
-                        type="button"
-                        onClick={() => navigateToMonth(month)}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:border-blue-300 hover:bg-blue-50"
-                        title={month}
-                      >
-                        {month.slice(5)}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-            {monthsByYear.length === 0 && (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
-                No month data available in current dataset scope.
-              </div>
             )}
           </div>
         </section>
