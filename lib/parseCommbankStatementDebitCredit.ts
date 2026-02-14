@@ -328,6 +328,18 @@ function pushWarning(
   warnings.push({ rawLine, reason, confidence: clamp01(confidence) });
 }
 
+function removeWarningForRawLine(
+  warnings: ParseWarning[],
+  rawLine: string,
+  reason: string
+) {
+  for (let i = warnings.length - 1; i >= 0; i -= 1) {
+    if (warnings[i].rawLine === rawLine && warnings[i].reason === reason) {
+      warnings.splice(i, 1);
+    }
+  }
+}
+
 function pickBalanceCandidateIndex(tokens: MoneyTokenWithLine[]) {
   for (let i = tokens.length - 1; i >= 0; i -= 1) {
     const parsed = tokens[i].parsed;
@@ -631,6 +643,9 @@ function finalizeBlock(params: {
         };
       }
       pushWarning(warnings, rawBlock, "AMOUNT_INFERRED_FROM_BALANCE_DIFF", 0.72);
+      // Suppress sign-uncertain warning for the same row once balance-diff
+      // inference has produced a deterministic final amount sign.
+      removeWarningForRawLine(warnings, rawBlock, "AMOUNT_SIGN_UNCERTAIN");
     }
   }
 

@@ -155,7 +155,18 @@ export async function loadParsedTransactions(fileId: string): Promise<ParsedFile
   }
 
   if (templateType === "commbank_auto_debit_credit") {
+    const continuityStrong = continuity.checked >= 5 && continuity.passRate >= 0.95;
+    const inferredRawLineSet = new Set(
+      parsed.transactions
+        .filter((tx) => tx.amountSource === "balance_diff_inferred")
+        .map((tx) => tx.rawLine)
+    );
     const warnHas = (prefix: string) => parsed.warnings.some((w) => w.reason.startsWith(prefix));
+    const hasBlockingSignUncertain = parsed.warnings.some(
+      (w) =>
+        w.reason.startsWith("AMOUNT_SIGN_UNCERTAIN") &&
+        !(continuityStrong && inferredRawLineSet.has(w.rawLine))
+    );
 
     if (
       parsed.transactions.some(
@@ -167,7 +178,7 @@ export async function loadParsedTransactions(fileId: string): Promise<ParsedFile
 
     if (warnHas("AUTO_AMOUNT_NOT_FOUND")) pushReasonUnique(reasons, "AUTO_AMOUNT_NOT_FOUND");
     if (warnHas("AUTO_BALANCE_NOT_FOUND")) pushReasonUnique(reasons, "AUTO_BALANCE_NOT_FOUND");
-    if (warnHas("AMOUNT_SIGN_UNCERTAIN")) pushReasonUnique(reasons, "AMOUNT_SIGN_UNCERTAIN");
+    if (hasBlockingSignUncertain) pushReasonUnique(reasons, "AMOUNT_SIGN_UNCERTAIN");
     if (warnHas("BALANCE_SUFFIX_MISSING")) pushReasonUnique(reasons, "BALANCE_SUFFIX_MISSING");
 
     const coverageTotal = parsed.transactions.length;

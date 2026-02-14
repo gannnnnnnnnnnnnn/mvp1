@@ -325,6 +325,18 @@ export async function POST(request: Request) {
     }
 
     if (templateType === "commbank_auto_debit_credit") {
+      const continuityStrong = continuity.checked >= 5 && continuity.passRate >= 0.95;
+      const inferredRawLineSet = new Set(
+        parsed.transactions
+          .filter((tx) => tx.amountSource === "balance_diff_inferred")
+          .map((tx) => tx.rawLine)
+      );
+      const hasBlockingSignUncertain = parsed.warnings.some(
+        (w) =>
+          w.reason.startsWith("AMOUNT_SIGN_UNCERTAIN") &&
+          !(continuityStrong && inferredRawLineSet.has(w.rawLine))
+      );
+
       // If parser detected both debit and credit in the same block, mark review.
       if (parsed.warnings.some((w) => w.reason === "DEBIT_CREDIT_BOTH_PRESENT")) {
         pushReasonUnique(needsReviewReasons, "DEBIT_CREDIT_BOTH_PRESENT");
@@ -342,7 +354,7 @@ export async function POST(request: Request) {
       if (parsed.warnings.some((w) => w.reason.startsWith("AUTO_BALANCE_NOT_FOUND"))) {
         pushReasonUnique(needsReviewReasons, "AUTO_BALANCE_NOT_FOUND");
       }
-      if (parsed.warnings.some((w) => w.reason.startsWith("AMOUNT_SIGN_UNCERTAIN"))) {
+      if (hasBlockingSignUncertain) {
         pushReasonUnique(needsReviewReasons, "AMOUNT_SIGN_UNCERTAIN");
       }
       const hasOutlierWarning = parsed.warnings.some((w) =>
