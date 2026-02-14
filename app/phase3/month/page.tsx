@@ -186,7 +186,7 @@ export default function Phase3MonthPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
-  const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [drilldownRows, setDrilldownRows] = useState<DrilldownTx[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
   const [drilldownError, setDrilldownError] = useState<ApiError | null>(null);
@@ -409,17 +409,18 @@ export default function Phase3MonthPage() {
   }, [scopeMode, selectedFileIds, month]);
 
   useEffect(() => {
-    if (!selectedCategory && spendRows.length > 0) {
-      setSelectedCategory(spendRows[0].category);
-      return;
-    }
-    if (selectedCategory && !spendRows.some((row) => row.category === selectedCategory)) {
-      setSelectedCategory(spendRows[0]?.category || "");
+    if (!selectedCategory) return;
+    if (!spendRows.some((row) => row.category === selectedCategory)) {
+      setSelectedCategory(null);
+      setDrilldownRows([]);
     }
   }, [selectedCategory, spendRows]);
 
   useEffect(() => {
-    if (!selectedCategory) return;
+    if (!selectedCategory) {
+      setDrilldownRows([]);
+      return;
+    }
     void fetchCategoryDrilldown(selectedCategory);
   }, [selectedCategory, fetchCategoryDrilldown]);
 
@@ -570,6 +571,16 @@ export default function Phase3MonthPage() {
           <article className="overflow-visible rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Spend by Category</h2>
             <p className="mt-1 text-sm text-slate-600">Hover for details. Click to open embedded drilldown.</p>
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => setSelectedCategory(null)}
+                disabled={!selectedCategory}
+                className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Clear selection
+              </button>
+            </div>
             <div className="mt-4 grid gap-4 sm:grid-cols-[240px_1fr]">
               <div className="relative mx-auto h-56 w-56 overflow-visible">
                 <PieChart width={224} height={224}>
@@ -622,7 +633,7 @@ export default function Phase3MonthPage() {
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-slate-900">Category Drilldown</h2>
-              <span className="text-xs text-slate-500">{selectedCategory || "-"}</span>
+              <span className="text-xs text-slate-500">{selectedCategory || "overview"}</span>
             </div>
 
             {drilldownError && (
@@ -649,7 +660,11 @@ export default function Phase3MonthPage() {
 
               {drilldownLoading && <p className="text-sm text-slate-500">Loading drilldown...</p>}
               {!drilldownLoading && !drilldownRows.length && (
-                <p className="text-sm text-slate-500">No transactions for selected category in this month.</p>
+                <p className="text-sm text-slate-500">
+                  {selectedCategory
+                    ? "No transactions for selected category in this month."
+                    : "Select a category from the chart or list to open drilldown."}
+                </p>
               )}
             </div>
           </article>
