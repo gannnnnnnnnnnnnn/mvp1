@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Cell, Pie, PieChart, Tooltip } from "recharts";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Cell, Pie, PieChart } from "recharts";
 import {
   ApiError,
   FileMeta,
@@ -160,17 +160,32 @@ function availableKeysByType(overview: OverviewResponse | null, type: PeriodType
   return [...(overview.availableMonths || [])].sort();
 }
 
-function CategoryPieTooltip(props: {
-  active?: boolean;
-  payload?: Array<{ payload?: PieRow }>;
+function clampPieTooltip(params: {
+  chartX: number;
+  chartY: number;
+  containerWidth: number;
+  containerHeight: number;
 }) {
-  if (!props.active || !props.payload || props.payload.length === 0) {
-    return null;
+  const offset = 18;
+  const tooltipWidth = 320;
+  const tooltipHeight = 170;
+  let x = params.chartX + offset;
+  let y = params.chartY + offset;
+
+  if (x + tooltipWidth > params.containerWidth - 8) {
+    x = params.chartX - tooltipWidth - offset;
+  }
+  if (y + tooltipHeight > params.containerHeight - 8) {
+    y = params.chartY - tooltipHeight - offset;
   }
 
-  const row = props.payload[0]?.payload;
-  if (!row) return null;
+  if (x < 8) x = 8;
+  if (y < 8) y = 8;
+  return { x, y };
+}
 
+function CategoryTooltipCard(props: { row: PieRow }) {
+  const row = props.row;
   if (
     process.env.NODE_ENV !== "production" &&
     typeof window !== "undefined" &&
@@ -180,7 +195,7 @@ function CategoryPieTooltip(props: {
   }
 
   return (
-    <div className="w-[320px] rounded-lg border border-slate-300 bg-white p-2 text-[11px] text-slate-700 shadow-xl">
+    <div className="max-w-[320px] rounded-xl border border-slate-200 bg-white p-2 text-xs text-slate-700 shadow-lg">
       <div className="font-semibold text-slate-900">{row.category}</div>
       <div className="mt-1">
         total {CURRENCY.format(row.amount)} · {row.transactionIds.length} tx · {PERCENT.format(row.share)}
@@ -220,6 +235,12 @@ export default function Phase3PeriodPage() {
   const [error, setError] = useState<ApiError | null>(null);
 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [pieTooltip, setPieTooltip] = useState<{
+    row: PieRow | null;
+    x: number;
+    y: number;
+    visible: boolean;
+  }>({ row: null, x: 0, y: 0, visible: false });
   const [drilldownRows, setDrilldownRows] = useState<DrilldownTx[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
   const [drilldownError, setDrilldownError] = useState<ApiError | null>(null);
@@ -230,6 +251,7 @@ export default function Phase3PeriodPage() {
   const [triageCategory, setTriageCategory] = useState<CategoryOption>("Other");
   const [triageSaving, setTriageSaving] = useState(false);
   const [triageStatus, setTriageStatus] = useState("");
+  const pieCardRef = useRef<HTMLDivElement | null>(null);
 
   const selectedFileNames = useMemo(
     () =>
@@ -278,6 +300,40 @@ export default function Phase3PeriodPage() {
     () => triageItems.reduce((sum, item) => sum + item.totalSpend, 0),
     [triageItems]
   );
+
+  const handlePieMouseMove = useCallback((state: unknown) => {
+    const event = state as {
+      chartX?: number;
+      chartY?: number;
+      activePayload?: Array<{ payload?: PieRow }>;
+    };
+
+    const row = event.activePayload?.[0]?.payload;
+    const chartX = event.chartX;
+    const chartY = event.chartY;
+    const container = pieCardRef.current;
+
+    if (!row || typeof chartX !== "number" || typeof chartY !== "number" || !container) {
+      setPieTooltip((prev) =>
+        prev.visible ? { ...prev, visible: false, row: null } : prev
+      );
+      return;
+    }
+
+    const next = clampPieTooltip({
+      chartX,
+      chartY,
+      containerWidth: container.clientWidth,
+      containerHeight: container.clientHeight,
+    });
+
+    setPieTooltip({
+      row,
+      x: next.x,
+      y: next.y,
+      visible: true,
+    });
+  }, []);
 
   async function fetchFiles() {
     const res = await fetch("/api/files");
@@ -681,8 +737,20 @@ export default function Phase3PeriodPage() {
               </button>
             </div>
             <div className="mt-4 grid gap-4 sm:grid-cols-[240px_1fr]">
-              <div className="relative mx-auto h-56 w-56 overflow-visible">
-                <PieChart width={224} height={224}>
+              <div
+                ref={pieCardRef}
+                className="relative mx-auto h-56 w-56 overflow-visible"
+              >
+                <PieChart
+                  width={224}
+                  height={224}
+                  onMouseMove={handlePieMouseMove}
+                  onMouseLeave={() =>
+                    setPieTooltip((prev) =>
+                      prev.visible ? { ...prev, visible: false, row: null } : prev
+                    )
+                  }
+                >
                   <Pie
                     data={pieData}
                     dataKey="amount"
@@ -719,8 +787,15 @@ export default function Phase3PeriodPage() {
                       <Cell key={`${row.category}-active`} fill={row.fill} />
                     ))}
                   </Pie>
-                  <Tooltip content={<CategoryPieTooltip />} wrapperStyle={{ zIndex: 70 }} />
                 </PieChart>
+                {pieTooltip.visible && pieTooltip.row && (
+                  <div
+                    className="pointer-events-none absolute z-50 transition-opacity duration-100"
+                    style={{ left: pieTooltip.x, top: pieTooltip.y }}
+                  >
+                    <CategoryTooltipCard row={pieTooltip.row} />
+                  </div>
+                )}
               </div>
               <div className="space-y-2">
                 {spendRows.map((row) => (
