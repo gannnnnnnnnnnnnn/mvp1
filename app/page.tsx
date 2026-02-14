@@ -87,8 +87,46 @@ type ParseTransactionsResult = {
   debug?: SegmentDebug;
 };
 
+type ParseTransactionsApiSuccess = {
+  ok: true;
+  templateType?: "commbank_manual_amount_balance" | "commbank_auto_debit_credit" | "unknown";
+  transactions: ParsedTransaction[];
+  warnings: ParseWarning[];
+  quality?: ParseQuality;
+  needsReview?: boolean;
+  reviewReasons?: string[];
+  sectionTextPreview?: string;
+  debug?: SegmentDebug;
+};
+
+type UploadFlowStatus = {
+  localKey: string;
+  fileName: string;
+  stage: "queued" | "uploading" | "uploaded" | "parsing" | "parsed" | "failed";
+  fileId?: string;
+  txCount?: number;
+  needsReview?: boolean;
+  error?: string;
+};
+
+type UploadFlowSummary = {
+  uploadedCount: number;
+  parsedCount: number;
+  totalTxCount: number;
+  reviewCount: number;
+  failedCount: number;
+  latestMonth?: string;
+  unknownMerchantCount?: number;
+};
+
 export default function Home() {
   // Local UI state hooks.
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [isRunningMainFlow, setIsRunningMainFlow] = useState(false);
+  const [flowStatuses, setFlowStatuses] = useState<UploadFlowStatus[]>([]);
+  const [flowSummary, setFlowSummary] = useState<UploadFlowSummary | null>(null);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -140,6 +178,37 @@ export default function Home() {
     return mimeOk || extOk;
   };
 
+  const isPdfUploadFile = (file: File) => {
+    const type = (file.type || "").toLowerCase();
+    const name = (file.name || "").toLowerCase();
+    return type === "application/pdf" || name.endsWith(".pdf");
+  };
+
+  const updateFlowStatus = (localKey: string, patch: Partial<UploadFlowStatus>) => {
+    setFlowStatuses((prev) =>
+      prev.map((item) =>
+        item.localKey === localKey
+          ? {
+              ...item,
+              ...patch,
+            }
+          : item
+      )
+    );
+  };
+
+  const monthRangeFromKey = (key: string) => {
+    const match = /^(\d{4})-(\d{2})$/.exec(key);
+    if (!match) return null;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    if (month < 1 || month > 12) return null;
+    const start = new Date(Date.UTC(year, month - 1, 1));
+    const end = new Date(Date.UTC(year, month, 0));
+    const toIsoDate = (date: Date) => date.toISOString().slice(0, 10);
+    return { dateFrom: toIsoDate(start), dateTo: toIsoDate(end) };
+  };
+
   /**
    * Fetch file list from the API. Errors are surfaced to the UI.
    */
@@ -158,6 +227,205 @@ export default function Home() {
       setError({ code: "FETCH_FAILED", message: "获取文件列表失败。" });
     } finally {
       setIsLoadingList(false);
+    }
+  };
+
+  const fetchUnknownSummaryForFileIds = async (fileIds: string[]) => {
+    if (fileIds.length === 0) {
+      return { latestMonth: "", unknownMerchantCount: 0 };
+    }
+
+    const overviewParams = new URLSearchParams();
+    overviewParams.set("scope", "selected");
+    for (const fileId of fileIds) {
+      overviewParams.append("fileIds", fileId);
+    }
+    overviewParams.set("granularity", "month");
+
+    const overviewRes = await fetch(`/api/analysis/overview?${overviewParams.toString()}`);
+    const overviewData = (await overviewRes.json()) as
+      | { ok: true; availableMonths?: string[] }
+      | { ok: false; error: ApiError };
+    if (!overviewData.ok) {
+      return { latestMonth: "", unknownMerchantCount: 0 };
+    }
+
+    const months = [...(overviewData.availableMonths || [])].sort();
+    const latestMonth = months[months.length - 1] || "";
+    const latestRange = monthRangeFromKey(latestMonth);
+    if (!latestRange) {
+      return { latestMonth, unknownMerchantCount: 0 };
+    }
+
+    const triageParams = new URLSearchParams();
+    triageParams.set("scope", "selected");
+    for (const fileId of fileIds) {
+      triageParams.append("fileIds", fileId);
+    }
+    triageParams.set("dateFrom", latestRange.dateFrom);
+    triageParams.set("dateTo", latestRange.dateTo);
+
+    const triageRes = await fetch(
+      `/api/analysis/triage/unknown-merchants?${triageParams.toString()}`
+    );
+    const triageData = (await triageRes.json()) as
+      | { ok: true; unknownMerchantCount?: number }
+      | { ok: false; error: ApiError };
+
+    if (!triageData.ok) {
+      return { latestMonth, unknownMerchantCount: 0 };
+    }
+
+    return {
+      latestMonth,
+      unknownMerchantCount: triageData.unknownMerchantCount || 0,
+    };
+  };
+
+  const handleUploadAndParseMainFlow = async () => {
+    if (selectedFiles.length === 0) {
+      setError({ code: "NO_FILE", message: "请选择至少一个 PDF 文件。" });
+      return;
+    }
+
+    setIsRunningMainFlow(true);
+    setError(null);
+    setSuccessMsg(null);
+    setFlowSummary(null);
+    setUnknownSummaryForParsedFile(null);
+    setFlowStatuses(
+      selectedFiles.map((file, idx) => ({
+        localKey: `${file.name}-${file.lastModified}-${idx}`,
+        fileName: file.name,
+        stage: "queued",
+      }))
+    );
+
+    let uploadedCount = 0;
+    let parsedCount = 0;
+    let totalTxCount = 0;
+    let failedCount = 0;
+    let reviewCount = 0;
+    const parsedFileIds: string[] = [];
+    let latestParseResult: ParseTransactionsResult | null = null;
+
+    try {
+      for (let idx = 0; idx < selectedFiles.length; idx += 1) {
+        const file = selectedFiles[idx];
+        const localKey = `${file.name}-${file.lastModified}-${idx}`;
+
+        if (!isPdfUploadFile(file)) {
+          failedCount += 1;
+          updateFlowStatus(localKey, {
+            stage: "failed",
+            error: "Main flow only parses PDF files.",
+          });
+          continue;
+        }
+
+        updateFlowStatus(localKey, { stage: "uploading", error: undefined });
+        const form = new FormData();
+        form.append("file", file);
+
+        const uploadRes = await fetch("/api/upload", {
+          method: "POST",
+          body: form,
+        });
+        const uploadData = (await uploadRes.json()) as
+          | { ok: true; file: FileMeta }
+          | { ok: false; error: ApiError };
+
+        if (!uploadData.ok) {
+          failedCount += 1;
+          updateFlowStatus(localKey, {
+            stage: "failed",
+            error: `${uploadData.error.code}: ${uploadData.error.message}`,
+          });
+          continue;
+        }
+
+        uploadedCount += 1;
+        updateFlowStatus(localKey, {
+          stage: "uploaded",
+          fileId: uploadData.file.id,
+        });
+
+        updateFlowStatus(localKey, { stage: "parsing" });
+        const parseRes = await fetch("/api/parse/pdf-transactions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileId: uploadData.file.id }),
+        });
+        const parseData = (await parseRes.json()) as
+          | ParseTransactionsApiSuccess
+          | { ok: false; error: ApiError };
+
+        if (!parseData.ok) {
+          failedCount += 1;
+          updateFlowStatus(localKey, {
+            stage: "failed",
+            error: `${parseData.error.code}: ${parseData.error.message}`,
+          });
+          continue;
+        }
+
+        parsedCount += 1;
+        totalTxCount += parseData.transactions.length;
+        if (parseData.needsReview) {
+          reviewCount += 1;
+        }
+        parsedFileIds.push(uploadData.file.id);
+        latestParseResult = {
+          fileId: uploadData.file.id,
+          originalName: uploadData.file.originalName,
+          templateType: parseData.templateType ?? "unknown",
+          transactions: parseData.transactions,
+          warnings: parseData.warnings,
+          quality: parseData.quality,
+          needsReview: parseData.needsReview === true,
+          reviewReasons: Array.isArray(parseData.reviewReasons)
+            ? parseData.reviewReasons
+            : [],
+          sectionTextPreview:
+            typeof parseData.sectionTextPreview === "string"
+              ? parseData.sectionTextPreview
+              : "",
+          debug: parseData.debug,
+        };
+
+        updateFlowStatus(localKey, {
+          stage: "parsed",
+          fileId: uploadData.file.id,
+          txCount: parseData.transactions.length,
+          needsReview: parseData.needsReview === true,
+        });
+      }
+
+      setTxResult(latestParseResult);
+      await fetchFiles();
+      const unknownSummary = await fetchUnknownSummaryForFileIds(parsedFileIds);
+      setFlowSummary({
+        uploadedCount,
+        parsedCount,
+        totalTxCount,
+        reviewCount,
+        failedCount,
+        latestMonth: unknownSummary.latestMonth || undefined,
+        unknownMerchantCount: unknownSummary.unknownMerchantCount,
+      });
+
+      if (failedCount > 0 || reviewCount > 0) {
+        setSuccessMsg("Upload & Parse completed with partial issues. See progress and Advanced.");
+      } else {
+        setSuccessMsg("Upload & Parse completed.");
+      }
+    } catch {
+      setError({
+        code: "FLOW_FAILED",
+        message: "批量上传并解析失败，请重试或打开 Advanced 查看细节。",
+      });
+    } finally {
+      setIsRunningMainFlow(false);
     }
   };
 
@@ -294,17 +562,7 @@ export default function Home() {
       });
 
       const data = (await res.json()) as
-        | {
-            ok: true;
-            templateType?: "commbank_manual_amount_balance" | "commbank_auto_debit_credit" | "unknown";
-            transactions: ParsedTransaction[];
-            warnings: ParseWarning[];
-            quality?: ParseQuality;
-            needsReview?: boolean;
-            reviewReasons?: string[];
-            sectionTextPreview?: string;
-            debug?: SegmentDebug;
-          }
+        | ParseTransactionsApiSuccess
         | { ok: false; error: ApiError };
 
       if (!data.ok) {
@@ -530,40 +788,74 @@ export default function Home() {
     <main className="min-h-screen bg-slate-50 p-8">
       <div className="mx-auto max-w-5xl space-y-8">
         <header>
-          <h1 className="text-3xl font-semibold text-slate-900">Personal Cashflow</h1>
-          <p className="mt-2 text-slate-600">Upload CommBank PDF and parse transactions.</p>
+          <h1 className="text-4xl font-semibold text-slate-900">Personal Cashflow</h1>
+          <p className="mt-2 text-slate-600">
+            Upload CommBank PDFs, auto-parse, then jump to dataset analysis.
+          </p>
         </header>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-900">Upload</h2>
-          <p className="mt-1 text-sm text-slate-600">PDF only. Keep it simple: choose file, click upload.</p>
+          <h2 className="text-xl font-semibold text-slate-900">Upload & Parse</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Main flow: choose one or more PDFs and run parse automatically.
+          </p>
 
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700 hover:border-blue-500 hover:bg-blue-50">
+          <div className="mt-4">
+            <label
+              className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-sm text-slate-700 hover:border-blue-500 hover:bg-blue-50"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                const dropped = Array.from(event.dataTransfer?.files || []);
+                setSelectedFiles(dropped);
+                setError(null);
+                setSuccessMsg(null);
+                setFlowSummary(null);
+              }}
+            >
               <input
                 type="file"
-                accept=".pdf,.csv,application/pdf,text/csv"
+                multiple
+                accept=".pdf,application/pdf"
                 className="hidden"
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  setSelectedFile(file ?? null);
+                  const next = Array.from(e.target.files || []);
+                  setSelectedFiles(next);
                   setError(null);
                   setSuccessMsg(null);
+                  setFlowSummary(null);
                 }}
               />
-              <span className="font-medium">选择文件</span>
-              <span className="text-xs text-slate-500">text-based PDF</span>
+              <span className="font-medium">Drop PDFs here or click to select</span>
+              <span className="text-xs text-slate-500">
+                {selectedFiles.length > 0
+                  ? `${selectedFiles.length} file(s) selected`
+                  : "Supports multi-file selection"}
+              </span>
             </label>
+          </div>
 
-            <div className="text-sm text-slate-700">{selectedSummary}</div>
-
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
-              onClick={handleUpload}
-              disabled={isUploading}
+              onClick={() => {
+                void handleUploadAndParseMainFlow();
+              }}
+              disabled={isRunningMainFlow}
               className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
-              {isUploading ? "上传中..." : "Upload"}
+              {isRunningMainFlow ? "Uploading & Parsing..." : "Upload & Parse"}
             </button>
+            <a
+              href="/phase3"
+              className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Open Dataset
+            </a>
+            {selectedFiles.length > 0 && (
+              <div className="text-xs text-slate-600">
+                {selectedFiles.map((file) => file.name).join(" · ")}
+              </div>
+            )}
           </div>
 
           {error && (
@@ -578,11 +870,111 @@ export default function Home() {
           )}
         </section>
 
+        {flowStatuses.length > 0 && (
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h3 className="text-base font-semibold text-slate-900">Run Progress</h3>
+            <div className="mt-3 space-y-2 text-sm text-slate-700">
+              {flowStatuses.map((item) => (
+                <div key={item.localKey} className="rounded border border-slate-200 bg-slate-50 p-2">
+                  <div className="font-medium text-slate-800">{item.fileName}</div>
+                  <div className="mt-1 text-xs text-slate-600">
+                    status: {item.stage}
+                    {typeof item.txCount === "number" ? ` · tx: ${item.txCount}` : ""}
+                    {item.needsReview ? " · needsReview" : ""}
+                  </div>
+                  {item.error && <div className="mt-1 text-xs text-red-700">{item.error}</div>}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {flowSummary && (
+          <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-2xl text-white">
+                ✓
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-emerald-900">Parsed successfully</h3>
+                <p className="text-sm text-emerald-800">
+                  Parsed {flowSummary.parsedCount} files, {flowSummary.totalTxCount} transactions.
+                </p>
+                {(flowSummary.failedCount > 0 || flowSummary.reviewCount > 0) && (
+                  <p className="text-xs text-amber-800">
+                    Some files need review: failed {flowSummary.failedCount}, needsReview{" "}
+                    {flowSummary.reviewCount}.
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href="/phase3"
+                className="rounded bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800"
+              >
+                Go to Dataset
+              </a>
+              {(flowSummary.unknownMerchantCount || 0) > 0 && (
+                <a
+                  href={`/phase3/period?type=month${flowSummary.latestMonth ? `&key=${encodeURIComponent(flowSummary.latestMonth)}` : ""}&openInbox=1`}
+                  className="rounded border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-900 hover:bg-emerald-100"
+                >
+                  Review unknown merchants ({flowSummary.unknownMerchantCount || 0})
+                </a>
+              )}
+            </div>
+          </section>
+        )}
+
+        <details
+          open={isAdvancedOpen}
+          onToggle={(event) => setIsAdvancedOpen(event.currentTarget.open)}
+          className="rounded-2xl border border-slate-200 bg-white shadow-sm"
+        >
+          <summary className="cursor-pointer px-6 py-4 text-sm font-semibold text-slate-700">
+            Advanced (legacy manual controls)
+          </summary>
+          <div className="space-y-6 px-6 pb-6">
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-slate-900">Advanced Upload</h2>
+          <p className="mt-1 text-sm text-slate-600">Manual upload/debug entry, preserved for diagnostics.</p>
+
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700 hover:border-blue-500 hover:bg-blue-50">
+              <input
+                type="file"
+                accept=".pdf,.csv,application/pdf,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  setSelectedFile(file ?? null);
+                  setError(null);
+                  setSuccessMsg(null);
+                }}
+              />
+              <span className="font-medium">选择单个文件</span>
+              <span className="text-xs text-slate-500">legacy mode</span>
+            </label>
+
+            <div className="text-sm text-slate-700">{selectedSummary}</div>
+
+            <button
+              onClick={handleUpload}
+              disabled={isUploading}
+              className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+            >
+              {isUploading ? "上传中..." : "Upload"}
+            </button>
+          </div>
+        </section>
+
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-semibold text-slate-900">已上传文件列表</h2>
-              <p className="text-sm text-slate-600">每次刷新或重新打开页面都会从 uploads/index.json 读取。</p>
+              <h2 className="text-xl font-semibold text-slate-900">已上传文件列表（Advanced）</h2>
+              <p className="text-sm text-slate-600">Legacy debug list with manual Extract/Segment/Parse actions.</p>
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -959,6 +1351,8 @@ export default function Home() {
             </div>
           )}
         </section>
+          </div>
+        </details>
       </div>
     </main>
   );
