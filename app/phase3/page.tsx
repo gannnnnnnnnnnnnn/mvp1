@@ -30,6 +30,18 @@ export default function Phase3DatasetHomePage() {
         .filter(Boolean) as string[],
     [files, selectedFileIds]
   );
+  const datasetSeries = useMemo(
+    () => overview?.datasetMonthlySeries || [],
+    [overview?.datasetMonthlySeries]
+  );
+  const maxDatasetBar = useMemo(
+    () =>
+      Math.max(
+        0,
+        ...datasetSeries.map((row) => Math.max(row.income, row.spend, Math.abs(row.net)))
+      ),
+    [datasetSeries]
+  );
 
   async function fetchFiles() {
     const res = await fetch("/api/files");
@@ -176,6 +188,58 @@ export default function Phase3DatasetHomePage() {
           <p className="mt-1 text-xs text-slate-500">
             Selected file names: {selectedFileNames.length ? selectedFileNames.join(", ") : "All files"}
           </p>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Monthly Cashflow Trend</h2>
+          <p className="mt-1 text-sm text-slate-600">
+            Income / spend / net across the full selected dataset.
+          </p>
+          <div className="mt-4 space-y-3">
+            {datasetSeries.map((row) => (
+              <div key={row.month}>
+                <div className="flex items-center justify-between text-xs text-slate-600">
+                  <span className="font-medium text-slate-800">{row.month}</span>
+                  <span>{row.transactionIds.length} tx</span>
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <div className="h-2 flex-1 rounded-full bg-slate-100">
+                    <div
+                      className="h-2 rounded-full bg-emerald-500"
+                      style={{
+                        width:
+                          maxDatasetBar > 0
+                            ? `${Math.max(2, (row.income / maxDatasetBar) * 100)}%`
+                            : "0%",
+                      }}
+                    />
+                  </div>
+                  <span className="w-20 text-right text-[11px] text-slate-600">
+                    {CURRENCY.format(row.income)}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <div className="h-2 flex-1 rounded-full bg-slate-100">
+                    <div
+                      className="h-2 rounded-full bg-rose-500"
+                      style={{
+                        width:
+                          maxDatasetBar > 0
+                            ? `${Math.max(2, (row.spend / maxDatasetBar) * 100)}%`
+                            : "0%",
+                      }}
+                    />
+                  </div>
+                  <span className="w-20 text-right text-[11px] text-slate-600">
+                    {CURRENCY.format(row.spend)}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {!datasetSeries.length && (
+              <p className="text-sm text-slate-500">No monthly cashflow points available.</p>
+            )}
+          </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

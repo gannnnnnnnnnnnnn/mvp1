@@ -391,6 +391,14 @@ export function buildOverview(params: {
     Map<string, { amount: number; transactionIds: string[] }>
   >();
   const byMerchant = new Map<string, { amount: number; transactionIds: string[] }>();
+  const byMonthSeries = new Map<
+    string,
+    { income: number; spend: number; net: number; transactionIds: string[] }
+  >();
+  const byDaySeries = new Map<
+    string,
+    { income: number; spend: number; net: number; transactionIds: string[] }
+  >();
 
   for (const tx of sorted) {
     const key = periodKey(tx.date, granularity);
@@ -406,6 +414,32 @@ export function buildOverview(params: {
     current.net += tx.amount;
     current.transactionIds.push(tx.id);
     byPeriod.set(key, current);
+
+    const monthKey = tx.date.slice(0, 7);
+    const monthBucket = byMonthSeries.get(monthKey) || {
+      income: 0,
+      spend: 0,
+      net: 0,
+      transactionIds: [],
+    };
+    if (tx.amount > 0) monthBucket.income += tx.amount;
+    if (tx.amount < 0) monthBucket.spend += Math.abs(tx.amount);
+    monthBucket.net += tx.amount;
+    monthBucket.transactionIds.push(tx.id);
+    byMonthSeries.set(monthKey, monthBucket);
+
+    const dayKey = tx.date.slice(0, 10);
+    const dayBucket = byDaySeries.get(dayKey) || {
+      income: 0,
+      spend: 0,
+      net: 0,
+      transactionIds: [],
+    };
+    if (tx.amount > 0) dayBucket.income += tx.amount;
+    if (tx.amount < 0) dayBucket.spend += Math.abs(tx.amount);
+    dayBucket.net += tx.amount;
+    dayBucket.transactionIds.push(tx.id);
+    byDaySeries.set(dayKey, dayBucket);
 
     if (tx.amount < 0) {
       const cat = byCategory.get(tx.category) || { amount: 0, transactionIds: [] };
@@ -459,6 +493,12 @@ export function buildOverview(params: {
   const periods = [...byPeriod.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([period, value]) => ({ period, ...value }));
+  const datasetMonthlySeries = [...byMonthSeries.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, value]) => ({ month, ...value }));
+  const monthDailySeries = [...byDaySeries.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ date, ...value }));
 
   const spendByCategory = [...byCategory.entries()]
     .map(([category, value]) => {
@@ -534,6 +574,8 @@ export function buildOverview(params: {
   return {
     totals,
     periods,
+    datasetMonthlySeries,
+    monthDailySeries,
     spendByCategory,
     categoryTrendMonthly,
     topMerchants,

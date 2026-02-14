@@ -43,6 +43,20 @@ export type OverviewResponse = {
     net: number;
     transactionIds: string[];
   }>;
+  datasetMonthlySeries?: Array<{
+    month: string;
+    income: number;
+    spend: number;
+    net: number;
+    transactionIds: string[];
+  }>;
+  monthDailySeries?: Array<{
+    date: string;
+    income: number;
+    spend: number;
+    net: number;
+    transactionIds: string[];
+  }>;
   spendByCategory: Array<{
     category: string;
     amount: number;

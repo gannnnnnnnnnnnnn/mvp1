@@ -46,9 +46,13 @@ export default function Phase3MonthPage() {
     [files, selectedFileIds]
   );
 
+  const dailySeries = useMemo(
+    () => overview?.monthDailySeries || [],
+    [overview?.monthDailySeries]
+  );
   const maxPeriod = useMemo(
-    () => Math.max(0, ...(overview?.periods || []).map((row) => Math.max(row.income, row.spend))),
-    [overview?.periods]
+    () => Math.max(0, ...dailySeries.map((row) => Math.max(row.income, row.spend))),
+    [dailySeries]
   );
 
   async function fetchFiles() {
@@ -216,13 +220,13 @@ export default function Phase3MonthPage() {
 
         <section className="grid gap-4 xl:grid-cols-2">
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">Weekly Cashflow Trend</h2>
-            <p className="mt-1 text-sm text-slate-600">Weekly income and spend buckets inside selected month.</p>
+            <h2 className="text-lg font-semibold text-slate-900">Daily Cashflow Trend</h2>
+            <p className="mt-1 text-sm text-slate-600">Daily income and spend buckets inside selected month.</p>
             <div className="mt-4 space-y-3">
-              {(overview?.periods || []).map((row) => (
-                <div key={row.period}>
+              {dailySeries.map((row) => (
+                <div key={row.date}>
                   <div className="flex items-center justify-between text-xs text-slate-600">
-                    <span className="font-medium text-slate-800">{row.period}</span>
+                    <span className="font-medium text-slate-800">{row.date}</span>
                     <span>{row.transactionIds.length} tx</span>
                   </div>
                   <div className="mt-1 flex items-center gap-2">
@@ -249,7 +253,7 @@ export default function Phase3MonthPage() {
                   </div>
                 </div>
               ))}
-              {!overview?.periods.length && <p className="text-sm text-slate-500">No trend points available.</p>}
+              {!dailySeries.length && <p className="text-sm text-slate-500">No trend points available.</p>}
             </div>
           </article>
 
