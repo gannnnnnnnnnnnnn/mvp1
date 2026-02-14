@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
-  buildMonthComparison,
+  buildPeriodComparison,
+  CompareGranularity,
   loadCategorizedTransactionsForScope,
 } from "@/lib/analysis/analytics";
 
@@ -30,14 +31,17 @@ export async function GET(request: Request) {
   const fileIds = parseFileIds(searchParams);
   const scopeRaw = (searchParams.get("scope") || "").trim();
   const scope = scopeRaw === "all" ? "all" : fileId ? "file" : fileIds.length > 0 ? "selected" : "service";
-  const mode = (searchParams.get("mode") || "month").trim();
+  const mode = (searchParams.get("mode") || "current_vs_previous").trim();
+  const granularityRaw = (searchParams.get("granularity") || "month").trim();
+  const granularity: CompareGranularity =
+    granularityRaw === "quarter" || granularityRaw === "year" ? granularityRaw : "month";
 
   if (!fileId && fileIds.length === 0 && scope !== "all") {
     return errorJson(400, "BAD_REQUEST", "fileId or fileIds (or scope=all) is required.");
   }
 
-  if (mode !== "month") {
-    return errorJson(400, "BAD_REQUEST", "Only mode=month is supported in MVP.");
+  if (mode !== "current_vs_previous") {
+    return errorJson(400, "BAD_REQUEST", "Only mode=current_vs_previous is supported.");
   }
 
   const dateFrom = (searchParams.get("dateFrom") || "").trim() || undefined;
@@ -53,7 +57,10 @@ export async function GET(request: Request) {
       dateTo,
     });
 
-    const comparison = buildMonthComparison(result.transactions);
+    const comparison = buildPeriodComparison({
+      transactions: result.transactions,
+      granularity,
+    });
 
     return NextResponse.json({
       ok: true,
@@ -64,12 +71,14 @@ export async function GET(request: Request) {
       dedupedCount: result.dedupedCount,
       accountId: result.accountId,
       mode,
+      granularity,
       templateType: result.templateType,
       needsReview: result.needsReview,
       quality: result.quality,
       appliedFilters: {
         ...result.appliedFilters,
         mode,
+        granularity,
       },
       txCount: result.transactions.length,
       ...comparison,
