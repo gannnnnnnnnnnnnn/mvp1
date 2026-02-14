@@ -158,7 +158,14 @@ export default function Home() {
       const res = await fetch("/api/files");
       const data = await res.json();
       if (!data.ok) {
-        setError(data.error);
+        if (data.error?.code === "DUPLICATE_FILE") {
+          setError({
+            code: "DUPLICATE_FILE",
+            message: "File already uploaded. Please choose a different statement.",
+          });
+        } else {
+          setError(data.error);
+        }
         return;
       }
       setFiles(data.files as FileMeta[]);

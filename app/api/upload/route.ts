@@ -9,11 +9,12 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import {
-  appendMetadata,
+  appendMetadataDedupByHash,
   ensureUploadsDir,
   FileMeta,
+  findByContentHash,
   uploadsDirAbsolute,
 } from "@/lib/fileStore";
 
@@ -62,6 +63,7 @@ function buildMetadata(params: {
   id: string;
   storedName: string;
   relativePath: string;
+  contentHash: string;
 }): FileMeta {
   return {
     id: params.id,
@@ -71,6 +73,7 @@ function buildMetadata(params: {
     mimeType: params.file.type || "application/octet-stream",
     uploadedAt: new Date().toISOString(),
     path: params.relativePath,
+    contentHash: params.contentHash,
   };
 }
 
@@ -120,12 +123,46 @@ export async function POST(request: Request) {
 
     // Write the file to disk.
     const buffer = await fileToBuffer(file);
+    const contentHash = createHash("sha256").update(buffer).digest("hex");
+    const existing = await findByContentHash(contentHash);
+    if (existing) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            code: "DUPLICATE_FILE",
+            message: "File already uploaded.",
+          },
+        },
+        { status: 409 }
+      );
+    }
+
     await fs.writeFile(absolutePath, buffer);
 
     // Build and persist metadata (write temp then rename inside appendMetadata).
-    const metadata = buildMetadata({ file, id, storedName, relativePath });
+    const metadata = buildMetadata({
+      file,
+      id,
+      storedName,
+      relativePath,
+      contentHash,
+    });
     try {
-      await appendMetadata(metadata);
+      const dedupResult = await appendMetadataDedupByHash(metadata);
+      if (dedupResult.duplicate) {
+        await fs.unlink(absolutePath).catch(() => undefined);
+        return NextResponse.json(
+          {
+            ok: false,
+            error: {
+              code: "DUPLICATE_FILE",
+              message: "File already uploaded.",
+            },
+          },
+          { status: 409 }
+        );
+      }
     } catch {
       // Keep file/index consistency if metadata write fails.
       await fs.unlink(absolutePath).catch(() => undefined);

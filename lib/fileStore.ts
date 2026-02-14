@@ -15,6 +15,10 @@ export type FileMeta = {
   id: string;
   // Optional account scoping field for future multi-account analytics.
   accountId?: string;
+  // SHA-256 hash of the file content for duplicate prevention.
+  contentHash?: string;
+  // Optional parser template tag populated after parsing.
+  templateType?: string;
   originalName: string;
   storedName: string;
   size: number;
@@ -123,11 +127,40 @@ export async function appendMetadata(entry: FileMeta) {
 }
 
 /**
+ * Append a metadata record only when its content hash does not already exist.
+ * This keeps duplicate uploads out of index.json in the common case.
+ */
+export async function appendMetadataDedupByHash(
+  entry: FileMeta
+): Promise<{ duplicate: FileMeta | null }> {
+  return withIndexWriteLock(async () => {
+    const current = await readIndex();
+    const duplicate =
+      entry.contentHash
+        ? current.find((item) => item.contentHash && item.contentHash === entry.contentHash)
+        : undefined;
+    if (duplicate) {
+      return { duplicate };
+    }
+    current.push(entry);
+    await writeIndexSafe(current);
+    return { duplicate: null };
+  });
+}
+
+/**
  * Find a single metadata record by id.
  */
 export async function findById(id: string): Promise<FileMeta | undefined> {
   const current = await readIndex();
   return current.find((item) => item.id === id);
+}
+
+export async function findByContentHash(
+  contentHash: string
+): Promise<FileMeta | undefined> {
+  const current = await readIndex();
+  return current.find((item) => item.contentHash === contentHash);
 }
 
 /**
