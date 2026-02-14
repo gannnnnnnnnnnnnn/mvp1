@@ -73,7 +73,8 @@ type CompareResponse = {
   txCountBeforeDedupe?: number;
   dedupedCount?: number;
   accountId?: string;
-  mode: "month";
+  mode: "current_vs_previous";
+  granularity: "month" | "quarter" | "year";
   appliedFilters?: Record<string, unknown>;
   current: {
     income: number;
@@ -96,6 +97,13 @@ type CompareResponse = {
   };
   categoryDeltas: Array<{
     category: string;
+    current: number;
+    previous: number;
+    delta: number;
+    percent: number;
+  }>;
+  merchantDeltas?: Array<{
+    merchantNorm: string;
     current: number;
     previous: number;
     delta: number;
@@ -188,6 +196,9 @@ export default function DashboardPage() {
   const [scopeMode, setScopeMode] = useState<"all" | "selected">("all");
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [granularity, setGranularity] = useState<"month" | "week">("month");
+  const [compareGranularity, setCompareGranularity] = useState<"month" | "quarter" | "year">(
+    "month"
+  );
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -238,7 +249,8 @@ export default function DashboardPage() {
 
     try {
       const compareParams = new URLSearchParams({
-        mode: "month",
+        mode: "current_vs_previous",
+        granularity: compareGranularity,
         ...(dateFrom ? { dateFrom } : {}),
         ...(dateTo ? { dateTo } : {}),
       });
@@ -296,7 +308,7 @@ export default function DashboardPage() {
     if (scopeMode === "selected" && selectedFileIds.length === 0) return;
     void fetchAnalytics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeMode, selectedFileIds, granularity]);
+  }, [scopeMode, selectedFileIds, granularity, compareGranularity]);
 
   const maxPeriodTotal = useMemo(() => {
     if (!overview?.periods.length) return 0;
@@ -380,6 +392,21 @@ export default function DashboardPage() {
               >
                 <option value="month">Month</option>
                 <option value="week">Week</option>
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600">
+              Compare Basis
+              <select
+                value={compareGranularity}
+                onChange={(e) =>
+                  setCompareGranularity(e.target.value as "month" | "quarter" | "year")
+                }
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+              >
+                <option value="month">Month</option>
+                <option value="quarter">Quarter</option>
+                <option value="year">Year</option>
               </select>
             </label>
 
@@ -484,6 +511,34 @@ export default function DashboardPage() {
             </div>
             {compare && <div className="mt-2 text-xs text-slate-500">vs prev: {deltaText(compare.deltas.net)}</div>}
           </article>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-slate-900">Compare: Top Category Movers</h2>
+            <div className="text-xs text-slate-500">Basis: {compareGranularity}</div>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {(compare?.categoryDeltas || []).slice(0, 5).map((row) => (
+              <div key={row.category} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-800">{row.category}</span>
+                  <span className={row.delta >= 0 ? "text-rose-700" : "text-emerald-700"}>
+                    {row.delta >= 0 ? "+" : "-"}
+                    {CURRENCY.format(Math.abs(row.delta))}
+                  </span>
+                </div>
+                <div className="mt-1 text-slate-500">
+                  current {CURRENCY.format(row.current)} · previous {CURRENCY.format(row.previous)} ·{" "}
+                  {row.percent >= 0 ? "+" : "-"}
+                  {PERCENT.format(Math.abs(row.percent))}
+                </div>
+              </div>
+            ))}
+            {!compare?.categoryDeltas?.length && (
+              <p className="text-sm text-slate-500">No comparison deltas in current range.</p>
+            )}
+          </div>
         </section>
 
         <section className="grid gap-4 xl:grid-cols-2">
