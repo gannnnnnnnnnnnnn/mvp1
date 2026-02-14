@@ -204,6 +204,13 @@ function availableKeysByType(overview: OverviewResponse | null, type: PeriodType
   return [...(overview.availableMonths || [])].sort();
 }
 
+function clampIndex(nextIndex: number, length: number) {
+  if (length <= 0) return 0;
+  if (nextIndex < 0) return 0;
+  if (nextIndex >= length) return length - 1;
+  return nextIndex;
+}
+
 function clampPieTooltip(params: {
   chartX: number;
   chartY: number;
@@ -350,6 +357,23 @@ export default function Phase3PeriodPage() {
     () => availableKeysByType(overview, periodType),
     [overview, periodType]
   );
+  const selectedPeriodIndex = useMemo(
+    () => availablePeriodKeys.indexOf(periodKey),
+    [availablePeriodKeys, periodKey]
+  );
+  const effectivePeriodIndex =
+    selectedPeriodIndex >= 0 ? selectedPeriodIndex : Math.max(availablePeriodKeys.length - 1, 0);
+  const timelineVisibleItems = useMemo(() => {
+    if (availablePeriodKeys.length <= 16) {
+      return availablePeriodKeys.map((key, idx) => ({ key, idx }));
+    }
+    const start = clampIndex(effectivePeriodIndex - 7, availablePeriodKeys.length);
+    const end = clampIndex(start + 15, availablePeriodKeys.length);
+    const windowStart = clampIndex(end - 15, availablePeriodKeys.length);
+    return availablePeriodKeys
+      .slice(windowStart, end + 1)
+      .map((key, offset) => ({ key, idx: windowStart + offset }));
+  }, [availablePeriodKeys, effectivePeriodIndex]);
 
   const dailySeries = useMemo(
     () => overview?.monthDailySeries || [],
@@ -474,6 +498,27 @@ export default function Phase3PeriodPage() {
       visible: true,
     });
   }, []);
+
+  const setTimelineIndex = useCallback(
+    (nextIndex: number) => {
+      if (!availablePeriodKeys.length) return;
+      const clamped = clampIndex(nextIndex, availablePeriodKeys.length);
+      const key = availablePeriodKeys[clamped];
+      if (key) {
+        setPeriodKey(key);
+      }
+    },
+    [availablePeriodKeys]
+  );
+
+  const switchPeriodType = useCallback(
+    (nextType: PeriodType) => {
+      setPeriodType(nextType);
+      const nextKeys = availableKeysByType(overview, nextType);
+      setPeriodKey(nextKeys[nextKeys.length - 1] || "");
+    },
+    [overview]
+  );
 
   async function fetchFiles() {
     const res = await fetch("/api/files");
@@ -761,6 +806,8 @@ export default function Phase3PeriodPage() {
     void fetchPeriodOverview(scopeMode, selectedFileIds, periodType, periodKey);
   }, [periodType, periodKey, scopeMode, selectedFileIds]);
 
+  const timelineAriaLabel = `${periodType} timeline`;
+
   return (
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto max-w-[1280px] space-y-6">
@@ -803,34 +850,6 @@ export default function Phase3PeriodPage() {
               </select>
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Period Type
-              <select
-                value={periodType}
-                onChange={(e) => setPeriodType(e.target.value as PeriodType)}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
-              >
-                <option value="month">Month</option>
-                <option value="quarter">Quarter</option>
-                <option value="year">Year</option>
-              </select>
-            </label>
-
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-3">
-              Period
-              <select
-                value={periodKey}
-                onChange={(e) => setPeriodKey(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
-              >
-                {availablePeriodKeys.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </label>
-
             <div className="flex items-end lg:col-span-2">
               <button
                 type="button"
@@ -846,6 +865,96 @@ export default function Phase3PeriodPage() {
               >
                 {isLoading ? "Loading..." : "Refresh"}
               </button>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Timeline
+              </div>
+              <button
+                type="button"
+                onClick={() => switchPeriodType("month")}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                  periodType === "month"
+                    ? "bg-blue-600 text-white"
+                    : "border border-slate-300 bg-white text-slate-700 hover:border-blue-300"
+                }`}
+              >
+                Month
+              </button>
+              <button
+                type="button"
+                onClick={() => switchPeriodType("quarter")}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                  periodType === "quarter"
+                    ? "bg-blue-600 text-white"
+                    : "border border-slate-300 bg-white text-slate-700 hover:border-blue-300"
+                }`}
+              >
+                Quarter
+              </button>
+              <button
+                type="button"
+                onClick={() => switchPeriodType("year")}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                  periodType === "year"
+                    ? "bg-blue-600 text-white"
+                    : "border border-slate-300 bg-white text-slate-700 hover:border-blue-300"
+                }`}
+              >
+                Year
+              </button>
+              <div className="ml-auto text-xs text-slate-600">
+                Selected: <span className="font-semibold text-slate-900">{periodKey || "-"}</span>
+              </div>
+            </div>
+
+            <div
+              className="mt-3 rounded-lg border border-slate-200 bg-white p-3"
+              role="group"
+              aria-label={timelineAriaLabel}
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  setTimelineIndex(effectivePeriodIndex - 1);
+                }
+                if (event.key === "ArrowRight") {
+                  event.preventDefault();
+                  setTimelineIndex(effectivePeriodIndex + 1);
+                }
+              }}
+            >
+              <input
+                type="range"
+                min={0}
+                max={Math.max(availablePeriodKeys.length - 1, 0)}
+                value={effectivePeriodIndex}
+                onChange={(event) => setTimelineIndex(Number(event.target.value))}
+                className="w-full accent-blue-600"
+                disabled={availablePeriodKeys.length === 0}
+              />
+              <div className="mt-3 flex flex-wrap gap-2">
+                {timelineVisibleItems.map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setTimelineIndex(item.idx)}
+                    className={`rounded-md border px-2 py-1 text-xs transition ${
+                      periodKey === item.key
+                        ? "border-blue-300 bg-blue-50 text-blue-700"
+                        : "border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                    }`}
+                  >
+                    {item.key}
+                  </button>
+                ))}
+                {timelineVisibleItems.length === 0 && (
+                  <span className="text-xs text-slate-500">No period keys in this scope.</span>
+                )}
+              </div>
             </div>
           </div>
 
