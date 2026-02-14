@@ -1,11 +1,13 @@
 export const CATEGORY_TAXONOMY = [
   "Groceries",
   "Dining",
+  "Food Delivery",
   "Transport",
   "Shopping",
   "Bills&Utilities",
   "Rent/Mortgage",
   "Health",
+  "Pet",
   "Entertainment",
   "Travel",
   "Income",
@@ -20,6 +22,8 @@ export type CategorySource = "rule" | "manual" | "default";
 
 export type NormalizedTransaction = {
   id: string;
+  // Cross-file dedupe key. Keep id unique per source, dedupeKey stable by business fields.
+  dedupeKey: string;
   accountId: string;
   date: string;
   descriptionRaw: string;
@@ -53,8 +57,12 @@ export type CategoryRule = {
   amountSign?: "positive" | "negative";
 };
 
+export const DEFAULT_OVERRIDE_SCOPE = "global" as const;
+export type OverrideScopeKey = string;
+export type ScopedCategoryMap = Record<OverrideScopeKey, Record<string, Category>>;
+
 export type CategoryOverrides = {
-  merchantMap: Record<string, Category>;
-  transactionMap: Record<string, Category>;
+  merchantMap: ScopedCategoryMap;
+  transactionMap: ScopedCategoryMap;
   updatedAt?: string;
 };

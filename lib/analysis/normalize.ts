@@ -25,6 +25,23 @@ function stableTxId(params: {
   return createHash("sha1").update(payload).digest("hex").slice(0, 16);
 }
 
+function stableDedupeKey(params: {
+  accountId: string;
+  date: string;
+  merchantNorm: string;
+  amount: number;
+  descriptionNorm: string;
+}) {
+  const payload = [
+    params.accountId,
+    params.date.slice(0, 10),
+    params.merchantNorm,
+    params.amount.toFixed(2),
+    params.descriptionNorm,
+  ].join("|");
+  return createHash("sha1").update(payload).digest("hex").slice(0, 20);
+}
+
 function warningReasonsForTx(tx: ParsedTransaction, warnings: ParseWarning[]) {
   const lineHead = tx.rawLine.split("\n")[0] || tx.rawLine;
   return warnings
@@ -60,6 +77,13 @@ export function normalizeParsedTransactions(params: {
 
     return {
       id,
+      dedupeKey: stableDedupeKey({
+        accountId,
+        date: tx.date,
+        merchantNorm,
+        amount: tx.amount,
+        descriptionNorm,
+      }),
       accountId,
       date: tx.date,
       descriptionRaw: tx.description,

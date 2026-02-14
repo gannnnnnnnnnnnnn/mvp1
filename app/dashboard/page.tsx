@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type FileMeta = {
   id: string;
@@ -14,7 +15,11 @@ type ApiError = { code: string; message: string };
 
 type OverviewResponse = {
   ok: true;
-  fileId: string;
+  fileId?: string;
+  fileIds?: string[];
+  filesIncludedCount?: number;
+  txCountBeforeDedupe?: number;
+  dedupedCount?: number;
   accountId?: string;
   granularity: "month" | "week";
   templateType: string;
@@ -28,7 +33,16 @@ type OverviewResponse = {
     balanceContinuitySkippedReasons?: Record<string, number>;
     needsReviewReasons: string[];
   };
-  appliedFilters?: Record<string, unknown>;
+  appliedFilters?: {
+    scope?: string;
+    fileId?: string;
+    fileIds?: string[];
+    accountId?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    granularity?: "month" | "week";
+    balanceScope?: "file" | "account" | "none";
+  };
   totals: { income: number; spend: number; net: number };
   periods: Array<{
     period: string;
@@ -42,6 +56,18 @@ type OverviewResponse = {
     amount: number;
     share: number;
     transactionIds: string[];
+    topMerchants?: Array<{ merchantNorm: string; amount: number }>;
+    recentTransactions?: Array<{
+      id: string;
+      date: string;
+      merchantNorm: string;
+      amount: number;
+      descriptionRaw: string;
+    }>;
+  }>;
+  categoryTrendMonthly?: Array<{
+    category: string;
+    points: Array<{ period: string; amount: number; transactionIds: string[] }>;
   }>;
   topMerchants: Array<{
     merchantNorm: string;
@@ -49,13 +75,19 @@ type OverviewResponse = {
     transactionIds: string[];
   }>;
   balanceSeries: Array<{ date: string; balance: number; transactionId: string }>;
+  balanceSeriesDisabledReason?: string;
 };
 
 type CompareResponse = {
   ok: true;
-  fileId: string;
+  fileId?: string;
+  fileIds?: string[];
+  filesIncludedCount?: number;
+  txCountBeforeDedupe?: number;
+  dedupedCount?: number;
   accountId?: string;
-  mode: "month";
+  mode: "current_vs_previous";
+  granularity: "month" | "quarter" | "year";
   appliedFilters?: Record<string, unknown>;
   current: {
     income: number;
@@ -83,6 +115,13 @@ type CompareResponse = {
     delta: number;
     percent: number;
   }>;
+  merchantDeltas?: Array<{
+    merchantNorm: string;
+    current: number;
+    previous: number;
+    delta: number;
+    percent: number;
+  }>;
 };
 
 const CURRENCY = new Intl.NumberFormat("en-AU", {
@@ -99,6 +138,7 @@ const PERCENT = new Intl.NumberFormat("en-AU", {
 function templateLabel(templateType: string) {
   if (templateType === "commbank_manual_amount_balance") return "manual";
   if (templateType === "commbank_auto_debit_credit") return "auto";
+  if (templateType === "mixed") return "mixed";
   return "unknown";
 }
 
@@ -164,10 +204,26 @@ function skippedSummary(quality?: OverviewResponse["quality"]) {
   return skipped > 0 ? `${skipped}${reasonText ? ` · ${reasonText}` : ""}` : "0";
 }
 
+function monthRange(period: string) {
+  const match = /^(\\d{4})-(\\d{2})$/.exec(period);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 0));
+  const toDate = (d: Date) => d.toISOString().slice(0, 10);
+  return { dateFrom: toDate(start), dateTo: toDate(end) };
+}
+
 export default function DashboardPage() {
+  const router = useRouter();
   const [files, setFiles] = useState<FileMeta[]>([]);
-  const [selectedFileId, setSelectedFileId] = useState("");
+  const [scopeMode, setScopeMode] = useState<"all" | "selected">("all");
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [granularity, setGranularity] = useState<"month" | "week">("month");
+  const [compareGranularity, setCompareGranularity] = useState<"month" | "quarter" | "year">(
+    "month"
+  );
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -175,11 +231,46 @@ export default function DashboardPage() {
   const [compare, setCompare] = useState<CompareResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [selectedTrendCategory, setSelectedTrendCategory] = useState<string>("");
 
-  const selectedFileName = useMemo(
-    () => files.find((f) => f.id === selectedFileId)?.originalName || "",
-    [files, selectedFileId]
+  const selectedFileNames = useMemo(
+    () =>
+      selectedFileIds
+        .map((id) => files.find((f) => f.id === id)?.originalName)
+        .filter(Boolean) as string[],
+    [files, selectedFileIds]
   );
+
+  const buildSharedScopeParams = () => {
+    const params = new URLSearchParams();
+    if (scopeMode === "all") {
+      params.set("scope", "all");
+    } else {
+      for (const fileId of selectedFileIds) {
+        params.append("fileIds", fileId);
+      }
+    }
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    return params;
+  };
+
+  const goToCategoryDrilldown = (categoryName: string) => {
+    const params = buildSharedScopeParams();
+    params.set("category", categoryName);
+    router.push(`/transactions?${params.toString()}`);
+  };
+
+  const goToCategoryMonthDrilldown = (categoryName: string, period: string) => {
+    const params = buildSharedScopeParams();
+    params.set("category", categoryName);
+    const range = monthRange(period);
+    if (range) {
+      params.set("dateFrom", range.dateFrom);
+      params.set("dateTo", range.dateTo);
+    }
+    router.push(`/transactions?${params.toString()}`);
+  };
 
   const fetchFiles = async () => {
     const res = await fetch("/api/files");
@@ -190,34 +281,47 @@ export default function DashboardPage() {
       throw new Error(`${data.error.code}: ${data.error.message}`);
     }
     setFiles(data.files);
-    if (!selectedFileId && data.files.length > 0) {
-      setSelectedFileId(data.files[0].id);
+    if (scopeMode === "selected" && selectedFileIds.length === 0 && data.files.length > 0) {
+      setSelectedFileIds([data.files[0].id]);
     }
   };
 
-  const fetchAnalytics = async (fileId: string) => {
-    if (!fileId) return;
+  const fetchAnalytics = async () => {
+    if (scopeMode === "selected" && selectedFileIds.length === 0) return;
     setIsLoading(true);
     setError(null);
 
     const common = new URLSearchParams({
-      fileId,
       granularity,
       ...(dateFrom ? { dateFrom } : {}),
       ...(dateTo ? { dateTo } : {}),
     });
+    if (scopeMode === "all") {
+      common.set("scope", "all");
+    } else {
+      for (const fileId of selectedFileIds) {
+        common.append("fileIds", fileId);
+      }
+    }
 
     try {
+      const compareParams = new URLSearchParams({
+        mode: "current_vs_previous",
+        granularity: compareGranularity,
+        ...(dateFrom ? { dateFrom } : {}),
+        ...(dateTo ? { dateTo } : {}),
+      });
+      if (scopeMode === "all") {
+        compareParams.set("scope", "all");
+      } else {
+        for (const fileId of selectedFileIds) {
+          compareParams.append("fileIds", fileId);
+        }
+      }
+
       const [overviewRes, compareRes] = await Promise.all([
         fetch(`/api/analysis/overview?${common.toString()}`),
-        fetch(
-          `/api/analysis/compare?${new URLSearchParams({
-            fileId,
-            mode: "month",
-            ...(dateFrom ? { dateFrom } : {}),
-            ...(dateTo ? { dateTo } : {}),
-          }).toString()}`
-        ),
+        fetch(`/api/analysis/compare?${compareParams.toString()}`),
       ]);
 
       const overviewData = (await overviewRes.json()) as
@@ -258,10 +362,10 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    if (!selectedFileId) return;
-    void fetchAnalytics(selectedFileId);
+    if (scopeMode === "selected" && selectedFileIds.length === 0) return;
+    void fetchAnalytics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedFileId, granularity]);
+  }, [scopeMode, selectedFileIds, granularity, compareGranularity]);
 
   const maxPeriodTotal = useMemo(() => {
     if (!overview?.periods.length) return 0;
@@ -294,6 +398,31 @@ export default function DashboardPage() {
     [overview]
   );
 
+  useEffect(() => {
+    if (!overview?.spendByCategory?.length) {
+      setSelectedTrendCategory("");
+      return;
+    }
+    if (!selectedTrendCategory) {
+      setSelectedTrendCategory(overview.spendByCategory[0].category);
+      return;
+    }
+    if (!overview.spendByCategory.some((row) => row.category === selectedTrendCategory)) {
+      setSelectedTrendCategory(overview.spendByCategory[0].category);
+    }
+  }, [overview, selectedTrendCategory]);
+
+  const trendPoints = useMemo(() => {
+    if (!overview?.categoryTrendMonthly || !selectedTrendCategory) return [];
+    const found = overview.categoryTrendMonthly.find((row) => row.category === selectedTrendCategory);
+    return found?.points || [];
+  }, [overview, selectedTrendCategory]);
+
+  const maxTrendAmount = useMemo(
+    () => Math.max(0, ...trendPoints.map((item) => item.amount)),
+    [trendPoints]
+  );
+
   return (
     <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
       <div className="mx-auto max-w-7xl space-y-6">
@@ -305,13 +434,29 @@ export default function DashboardPage() {
 
           <div className="mt-4 grid gap-3 md:grid-cols-5">
             <label className="space-y-1 text-xs font-medium text-slate-600">
-              File
+              Scope
               <select
-                value={selectedFileId}
-                onChange={(e) => setSelectedFileId(e.target.value)}
+                value={scopeMode}
+                onChange={(e) => setScopeMode(e.target.value as "all" | "selected")}
                 className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
               >
-                <option value="">Select a file</option>
+                <option value="all">All files</option>
+                <option value="selected">Selected files</option>
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600 md:col-span-2">
+              Files (multi-select)
+              <select
+                multiple
+                value={selectedFileIds}
+                onChange={(e) => {
+                  const values = Array.from(e.currentTarget.selectedOptions).map((opt) => opt.value);
+                  setSelectedFileIds(values);
+                }}
+                disabled={scopeMode !== "selected"}
+                className="h-[88px] w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 disabled:bg-slate-100"
+              >
                 {files.map((file) => (
                   <option key={file.id} value={file.id}>
                     {file.originalName}
@@ -329,6 +474,21 @@ export default function DashboardPage() {
               >
                 <option value="month">Month</option>
                 <option value="week">Week</option>
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600">
+              Compare Basis
+              <select
+                value={compareGranularity}
+                onChange={(e) =>
+                  setCompareGranularity(e.target.value as "month" | "quarter" | "year")
+                }
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+              >
+                <option value="month">Month</option>
+                <option value="quarter">Quarter</option>
+                <option value="year">Year</option>
               </select>
             </label>
 
@@ -355,11 +515,9 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => {
-                if (selectedFileId) {
-                  void fetchAnalytics(selectedFileId);
-                }
+                void fetchAnalytics();
               }}
-              disabled={isLoading || !selectedFileId}
+              disabled={isLoading || (scopeMode === "selected" && selectedFileIds.length === 0)}
               className="self-end rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
               {isLoading ? "Loading..." : "Refresh"}
@@ -386,8 +544,18 @@ export default function DashboardPage() {
                   : ""}
               </div>
               <div>
-                File: <span className="font-mono">{selectedFileId}</span>
-                {selectedFileName ? ` · ${selectedFileName}` : ""}
+                Scope: <span className="font-medium">{overview.appliedFilters?.scope || scopeMode}</span>
+                {scopeMode === "selected" && selectedFileIds.length
+                  ? ` · ${selectedFileIds.length} selected`
+                  : ""}
+              </div>
+              <div>
+                Files included: {overview.filesIncludedCount ?? 0}
+                {selectedFileNames.length ? ` · ${selectedFileNames.join(", ")}` : ""}
+              </div>
+              <div>
+                Tx before dedupe: {overview.txCountBeforeDedupe ?? 0} · deduped:{" "}
+                {overview.dedupedCount ?? 0}
               </div>
             </div>
           )}
@@ -425,6 +593,34 @@ export default function DashboardPage() {
             </div>
             {compare && <div className="mt-2 text-xs text-slate-500">vs prev: {deltaText(compare.deltas.net)}</div>}
           </article>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-slate-900">Compare: Top Category Movers</h2>
+            <div className="text-xs text-slate-500">Basis: {compareGranularity}</div>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {(compare?.categoryDeltas || []).slice(0, 5).map((row) => (
+              <div key={row.category} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-800">{row.category}</span>
+                  <span className={row.delta >= 0 ? "text-rose-700" : "text-emerald-700"}>
+                    {row.delta >= 0 ? "+" : "-"}
+                    {CURRENCY.format(Math.abs(row.delta))}
+                  </span>
+                </div>
+                <div className="mt-1 text-slate-500">
+                  current {CURRENCY.format(row.current)} · previous {CURRENCY.format(row.previous)} ·{" "}
+                  {row.percent >= 0 ? "+" : "-"}
+                  {PERCENT.format(Math.abs(row.percent))}
+                </div>
+              </div>
+            ))}
+            {!compare?.categoryDeltas?.length && (
+              <p className="text-sm text-slate-500">No comparison deltas in current range.</p>
+            )}
+          </div>
         </section>
 
         <section className="grid gap-4 xl:grid-cols-2">
@@ -486,7 +682,12 @@ export default function DashboardPage() {
               />
               <div className="space-y-2">
                 {(overview?.spendByCategory || []).slice(0, 8).map((row) => (
-                  <div key={row.category} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                  <button
+                    key={row.category}
+                    type="button"
+                    onClick={() => goToCategoryDrilldown(row.category)}
+                    className="group relative w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs hover:border-blue-300 hover:bg-blue-50"
+                  >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-slate-800">{row.category}</span>
                       <span className="text-slate-600">{CURRENCY.format(row.amount)}</span>
@@ -494,7 +695,31 @@ export default function DashboardPage() {
                     <div className="mt-1 text-slate-500">
                       {PERCENT.format(row.share)} · <span title={row.transactionIds.join(", ")}>{row.transactionIds.length} tx</span>
                     </div>
-                  </div>
+                    <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-[320px] rounded-lg border border-slate-300 bg-white p-2 text-[11px] text-slate-700 shadow-xl group-hover:block">
+                      <div className="font-semibold text-slate-900">{row.category}</div>
+                      <div className="mt-1">
+                        total {CURRENCY.format(row.amount)} · {row.transactionIds.length} tx
+                      </div>
+                      <div className="mt-2 text-slate-500">Top merchants</div>
+                      <div>
+                        {(row.topMerchants || []).map((item) => (
+                          <div key={item.merchantNorm}>
+                            {item.merchantNorm}: {CURRENCY.format(item.amount)}
+                          </div>
+                        ))}
+                        {!(row.topMerchants || []).length && <div>-</div>}
+                      </div>
+                      <div className="mt-2 text-slate-500">Recent transactions</div>
+                      <div>
+                        {(row.recentTransactions || []).map((item) => (
+                          <div key={item.id}>
+                            {item.date} · {item.merchantNorm} · {CURRENCY.format(item.amount)}
+                          </div>
+                        ))}
+                        {!(row.recentTransactions || []).length && <div>-</div>}
+                      </div>
+                    </div>
+                  </button>
                 ))}
                 {!(overview?.spendByCategory.length) && (
                   <p className="text-sm text-slate-500">No spending rows in range.</p>
@@ -513,7 +738,9 @@ export default function DashboardPage() {
                   <path d={balancePath} fill="none" stroke="#2563eb" strokeWidth="2.5" />
                 </svg>
               ) : (
-                <p className="text-sm text-slate-500">Not enough balance points to draw curve.</p>
+                <p className="text-sm text-slate-500">
+                  {overview?.balanceSeriesDisabledReason || "Not enough balance points to draw curve."}
+                </p>
               )}
             </div>
             <p className="mt-2 text-xs text-slate-500">
@@ -547,6 +774,53 @@ export default function DashboardPage() {
               {!overview?.topMerchants.length && <p className="text-sm text-slate-500">No merchants in range.</p>}
             </div>
           </article>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-slate-900">Category Trend (Monthly)</h2>
+            <select
+              value={selectedTrendCategory}
+              onChange={(e) => setSelectedTrendCategory(e.target.value)}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800"
+            >
+              {(overview?.spendByCategory || []).map((row) => (
+                <option key={row.category} value={row.category}>
+                  {row.category}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mt-3 space-y-2">
+            {trendPoints.map((point) => (
+              <button
+                key={point.period}
+                type="button"
+                onClick={() => goToCategoryMonthDrilldown(selectedTrendCategory, point.period)}
+                className="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs hover:border-blue-300 hover:bg-blue-50"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-800">{point.period}</span>
+                  <span className="text-slate-600">{CURRENCY.format(point.amount)}</span>
+                </div>
+                <div className="mt-1 h-2 rounded-full bg-slate-200">
+                  <div
+                    className="h-2 rounded-full bg-blue-500"
+                    style={{
+                      width:
+                        maxTrendAmount > 0
+                          ? `${Math.max(3, (point.amount / maxTrendAmount) * 100)}%`
+                          : "0%",
+                    }}
+                  />
+                </div>
+                <div className="mt-1 text-[11px] text-slate-500">{point.transactionIds.length} tx</div>
+              </button>
+            ))}
+            {trendPoints.length === 0 && (
+              <p className="text-sm text-slate-500">No monthly points for this category.</p>
+            )}
+          </div>
         </section>
       </div>
     </main>

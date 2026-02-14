@@ -2,6 +2,7 @@ import {
   Category,
   CategoryOverrides,
   CategoryRule,
+  DEFAULT_OVERRIDE_SCOPE,
   NormalizedTransaction,
 } from "@/lib/analysis/types";
 
@@ -29,9 +30,23 @@ const RULES: CategoryRule[] = [
     amountSign: "negative",
   },
   {
+    id: "food-delivery",
+    category: "Food Delivery",
+    merchantIncludes: [
+      "HUNGRYPANDA",
+      "EASI",
+      "UBER EATS",
+      "UBEREATS",
+      "DOORDASH",
+      "MENULOG",
+      "DELIVEROO",
+    ],
+    amountSign: "negative",
+  },
+  {
     id: "dining",
     category: "Dining",
-    merchantIncludes: ["MCDONALD", "KFC", "SUBWAY", "UBER EATS", "DOORDASH", "CAFE"],
+    merchantIncludes: ["MCDONALD", "KFC", "SUBWAY", "CAFE"],
     amountSign: "negative",
   },
   {
@@ -62,6 +77,20 @@ const RULES: CategoryRule[] = [
     id: "health",
     category: "Health",
     merchantIncludes: ["CHEMIST", "PHARMACY", "MEDICAL", "HOSPITAL", "DENTAL"],
+    amountSign: "negative",
+  },
+  {
+    id: "pet",
+    category: "Pet",
+    merchantIncludes: [
+      "VET",
+      "VETERINARY",
+      "PETSTOCK",
+      "PET BARN",
+      "PET CIRCLE",
+      "PET FOOD",
+      "GROOMING",
+    ],
     amountSign: "negative",
   },
   {
@@ -102,14 +131,18 @@ function defaultCategory(tx: NormalizedTransaction): Category {
 
 export function assignCategory(
   tx: NormalizedTransaction,
-  overrides: CategoryOverrides
+  overrides: CategoryOverrides,
+  scopeKey = DEFAULT_OVERRIDE_SCOPE
 ): Pick<NormalizedTransaction, "category" | "categorySource" | "categoryRuleId"> {
-  const txOverride = overrides.transactionMap[tx.id];
+  const transactionMap = overrides.transactionMap[scopeKey] || {};
+  const merchantMap = overrides.merchantMap[scopeKey] || {};
+
+  const txOverride = transactionMap[tx.id];
   if (txOverride) {
     return { category: txOverride, categorySource: "manual" };
   }
 
-  const merchantOverride = overrides.merchantMap[tx.merchantNorm];
+  const merchantOverride = merchantMap[tx.merchantNorm];
   if (merchantOverride) {
     return { category: merchantOverride, categorySource: "manual" };
   }
