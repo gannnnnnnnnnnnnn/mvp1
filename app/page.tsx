@@ -900,10 +900,18 @@ export default function Home() {
                 <p className="text-sm text-emerald-800">
                   Parsed {flowSummary.parsedCount} files, {flowSummary.totalTxCount} transactions.
                 </p>
+                <p className="text-xs text-emerald-800">
+                  Uploaded {flowSummary.uploadedCount} file(s) in this run.
+                </p>
                 {(flowSummary.failedCount > 0 || flowSummary.reviewCount > 0) && (
                   <p className="text-xs text-amber-800">
                     Some files need review: failed {flowSummary.failedCount}, needsReview{" "}
                     {flowSummary.reviewCount}.
+                  </p>
+                )}
+                {flowSummary.failedCount === 0 && flowSummary.reviewCount === 0 && (
+                  <p className="text-xs text-emerald-800">
+                    Next step: open dataset and start period-based analysis.
                   </p>
                 )}
               </div>
