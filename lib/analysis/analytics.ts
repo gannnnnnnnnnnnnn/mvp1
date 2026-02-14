@@ -341,6 +341,15 @@ export function buildOverview(params: {
   >();
 
   const byCategory = new Map<string, { amount: number; transactionIds: string[] }>();
+  const byCategoryMerchant = new Map<string, Map<string, number>>();
+  const byCategoryRecent = new Map<
+    string,
+    Array<{ id: string; date: string; merchantNorm: string; amount: number; descriptionRaw: string }>
+  >();
+  const byCategoryMonth = new Map<
+    string,
+    Map<string, { amount: number; transactionIds: string[] }>
+  >();
   const byMerchant = new Map<string, { amount: number; transactionIds: string[] }>();
 
   for (const tx of sorted) {
@@ -364,6 +373,34 @@ export function buildOverview(params: {
       cat.transactionIds.push(tx.id);
       byCategory.set(tx.category, cat);
 
+      const byMerchantForCategory = byCategoryMerchant.get(tx.category) || new Map<string, number>();
+      byMerchantForCategory.set(
+        tx.merchantNorm,
+        (byMerchantForCategory.get(tx.merchantNorm) || 0) + Math.abs(tx.amount)
+      );
+      byCategoryMerchant.set(tx.category, byMerchantForCategory);
+
+      const recents = byCategoryRecent.get(tx.category) || [];
+      recents.push({
+        id: tx.id,
+        date: tx.date.slice(0, 10),
+        merchantNorm: tx.merchantNorm,
+        amount: Math.abs(tx.amount),
+        descriptionRaw: tx.descriptionRaw,
+      });
+      byCategoryRecent.set(tx.category, recents);
+
+      const monthKey = tx.date.slice(0, 7);
+      const byMonth = byCategoryMonth.get(tx.category) || new Map<
+        string,
+        { amount: number; transactionIds: string[] }
+      >();
+      const monthBucket = byMonth.get(monthKey) || { amount: 0, transactionIds: [] };
+      monthBucket.amount += Math.abs(tx.amount);
+      monthBucket.transactionIds.push(tx.id);
+      byMonth.set(monthKey, monthBucket);
+      byCategoryMonth.set(tx.category, byMonth);
+
       const merchant = byMerchant.get(tx.merchantNorm) || { amount: 0, transactionIds: [] };
       merchant.amount += Math.abs(tx.amount);
       merchant.transactionIds.push(tx.id);
@@ -384,13 +421,38 @@ export function buildOverview(params: {
     .map(([period, value]) => ({ period, ...value }));
 
   const spendByCategory = [...byCategory.entries()]
-    .map(([category, value]) => ({
-      category,
-      amount: value.amount,
-      share: totals.spend > 0 ? value.amount / totals.spend : 0,
-      transactionIds: value.transactionIds,
-    }))
+    .map(([category, value]) => {
+      const merchantMap = byCategoryMerchant.get(category) || new Map<string, number>();
+      const topMerchants = [...merchantMap.entries()]
+        .map(([merchantNorm, amount]) => ({ merchantNorm, amount }))
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 3);
+      const recentTransactions = [...(byCategoryRecent.get(category) || [])]
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 5);
+      return {
+        category,
+        amount: value.amount,
+        share: totals.spend > 0 ? value.amount / totals.spend : 0,
+        transactionIds: value.transactionIds,
+        topMerchants,
+        recentTransactions,
+      };
+    })
     .sort((a, b) => b.amount - a.amount);
+
+  const categoryTrendMonthly = [...byCategoryMonth.entries()]
+    .map(([category, monthMap]) => ({
+      category,
+      points: [...monthMap.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([period, value]) => ({
+          period,
+          amount: value.amount,
+          transactionIds: value.transactionIds,
+        })),
+    }))
+    .sort((a, b) => a.category.localeCompare(b.category));
 
   const topMerchants = [...byMerchant.entries()]
     .map(([merchantNorm, value]) => ({
@@ -433,6 +495,7 @@ export function buildOverview(params: {
     totals,
     periods,
     spendByCategory,
+    categoryTrendMonthly,
     topMerchants,
     balanceSeries,
   };
