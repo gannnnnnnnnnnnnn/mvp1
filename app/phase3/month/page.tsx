@@ -187,6 +187,7 @@ export default function Phase3MonthPage() {
   const [error, setError] = useState<ApiError | null>(null);
 
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [drilldownEntered, setDrilldownEntered] = useState(false);
   const [drilldownRows, setDrilldownRows] = useState<DrilldownTx[]>([]);
   const [drilldownLoading, setDrilldownLoading] = useState(false);
   const [drilldownError, setDrilldownError] = useState<ApiError | null>(null);
@@ -428,6 +429,18 @@ export default function Phase3MonthPage() {
   }, [selectedCategory, fetchCategoryDrilldown]);
 
   useEffect(() => {
+    if (!selectedCategory) {
+      setDrilldownEntered(false);
+      return;
+    }
+    setDrilldownEntered(false);
+    const timer = window.setTimeout(() => {
+      setDrilldownEntered(true);
+    }, 16);
+    return () => window.clearTimeout(timer);
+  }, [selectedCategory]);
+
+  useEffect(() => {
     if (!month) return;
     void fetchTriage();
   }, [month, scopeMode, selectedFileIds, fetchTriage]);
@@ -625,7 +638,8 @@ export default function Phase3MonthPage() {
                     key={row.category}
                     type="button"
                     onClick={() => setSelectedCategory(row.category)}
-                    className={`group relative w-full rounded border px-3 py-2 text-left text-xs transition-all duration-200 ${selectedCategory === row.category ? "scale-[1.01] border-blue-300 bg-blue-50 shadow-sm" : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"}`}
+                    aria-pressed={selectedCategory === row.category}
+                    className={`group relative w-full rounded border px-3 py-2 text-left text-xs transition-all duration-200 ${selectedCategory === row.category ? "scale-[1.01] border-blue-300 bg-blue-50 shadow-sm ring-1 ring-blue-200" : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"}`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="font-medium text-slate-800">{row.category}</span>
@@ -668,7 +682,13 @@ export default function Phase3MonthPage() {
         </section>
 
         <section className="grid gap-4 xl:grid-cols-2">
-          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <article
+            className={`rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-200 ${
+              drilldownEntered
+                ? "translate-y-0 opacity-100"
+                : "translate-y-1 opacity-90"
+            }`}
+          >
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-slate-900">Category Drilldown</h2>
               <span className="text-xs text-slate-500">{selectedCategory || "-"}</span>
