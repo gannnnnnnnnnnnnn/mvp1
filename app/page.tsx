@@ -178,7 +178,7 @@ export default function Home() {
       }
       setFiles(data.files as FileMeta[]);
     } catch {
-      setError({ code: "FETCH_FAILED", message: "获取文件列表失败。" });
+      setError({ code: "FETCH_FAILED", message: "Failed to load file list." });
     } finally {
       setIsLoadingList(false);
     }
@@ -420,7 +420,7 @@ export default function Home() {
     } catch {
       setExtractError({
         code: "EXTRACT_REQUEST_FAIL",
-        message: "调用文本抽取接口失败，请稍后重试。",
+        message: "Failed to call extract API.",
       });
     } finally {
       setExtractingFileId(null);
@@ -459,7 +459,7 @@ export default function Home() {
     } catch {
       setSegmentError({
         code: "SEGMENT_REQUEST_FAIL",
-        message: "调用分段接口失败，请稍后重试。",
+        message: "Failed to call segment API.",
       });
     } finally {
       setSegmentingFileId(null);
@@ -515,7 +515,7 @@ export default function Home() {
     } catch {
       setTxError({
         code: "TRANSACTIONS_REQUEST_FAIL",
-        message: "调用交易解析接口失败，请稍后重试。",
+        message: "Failed to call transaction parse API.",
       });
     } finally {
       setParsingTxFileId(null);
@@ -546,7 +546,7 @@ export default function Home() {
    * Phase 1.5: delete one file + caches via DELETE /api/files/[id].
    */
   const handleDeleteFile = async (file: FileMeta) => {
-    const ok = window.confirm(`确定删除文件 "${file.originalName}" 吗？`);
+    const ok = window.confirm(`Delete file "${file.originalName}"?`);
     if (!ok) return;
 
     setDeletingFileId(file.id);
@@ -565,10 +565,10 @@ export default function Home() {
       }
 
       clearPanelsForFile(file.id);
-      setSuccessMsg("文件删除成功。");
+      setSuccessMsg("File deleted.");
       await fetchFiles();
     } catch {
-      setError({ code: "DELETE_FAILED", message: "删除文件失败，请稍后重试。" });
+      setError({ code: "DELETE_FAILED", message: "Failed to delete file." });
     } finally {
       setDeletingFileId(null);
     }
@@ -578,10 +578,10 @@ export default function Home() {
    * Phase 1.5: clear all files + text cache with a typed confirmation token.
    */
   const handleDeleteAll = async () => {
-    const token = window.prompt('危险操作：输入 "DELETE" 以清空全部文件');
+    const token = window.prompt('Danger action: type "DELETE" to clear all files');
     if (token === null) return;
     if (token !== "DELETE") {
-      setError({ code: "BAD_CONFIRM", message: '确认口令错误，必须输入 "DELETE"。' });
+      setError({ code: "BAD_CONFIRM", message: 'Invalid confirmation token. Type "DELETE".' });
       return;
     }
 
@@ -613,10 +613,10 @@ export default function Home() {
       setTxError(null);
       setExpandedRawLines({});
       setCopyMsg(null);
-      setSuccessMsg(`已清空全部文件，删除 ${data.deletedCount} 条记录。`);
+      setSuccessMsg(`All files cleared. Removed ${data.deletedCount} record(s).`);
       await fetchFiles();
     } catch {
-      setError({ code: "CLEAR_FAILED", message: "清空文件失败，请稍后重试。" });
+      setError({ code: "CLEAR_FAILED", message: "Failed to clear files." });
     } finally {
       setIsClearingAll(false);
     }
@@ -631,9 +631,9 @@ export default function Home() {
 
     try {
       await navigator.clipboard.writeText(extractResult.text);
-      setCopyMsg("已复制文本到剪贴板。");
+      setCopyMsg("Copied to clipboard.");
     } catch {
-      setCopyMsg("复制失败（请检查浏览器权限）。");
+      setCopyMsg("Copy failed (check browser permission).");
     }
   };
 
@@ -991,7 +991,7 @@ export default function Home() {
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <h3 className="text-base font-semibold text-slate-900">Extracted Text Preview</h3>
               <p className="mt-1 text-xs text-slate-600">
-                fileId: <span className="font-mono">{extractResult.fileId}</span> · 文件名: {extractResult.originalName}
+                fileId: <span className="font-mono">{extractResult.fileId}</span> · file: {extractResult.originalName}
               </p>
               <p className="mt-1 text-xs text-slate-600">
                 extractor: {extractResult.meta.extractor} · length: {extractResult.meta.length} · cached: {extractResult.meta.cached ? "true" : "false"} · truncated: {extractResult.meta.truncated ? "true" : "false"} · emptyText: {extractResult.meta.emptyText ? "true" : "false"}
@@ -1040,7 +1040,7 @@ export default function Home() {
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <h3 className="text-base font-semibold text-slate-900">Segment Preview</h3>
               <p className="mt-1 text-xs text-slate-600">
-                fileId: <span className="font-mono">{segmentResult.fileId}</span> · 文件名: {segmentResult.originalName}
+                fileId: <span className="font-mono">{segmentResult.fileId}</span> · file: {segmentResult.originalName}
               </p>
               <p className="mt-1 text-xs text-slate-600">
                 headerFound: {segmentResult.debug.headerFound ? "true" : "false"} · startLine:{" "}
@@ -1058,7 +1058,7 @@ export default function Home() {
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <h3 className="text-base font-semibold text-slate-900">Parsed Transactions v2 (CommBank)</h3>
               <p className="mt-1 text-xs text-slate-600">
-                fileId: <span className="font-mono">{txResult.fileId}</span> · 文件名: {txResult.originalName}
+                fileId: <span className="font-mono">{txResult.fileId}</span> · file: {txResult.originalName}
               </p>
               <p className="mt-1 text-xs text-slate-600">
                 transactions: {txResult.transactions.length} · warnings: {txResult.warnings.length}
