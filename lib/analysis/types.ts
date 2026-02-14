@@ -57,8 +57,12 @@ export type CategoryRule = {
   amountSign?: "positive" | "negative";
 };
 
+export const DEFAULT_OVERRIDE_SCOPE = "global" as const;
+export type OverrideScopeKey = string;
+export type ScopedCategoryMap = Record<OverrideScopeKey, Record<string, Category>>;
+
 export type CategoryOverrides = {
-  merchantMap: Record<string, Category>;
-  transactionMap: Record<string, Category>;
+  merchantMap: ScopedCategoryMap;
+  transactionMap: ScopedCategoryMap;
   updatedAt?: string;
 };

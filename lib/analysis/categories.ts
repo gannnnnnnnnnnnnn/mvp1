@@ -2,6 +2,7 @@ import {
   Category,
   CategoryOverrides,
   CategoryRule,
+  DEFAULT_OVERRIDE_SCOPE,
   NormalizedTransaction,
 } from "@/lib/analysis/types";
 
@@ -130,14 +131,18 @@ function defaultCategory(tx: NormalizedTransaction): Category {
 
 export function assignCategory(
   tx: NormalizedTransaction,
-  overrides: CategoryOverrides
+  overrides: CategoryOverrides,
+  scopeKey = DEFAULT_OVERRIDE_SCOPE
 ): Pick<NormalizedTransaction, "category" | "categorySource" | "categoryRuleId"> {
-  const txOverride = overrides.transactionMap[tx.id];
+  const transactionMap = overrides.transactionMap[scopeKey] || {};
+  const merchantMap = overrides.merchantMap[scopeKey] || {};
+
+  const txOverride = transactionMap[tx.id];
   if (txOverride) {
     return { category: txOverride, categorySource: "manual" };
   }
 
-  const merchantOverride = overrides.merchantMap[tx.merchantNorm];
+  const merchantOverride = merchantMap[tx.merchantNorm];
   if (merchantOverride) {
     return { category: merchantOverride, categorySource: "manual" };
   }
