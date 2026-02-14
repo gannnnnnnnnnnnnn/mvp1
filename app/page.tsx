@@ -97,6 +97,7 @@ type PipelineStatus = {
 
 export default function Home() {
   // Local UI state hooks.
+  const [sessionUserId, setSessionUserId] = useState<string>("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isAutoPipelineRunning, setIsAutoPipelineRunning] = useState(false);
@@ -554,6 +555,26 @@ export default function Home() {
     fetchFiles();
   }, []);
 
+  useEffect(() => {
+    const cookieName = "pc_user_id";
+    const existing = document.cookie
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${cookieName}=`));
+
+    if (existing) {
+      setSessionUserId(existing.split("=")[1] || "");
+      return;
+    }
+
+    const nextId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `u_${Math.random().toString(36).slice(2)}`;
+    document.cookie = `${cookieName}=${nextId}; Max-Age=31536000; Path=/; SameSite=Lax`;
+    setSessionUserId(nextId);
+  }, []);
+
   const selectedSummary = useMemo(() => {
     if (!selectedFile) return "未选择文件";
     return `${selectedFile.name} · ${formatSize(selectedFile.size)} · ${
@@ -639,6 +660,15 @@ export default function Home() {
             >
               {isUploading || isAutoPipelineRunning ? "上传并解析中..." : "Upload (Auto Parse)"}
             </button>
+
+            {files.length > 0 && (
+              <a
+                href="/phase3"
+                className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Continue
+              </a>
+            )}
           </div>
 
           {error && (
@@ -671,6 +701,11 @@ export default function Home() {
               </div>
             </div>
           )}
+
+          <div className="mt-3 text-xs text-slate-500">
+            session: {sessionUserId ? `${sessionUserId.slice(0, 8)}...` : "initializing"} ·
+            returning user: {files.length > 0 ? "yes" : "no"}
+          </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
