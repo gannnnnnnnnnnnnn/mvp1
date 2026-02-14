@@ -166,29 +166,28 @@ function toCategoryOption(value: string | undefined): CategoryOption {
   return "Other";
 }
 
-function readPeriodFromUrl(): { type: PeriodType; key: string; openInbox: boolean } {
+function readPeriodFromUrl(): { type: PeriodType; key: string } {
   if (typeof window === "undefined") {
-    return { type: "month" as PeriodType, key: "", openInbox: false };
+    return { type: "month" as PeriodType, key: "" };
   }
 
   const query = new URLSearchParams(window.location.search);
   const typeRaw = (query.get("type") || "").trim();
   const keyRaw = (query.get("key") || "").trim();
   const legacyMonth = (query.get("m") || "").trim();
-  const openInbox = query.get("openInbox") === "1";
 
   const type: PeriodType =
     typeRaw === "quarter" || typeRaw === "year" ? typeRaw : "month";
 
   if (keyRaw) {
-    return { type, key: keyRaw, openInbox };
+    return { type, key: keyRaw };
   }
 
   if (legacyMonth) {
-    return { type: "month", key: legacyMonth, openInbox };
+    return { type: "month", key: legacyMonth };
   }
 
-  return { type: "month", key: "", openInbox };
+  return { type: "month", key: "" };
 }
 
 function periodRange(type: PeriodType, key: string) {
@@ -344,10 +343,7 @@ export default function Phase3PeriodPage() {
   const [rowCategoryDraft, setRowCategoryDraft] = useState<Record<string, CategoryOption>>({});
   const [rowSavingTxId, setRowSavingTxId] = useState<string | null>(null);
   const [rowStatus, setRowStatus] = useState("");
-  const [focusInboxOnLoad, setFocusInboxOnLoad] = useState(false);
-  const [inboxPulse, setInboxPulse] = useState(false);
   const pieCardRef = useRef<HTMLDivElement | null>(null);
-  const triageSectionRef = useRef<HTMLElement | null>(null);
 
   const selectedFileNames = useMemo(
     () =>
@@ -739,7 +735,6 @@ export default function Phase3PeriodPage() {
     setSelectedFileIds(parsed.fileIds);
     setPeriodType(period.type);
     setPeriodKey(period.key);
-    setFocusInboxOnLoad(period.openInbox);
 
     void fetchFiles().catch(() => {
       setError({ code: "FILES_FAILED", message: "Failed to load file list." });
@@ -805,15 +800,6 @@ export default function Phase3PeriodPage() {
     if (!periodKey) return;
     void fetchTriage();
   }, [periodType, periodKey, scopeMode, selectedFileIds, fetchTriage]);
-
-  useEffect(() => {
-    if (!focusInboxOnLoad || triageItems.length === 0) return;
-    triageSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    setInboxPulse(true);
-    const timer = window.setTimeout(() => setInboxPulse(false), 1200);
-    setFocusInboxOnLoad(false);
-    return () => window.clearTimeout(timer);
-  }, [focusInboxOnLoad, triageItems.length]);
 
   useEffect(() => {
     if (!periodKey) return;
@@ -980,12 +966,7 @@ export default function Phase3PeriodPage() {
         </section>
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <article
-            ref={triageSectionRef}
-            className={`rounded-2xl border bg-white p-6 shadow-sm transition ${
-              inboxPulse ? "border-blue-300 ring-2 ring-blue-100" : "border-slate-200"
-            }`}
-          >
+          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="text-xs uppercase tracking-wide text-slate-500">Income</div>
             <div className="mt-3 text-3xl font-semibold text-emerald-700">
               {CURRENCY.format(overview?.totals.income || 0)}

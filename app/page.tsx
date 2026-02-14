@@ -113,10 +113,6 @@ export default function Home() {
   const [txError, setTxError] = useState<ApiError | null>(null);
   const [txResult, setTxResult] = useState<ParseTransactionsResult | null>(null);
   const [expandedRawLines, setExpandedRawLines] = useState<Record<string, boolean>>({});
-  const [unknownSummaryForParsedFile, setUnknownSummaryForParsedFile] = useState<{
-    merchantCount: number;
-    transactionCount: number;
-  } | null>(null);
 
   // Phase 1.5 cleanup UI state.
   const [deletingFileId, setDeletingFileId] = useState<string | null>(null);
@@ -324,24 +320,6 @@ export default function Home() {
         sectionTextPreview: typeof data.sectionTextPreview === "string" ? data.sectionTextPreview : "",
         debug: data.debug,
       });
-      try {
-        const triageRes = await fetch(
-          `/api/analysis/triage/unknown-merchants?fileId=${encodeURIComponent(file.id)}`
-        );
-        const triageData = (await triageRes.json()) as
-          | { ok: true; unknownMerchantCount?: number; unknownTransactionsCount?: number }
-          | { ok: false; error: ApiError };
-        if (triageData.ok) {
-          setUnknownSummaryForParsedFile({
-            merchantCount: triageData.unknownMerchantCount || 0,
-            transactionCount: triageData.unknownTransactionsCount || 0,
-          });
-        } else {
-          setUnknownSummaryForParsedFile(null);
-        }
-      } catch {
-        setUnknownSummaryForParsedFile(null);
-      }
       setExpandedRawLines({});
     } catch {
       setTxError({
@@ -370,7 +348,6 @@ export default function Home() {
       setTxResult(null);
       setTxError(null);
       setExpandedRawLines({});
-      setUnknownSummaryForParsedFile(null);
     }
   };
 
@@ -444,7 +421,6 @@ export default function Home() {
       setTxResult(null);
       setTxError(null);
       setExpandedRawLines({});
-      setUnknownSummaryForParsedFile(null);
       setCopyMsg(null);
       setSuccessMsg(`已清空全部文件，删除 ${data.deletedCount} 条记录。`);
       await fetchFiles();
@@ -517,26 +493,21 @@ export default function Home() {
     return skipped > 0 ? `${skipped}${reasonText ? ` · ${reasonText}` : ""}` : "0";
   };
 
-  const parsedMonthKey = useMemo(() => {
-    if (!txResult || txResult.transactions.length === 0) return "";
-    const dates = txResult.transactions
-      .map((tx) => tx.date.slice(0, 7))
-      .filter((value) => /^\d{4}-\d{2}$/.test(value))
-      .sort();
-    return dates[dates.length - 1] || "";
-  }, [txResult]);
-
   return (
     <main className="min-h-screen bg-slate-50 p-8">
       <div className="mx-auto max-w-5xl space-y-8">
         <header>
-          <h1 className="text-3xl font-semibold text-slate-900">Personal Cashflow</h1>
-          <p className="mt-2 text-slate-600">Upload CommBank PDF and parse transactions.</p>
+          <h1 className="text-3xl font-semibold text-slate-900">
+            Web Dropbox 1.0 — Phase 2.3
+          </h1>
+          <p className="mt-2 text-slate-600">
+            PDF-only pipeline：Extract Text → Segment → Parse Transactions。
+          </p>
         </header>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-900">Upload</h2>
-          <p className="mt-1 text-sm text-slate-600">PDF only. Keep it simple: choose file, click upload.</p>
+          <h2 className="text-xl font-semibold text-slate-900">文件上传</h2>
+          <p className="mt-1 text-sm text-slate-600">仅支持 PDF / CSV，单个文件 20MB 以内。</p>
 
           <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
             <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700 hover:border-blue-500 hover:bg-blue-50">
@@ -552,7 +523,7 @@ export default function Home() {
                 }}
               />
               <span className="font-medium">选择文件</span>
-              <span className="text-xs text-slate-500">text-based PDF</span>
+              <span className="text-xs text-slate-500">支持 PDF / CSV</span>
             </label>
 
             <div className="text-sm text-slate-700">{selectedSummary}</div>
@@ -823,38 +794,6 @@ export default function Home() {
                   </div>
                 </div>
               )}
-
-              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-lg text-white">
-                    ✓
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-emerald-900">Parsed successfully</div>
-                    <div className="text-xs text-emerald-800">
-                      Parsed 1 file, {txResult.transactions.length} transactions.
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <a
-                    href="/phase3"
-                    className="rounded bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800"
-                  >
-                    Go to Dashboard
-                  </a>
-                  {(unknownSummaryForParsedFile?.merchantCount || 0) > 0 && (
-                    <a
-                      href={`/phase3/period?scope=selected&fileIds=${encodeURIComponent(
-                        txResult.fileId
-                      )}&type=month${parsedMonthKey ? `&key=${encodeURIComponent(parsedMonthKey)}` : ""}&openInbox=1`}
-                      className="rounded border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
-                    >
-                      Review unknown merchants ({unknownSummaryForParsedFile?.merchantCount || 0})
-                    </a>
-                  )}
-                </div>
-              </div>
 
               <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
                 <table className="min-w-full text-left text-xs text-slate-700">
