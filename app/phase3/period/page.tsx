@@ -775,8 +775,8 @@ export default function Phase3PeriodPage() {
           </article>
         </section>
 
-        <section className="grid gap-4 xl:grid-cols-2">
-          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="grid items-stretch gap-4 xl:grid-cols-2">
+          <article className="h-full min-h-[360px] rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Period Cashflow Trend</h2>
             <p className="mt-1 text-sm text-slate-600">
               Compact chart: income/spend bars with net line.
@@ -843,7 +843,7 @@ export default function Phase3PeriodPage() {
             </div>
           </article>
 
-          <article className="overflow-visible rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <article className="h-full min-h-[360px] overflow-visible rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900">Spend by Category</h2>
             <p className="mt-1 text-sm text-slate-600">Hover for details. Click to open embedded drilldown.</p>
             <div className="mt-2">
