@@ -201,6 +201,10 @@ export default function Phase3DatasetHomePage() {
           </article>
         </section>
 
+        <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Note: Transfers are currently included in totals. Transfer offset matching will be added in the next milestone.
+        </section>
+
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
