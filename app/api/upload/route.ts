@@ -9,11 +9,14 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import {
-  appendMetadata,
+  appendMetadataDedupByHash,
   ensureUploadsDir,
   FileMeta,
+  findByContentHash,
+  readIndex,
+  replaceIndex,
   uploadsDirAbsolute,
 } from "@/lib/fileStore";
 
@@ -62,6 +65,7 @@ function buildMetadata(params: {
   id: string;
   storedName: string;
   relativePath: string;
+  contentHash: string;
 }): FileMeta {
   return {
     id: params.id,
@@ -71,6 +75,7 @@ function buildMetadata(params: {
     mimeType: params.file.type || "application/octet-stream",
     uploadedAt: new Date().toISOString(),
     path: params.relativePath,
+    contentHash: params.contentHash,
   };
 }
 
@@ -120,12 +125,74 @@ export async function POST(request: Request) {
 
     // Write the file to disk.
     const buffer = await fileToBuffer(file);
+    const contentHash = createHash("sha256").update(buffer).digest("hex");
+    let existing = await findByContentHash(contentHash);
+    if (!existing) {
+      // Backward compatibility: old index rows may not have contentHash.
+      // We lazily compute and backfill missing hashes to keep dedupe reliable.
+      const current = await readIndex();
+      let touched = false;
+      for (const row of current) {
+        if (row.contentHash) {
+          continue;
+        }
+        const candidatePath = path.join(uploadsDirAbsolute, row.storedName);
+        try {
+          const candidateBuffer = await fs.readFile(candidatePath);
+          const candidateHash = createHash("sha256")
+            .update(candidateBuffer)
+            .digest("hex");
+          row.contentHash = candidateHash;
+          touched = true;
+          if (candidateHash === contentHash) {
+            existing = row;
+          }
+        } catch {
+          // Ignore unreadable old file rows and continue dedupe scan.
+        }
+      }
+      if (touched) {
+        await replaceIndex(current);
+      }
+    }
+    if (existing) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: {
+            code: "DUPLICATE_FILE",
+            message: "File already uploaded.",
+          },
+        },
+        { status: 409 }
+      );
+    }
+
     await fs.writeFile(absolutePath, buffer);
 
     // Build and persist metadata (write temp then rename inside appendMetadata).
-    const metadata = buildMetadata({ file, id, storedName, relativePath });
+    const metadata = buildMetadata({
+      file,
+      id,
+      storedName,
+      relativePath,
+      contentHash,
+    });
     try {
-      await appendMetadata(metadata);
+      const dedupResult = await appendMetadataDedupByHash(metadata);
+      if (dedupResult.duplicate) {
+        await fs.unlink(absolutePath).catch(() => undefined);
+        return NextResponse.json(
+          {
+            ok: false,
+            error: {
+              code: "DUPLICATE_FILE",
+              message: "File already uploaded.",
+            },
+          },
+          { status: 409 }
+        );
+      }
     } catch {
       // Keep file/index consistency if metadata write fails.
       await fs.unlink(absolutePath).catch(() => undefined);

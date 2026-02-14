@@ -1,0 +1,1063 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+
+type FileMeta = {
+  id: string;
+  originalName: string;
+  size: number;
+  mimeType: string;
+  uploadedAt: string;
+};
+
+type ApiError = { code: string; message: string };
+
+type OverviewResponse = {
+  ok: true;
+  fileId?: string;
+  fileIds?: string[];
+  filesIncludedCount?: number;
+  txCountBeforeDedupe?: number;
+  dedupedCount?: number;
+  datasetDateMin?: string;
+  datasetDateMax?: string;
+  availableMonths?: string[];
+  availableQuarters?: string[];
+  availableYears?: string[];
+  accountIds?: string[];
+  accountId?: string;
+  granularity: "month" | "week";
+  templateType: string;
+  needsReview: boolean;
+  quality?: {
+    headerFound: boolean;
+    balanceContinuityPassRate: number;
+    balanceContinuityChecked: number;
+    balanceContinuityTotalRows?: number;
+    balanceContinuitySkipped?: number;
+    balanceContinuitySkippedReasons?: Record<string, number>;
+    needsReviewReasons: string[];
+  };
+  appliedFilters?: {
+    scope?: string;
+    fileId?: string;
+    fileIds?: string[];
+    accountId?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    granularity?: "month" | "week";
+    balanceScope?: "file" | "account" | "none";
+  };
+  totals: { income: number; spend: number; net: number };
+  periods: Array<{
+    period: string;
+    income: number;
+    spend: number;
+    net: number;
+    transactionIds: string[];
+  }>;
+  spendByCategory: Array<{
+    category: string;
+    amount: number;
+    share: number;
+    transactionIds: string[];
+    topMerchants?: Array<{ merchantNorm: string; amount: number }>;
+    recentTransactions?: Array<{
+      id: string;
+      date: string;
+      merchantNorm: string;
+      amount: number;
+      descriptionRaw: string;
+    }>;
+  }>;
+  categoryTrendMonthly?: Array<{
+    category: string;
+    points: Array<{ period: string; amount: number; transactionIds: string[] }>;
+  }>;
+  topMerchants: Array<{
+    merchantNorm: string;
+    amount: number;
+    transactionIds: string[];
+  }>;
+  balanceSeries: Array<{ date: string; balance: number; transactionId: string }>;
+  balanceSeriesDisabledReason?: string;
+};
+
+type CompareResponse = {
+  ok: true;
+  fileId?: string;
+  fileIds?: string[];
+  filesIncludedCount?: number;
+  txCountBeforeDedupe?: number;
+  dedupedCount?: number;
+  datasetDateMin?: string;
+  datasetDateMax?: string;
+  availableMonths?: string[];
+  availableQuarters?: string[];
+  availableYears?: string[];
+  accountIds?: string[];
+  accountId?: string;
+  periodA: { start: string; end: string };
+  periodB: { start: string; end: string };
+  appliedFilters?: Record<string, unknown>;
+  totalsA: {
+    income: number;
+    spend: number;
+    net: number;
+    transactionIds: string[];
+    categories: Array<{ category: string; amount: number }>;
+  };
+  totalsB: {
+    income: number;
+    spend: number;
+    net: number;
+    transactionIds: string[];
+    categories: Array<{ category: string; amount: number }>;
+  };
+  delta: {
+    income: { amount: number; percent: number };
+    spend: { amount: number; percent: number };
+    net: { amount: number; percent: number };
+  };
+  categoryBreakdownA: Array<{ category: string; amount: number }>;
+  categoryBreakdownB: Array<{ category: string; amount: number }>;
+  categoryDeltas: Array<{
+    category: string;
+    current: number;
+    previous: number;
+    delta: number;
+    percent: number;
+  }>;
+  merchantDeltas?: Array<{
+    merchantNorm: string;
+    current: number;
+    previous: number;
+    delta: number;
+    percent: number;
+  }>;
+};
+
+const CURRENCY = new Intl.NumberFormat("en-AU", {
+  style: "currency",
+  currency: "AUD",
+  maximumFractionDigits: 2,
+});
+
+const PERCENT = new Intl.NumberFormat("en-AU", {
+  style: "percent",
+  maximumFractionDigits: 1,
+});
+
+function templateLabel(templateType: string) {
+  if (templateType === "commbank_manual_amount_balance") return "manual";
+  if (templateType === "commbank_auto_debit_credit") return "auto";
+  if (templateType === "mixed") return "mixed";
+  return "unknown";
+}
+
+function deltaText(value: { amount: number; percent: number }) {
+  const sign = value.amount >= 0 ? "+" : "-";
+  return `${sign}${CURRENCY.format(Math.abs(value.amount))} (${sign}${PERCENT.format(
+    Math.abs(value.percent)
+  )})`;
+}
+
+function makeDonutStyle(items: Array<{ share: number }>) {
+  if (items.length === 0) {
+    return { background: "conic-gradient(#e2e8f0 0deg 360deg)" } as const;
+  }
+
+  const palette = [
+    "#0f766e",
+    "#0369a1",
+    "#2563eb",
+    "#7c3aed",
+    "#be185d",
+    "#dc2626",
+    "#ca8a04",
+    "#059669",
+  ];
+
+  let cursor = 0;
+  const pieces = items.map((item, index) => {
+    const start = cursor;
+    const end = cursor + item.share * 360;
+    cursor = end;
+    return `${palette[index % palette.length]} ${start}deg ${end}deg`;
+  });
+
+  if (cursor < 360) {
+    pieces.push(`#e2e8f0 ${cursor}deg 360deg`);
+  }
+
+  return { background: `conic-gradient(${pieces.join(", ")})` } as const;
+}
+
+function buildLinePath(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) return "";
+  return points
+    .map((point, index) => `${index === 0 ? "M" : "L"}${point.x},${point.y}`)
+    .join(" ");
+}
+
+function continuitySummary(quality?: OverviewResponse["quality"]) {
+  if (!quality || typeof quality.balanceContinuityPassRate !== "number") return "-";
+  const checked = quality.balanceContinuityChecked ?? 0;
+  const total = quality.balanceContinuityTotalRows ?? checked;
+  return `${(quality.balanceContinuityPassRate * 100).toFixed(1)}% (checked ${checked}/${total})`;
+}
+
+function skippedSummary(quality?: OverviewResponse["quality"]) {
+  if (!quality) return "-";
+  const skipped = quality.balanceContinuitySkipped ?? 0;
+  const reasons = quality.balanceContinuitySkippedReasons || {};
+  const reasonText = Object.entries(reasons)
+    .map(([reason, count]) => `${reason}:${count}`)
+    .join(", ");
+  return skipped > 0 ? `${skipped}${reasonText ? ` · ${reasonText}` : ""}` : "0";
+}
+
+function monthRange(period: string) {
+  const match = /^(\\d{4})-(\\d{2})$/.exec(period);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 0));
+  const toDate = (d: Date) => d.toISOString().slice(0, 10);
+  return { dateFrom: toDate(start), dateTo: toDate(end) };
+}
+
+function quarterRange(period: string) {
+  const match = /^(\\d{4})-Q([1-4])$/.exec(period);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const quarter = Number(match[2]);
+  const startMonth = (quarter - 1) * 3;
+  const start = new Date(Date.UTC(year, startMonth, 1));
+  const end = new Date(Date.UTC(year, startMonth + 3, 0));
+  const toDate = (d: Date) => d.toISOString().slice(0, 10);
+  return { dateFrom: toDate(start), dateTo: toDate(end) };
+}
+
+function yearRange(yearText: string) {
+  const year = Number(yearText);
+  if (!Number.isInteger(year)) return null;
+  const start = new Date(Date.UTC(year, 0, 1));
+  const end = new Date(Date.UTC(year, 11, 31));
+  const toDate = (d: Date) => d.toISOString().slice(0, 10);
+  return { dateFrom: toDate(start), dateTo: toDate(end) };
+}
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const [files, setFiles] = useState<FileMeta[]>([]);
+  const [scopeMode, setScopeMode] = useState<"all" | "selected">("all");
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [granularity, setGranularity] = useState<"month" | "week">("month");
+  const [compareMode, setCompareMode] = useState<
+    "month_prev" | "month_last_year" | "quarter_prev" | "year_prev" | "custom_month"
+  >("month_prev");
+  const [customMonthA, setCustomMonthA] = useState("");
+  const [customMonthB, setCustomMonthB] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  const [overview, setOverview] = useState<OverviewResponse | null>(null);
+  const [compare, setCompare] = useState<CompareResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [selectedTrendCategory, setSelectedTrendCategory] = useState<string>("");
+
+  const selectedFileNames = useMemo(
+    () =>
+      selectedFileIds
+        .map((id) => files.find((f) => f.id === id)?.originalName)
+        .filter(Boolean) as string[],
+    [files, selectedFileIds]
+  );
+
+  const availableMonths = useMemo(() => overview?.availableMonths || [], [overview?.availableMonths]);
+  const availableQuarters = useMemo(
+    () => overview?.availableQuarters || [],
+    [overview?.availableQuarters]
+  );
+  const availableYears = useMemo(() => overview?.availableYears || [], [overview?.availableYears]);
+
+  useEffect(() => {
+    if (availableMonths.length === 0) return;
+    if (!customMonthA) setCustomMonthA(availableMonths[availableMonths.length - 1]);
+    if (!customMonthB) {
+      const fallback =
+        availableMonths.length > 1
+          ? availableMonths[availableMonths.length - 2]
+          : availableMonths[availableMonths.length - 1];
+      setCustomMonthB(fallback);
+    }
+  }, [availableMonths, customMonthA, customMonthB]);
+
+  const comparePeriods = useMemo(() => {
+    const latestMonth = availableMonths[availableMonths.length - 1];
+    const latestQuarter = availableQuarters[availableQuarters.length - 1];
+    const latestYear = availableYears[availableYears.length - 1];
+
+    if (compareMode === "custom_month") {
+      const a = monthRange(customMonthA || latestMonth || "");
+      const b = monthRange(customMonthB || latestMonth || "");
+      return a && b ? { a, b, label: `Custom: ${customMonthA} vs ${customMonthB}` } : null;
+    }
+
+    if (compareMode === "month_prev") {
+      const a = monthRange(latestMonth || "");
+      if (!a) return null;
+      const previousDate = new Date(`${a.dateFrom}T00:00:00Z`);
+      previousDate.setUTCMonth(previousDate.getUTCMonth() - 1);
+      const prevMonth = `${previousDate.getUTCFullYear()}-${String(previousDate.getUTCMonth() + 1).padStart(2, "0")}`;
+      const b = monthRange(prevMonth);
+      return b ? { a, b, label: "This month vs last month" } : null;
+    }
+
+    if (compareMode === "month_last_year") {
+      const a = monthRange(latestMonth || "");
+      if (!a || !latestMonth) return null;
+      const [yearText, monthText] = latestMonth.split("-");
+      const lastYearMonth = `${Number(yearText) - 1}-${monthText}`;
+      if (!availableMonths.includes(lastYearMonth)) return null;
+      const b = monthRange(lastYearMonth);
+      return b ? { a, b, label: "This month vs same month last year" } : null;
+    }
+
+    if (compareMode === "quarter_prev") {
+      const a = quarterRange(latestQuarter || "");
+      if (!a || !latestQuarter) return null;
+      const qMatch = /^(\\d{4})-Q([1-4])$/.exec(latestQuarter);
+      if (!qMatch) return null;
+      const year = Number(qMatch[1]);
+      const quarter = Number(qMatch[2]);
+      const prevQuarter = quarter === 1 ? `${year - 1}-Q4` : `${year}-Q${quarter - 1}`;
+      const b = quarterRange(prevQuarter);
+      return b ? { a, b, label: "This quarter vs last quarter" } : null;
+    }
+
+    const a = yearRange(latestYear || "");
+    if (!a || !latestYear) return null;
+    const b = yearRange(String(Number(latestYear) - 1));
+    return b ? { a, b, label: "This year vs last year" } : null;
+  }, [
+    availableMonths,
+    availableQuarters,
+    availableYears,
+    compareMode,
+    customMonthA,
+    customMonthB,
+  ]);
+
+  const buildSharedScopeParams = () => {
+    const params = new URLSearchParams();
+    if (scopeMode === "all") {
+      params.set("scope", "all");
+    } else {
+      for (const fileId of selectedFileIds) {
+        params.append("fileIds", fileId);
+      }
+    }
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
+    return params;
+  };
+
+  const goToCategoryDrilldown = (categoryName: string) => {
+    const params = buildSharedScopeParams();
+    params.set("category", categoryName);
+    router.push(`/transactions?${params.toString()}`);
+  };
+
+  const goToCategoryMonthDrilldown = (categoryName: string, period: string) => {
+    const params = buildSharedScopeParams();
+    params.set("category", categoryName);
+    const range = monthRange(period);
+    if (range) {
+      params.set("dateFrom", range.dateFrom);
+      params.set("dateTo", range.dateTo);
+    }
+    router.push(`/transactions?${params.toString()}`);
+  };
+
+  const fetchFiles = async () => {
+    const res = await fetch("/api/files");
+    const data = (await res.json()) as
+      | { ok: true; files: FileMeta[] }
+      | { ok: false; error: ApiError };
+    if (!data.ok) {
+      throw new Error(`${data.error.code}: ${data.error.message}`);
+    }
+    setFiles(data.files);
+    if (scopeMode === "selected" && selectedFileIds.length === 0 && data.files.length > 0) {
+      setSelectedFileIds([data.files[0].id]);
+    }
+  };
+
+  const fetchAnalytics = async () => {
+    if (scopeMode === "selected" && selectedFileIds.length === 0) return;
+    setIsLoading(true);
+    setError(null);
+
+    const common = new URLSearchParams({
+      granularity,
+      ...(dateFrom ? { dateFrom } : {}),
+      ...(dateTo ? { dateTo } : {}),
+    });
+    if (scopeMode === "all") {
+      common.set("scope", "all");
+    } else {
+      for (const fileId of selectedFileIds) {
+        common.append("fileIds", fileId);
+      }
+    }
+
+    try {
+      const overviewRes = await fetch(`/api/analysis/overview?${common.toString()}`);
+
+      const overviewData = (await overviewRes.json()) as
+        | OverviewResponse
+        | { ok: false; error: ApiError };
+
+      if (!overviewData.ok) {
+        setError(overviewData.error);
+        setOverview(null);
+        setCompare(null);
+        return;
+      }
+
+      const months = overviewData.availableMonths || [];
+      const quarters = overviewData.availableQuarters || [];
+      const years = overviewData.availableYears || [];
+      const latestMonth = months[months.length - 1];
+      const latestQuarter = quarters[quarters.length - 1];
+      const latestYear = years[years.length - 1];
+
+      const fallbackPeriods = (() => {
+        if (compareMode === "custom_month") {
+          const a = monthRange(customMonthA || latestMonth || "");
+          const b = monthRange(customMonthB || latestMonth || "");
+          return a && b ? { a, b } : null;
+        }
+        if (compareMode === "month_last_year") {
+          const a = monthRange(latestMonth || "");
+          if (!a || !latestMonth) return null;
+          const [y, m] = latestMonth.split("-");
+          const b = monthRange(`${Number(y) - 1}-${m}`);
+          return b ? { a, b } : null;
+        }
+        if (compareMode === "quarter_prev") {
+          const a = quarterRange(latestQuarter || "");
+          if (!a || !latestQuarter) return null;
+          const qMatch = /^(\\d{4})-Q([1-4])$/.exec(latestQuarter);
+          if (!qMatch) return null;
+          const year = Number(qMatch[1]);
+          const quarter = Number(qMatch[2]);
+          const prevQuarter = quarter === 1 ? `${year - 1}-Q4` : `${year}-Q${quarter - 1}`;
+          const b = quarterRange(prevQuarter);
+          return b ? { a, b } : null;
+        }
+        if (compareMode === "year_prev") {
+          const a = yearRange(latestYear || "");
+          const b = yearRange(String(Number(latestYear || "0") - 1));
+          return a && b ? { a, b } : null;
+        }
+        const a = monthRange(latestMonth || "");
+        if (!a) return null;
+        const previousDate = new Date(`${a.dateFrom}T00:00:00Z`);
+        previousDate.setUTCMonth(previousDate.getUTCMonth() - 1);
+        const prevMonth = `${previousDate.getUTCFullYear()}-${String(previousDate.getUTCMonth() + 1).padStart(2, "0")}`;
+        const b = monthRange(prevMonth);
+        return b ? { a, b } : null;
+      })();
+
+      if (!fallbackPeriods) {
+        setOverview(overviewData);
+        setCompare(null);
+        setError({
+          code: "COMPARE_RANGE_UNAVAILABLE",
+          message: "Comparison periods are not available for current dataset scope.",
+        });
+        return;
+      }
+
+      const compareParams = new URLSearchParams({
+        periodAStart: fallbackPeriods.a.dateFrom,
+        periodAEnd: fallbackPeriods.a.dateTo,
+        periodBStart: fallbackPeriods.b.dateFrom,
+        periodBEnd: fallbackPeriods.b.dateTo,
+      });
+      if (scopeMode === "all") {
+        compareParams.set("scope", "all");
+      } else {
+        for (const fileId of selectedFileIds) {
+          compareParams.append("fileIds", fileId);
+        }
+      }
+
+      const compareRes = await fetch(`/api/analysis/compare?${compareParams.toString()}`);
+      const compareData = (await compareRes.json()) as CompareResponse | { ok: false; error: ApiError };
+      if (!compareData.ok) {
+        setError(compareData.error);
+        setOverview(overviewData);
+        setCompare(null);
+        return;
+      }
+
+      setOverview(overviewData);
+      setCompare(compareData);
+    } catch {
+      setError({ code: "FETCH_FAILED", message: "Failed to load analysis data." });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchFiles().catch(() => {
+      setError({ code: "FILES_FAILED", message: "Failed to load files list." });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (scopeMode === "selected" && selectedFileIds.length === 0) return;
+    void fetchAnalytics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeMode, selectedFileIds, granularity, compareMode, customMonthA, customMonthB]);
+
+  const maxPeriodTotal = useMemo(() => {
+    if (!overview?.periods.length) return 0;
+    return Math.max(
+      ...overview.periods.map((item) => Math.max(item.income, item.spend, Math.abs(item.net)))
+    );
+  }, [overview]);
+
+  const balancePath = useMemo(() => {
+    const rows = overview?.balanceSeries || [];
+    if (rows.length < 2) return "";
+
+    const width = 720;
+    const height = 200;
+    const min = Math.min(...rows.map((r) => r.balance));
+    const max = Math.max(...rows.map((r) => r.balance));
+    const span = max - min || 1;
+
+    const points = rows.map((row, index) => {
+      const x = (index / (rows.length - 1)) * width;
+      const y = height - ((row.balance - min) / span) * height;
+      return { x, y };
+    });
+
+    return buildLinePath(points);
+  }, [overview]);
+
+  const donutStyle = useMemo(
+    () => makeDonutStyle((overview?.spendByCategory || []).slice(0, 8)),
+    [overview]
+  );
+
+  useEffect(() => {
+    if (!overview?.spendByCategory?.length) {
+      setSelectedTrendCategory("");
+      return;
+    }
+    if (!selectedTrendCategory) {
+      setSelectedTrendCategory(overview.spendByCategory[0].category);
+      return;
+    }
+    if (!overview.spendByCategory.some((row) => row.category === selectedTrendCategory)) {
+      setSelectedTrendCategory(overview.spendByCategory[0].category);
+    }
+  }, [overview, selectedTrendCategory]);
+
+  const trendPoints = useMemo(() => {
+    if (!overview?.categoryTrendMonthly || !selectedTrendCategory) return [];
+    const found = overview.categoryTrendMonthly.find((row) => row.category === selectedTrendCategory);
+    return found?.points || [];
+  }, [overview, selectedTrendCategory]);
+
+  const maxTrendAmount = useMemo(
+    () => Math.max(0, ...trendPoints.map((item) => item.amount)),
+    [trendPoints]
+  );
+
+  return (
+    <main className="min-h-screen bg-slate-50 p-6 sm:p-8">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h1 className="text-2xl font-semibold text-slate-900">Phase 3 Dashboard</h1>
+          <p className="mt-1 text-sm text-slate-600">
+            Category analytics and period comparisons for CommBank parsed transactions.
+          </p>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-5">
+            <label className="space-y-1 text-xs font-medium text-slate-600">
+              Scope
+              <select
+                value={scopeMode}
+                onChange={(e) => setScopeMode(e.target.value as "all" | "selected")}
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+              >
+                <option value="all">All files</option>
+                <option value="selected">Selected files</option>
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600 md:col-span-2">
+              Files (multi-select)
+              <select
+                multiple
+                value={selectedFileIds}
+                onChange={(e) => {
+                  const values = Array.from(e.currentTarget.selectedOptions).map((opt) => opt.value);
+                  setSelectedFileIds(values);
+                }}
+                disabled={scopeMode !== "selected"}
+                className="h-[88px] w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 disabled:bg-slate-100"
+              >
+                {files.map((file) => (
+                  <option key={file.id} value={file.id}>
+                    {file.originalName}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600">
+              Granularity
+              <select
+                value={granularity}
+                onChange={(e) => setGranularity(e.target.value as "month" | "week")}
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+              >
+                <option value="month">Month</option>
+                <option value="week">Week</option>
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600">
+              Compare Mode
+              <select
+                value={compareMode}
+                onChange={(e) =>
+                  setCompareMode(
+                    e.target.value as
+                      | "month_prev"
+                      | "month_last_year"
+                      | "quarter_prev"
+                      | "year_prev"
+                      | "custom_month"
+                  )
+                }
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+              >
+                <option value="month_prev">This month vs last month</option>
+                <option
+                  value="month_last_year"
+                  disabled={
+                    !overview?.availableMonths?.some((month) => {
+                      const latest = overview.availableMonths?.[overview.availableMonths.length - 1];
+                      if (!latest) return false;
+                      const [y, m] = latest.split("-");
+                      return month === `${Number(y) - 1}-${m}`;
+                    })
+                  }
+                >
+                  This month vs same month last year
+                </option>
+                <option value="quarter_prev">This quarter vs last quarter</option>
+                <option value="year_prev">This year vs last year</option>
+                <option value="custom_month">Custom (Month A vs Month B)</option>
+              </select>
+            </label>
+
+            {compareMode === "custom_month" && (
+              <>
+                <label className="space-y-1 text-xs font-medium text-slate-600">
+                  Month A
+                  <select
+                    value={customMonthA}
+                    onChange={(e) => setCustomMonthA(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                  >
+                    {(overview?.availableMonths || []).map((month) => (
+                      <option key={month} value={month}>
+                        {month}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-1 text-xs font-medium text-slate-600">
+                  Month B
+                  <select
+                    value={customMonthB}
+                    onChange={(e) => setCustomMonthB(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+                  >
+                    {(overview?.availableMonths || []).map((month) => (
+                      <option key={month} value={month}>
+                        {month}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
+
+            <label className="space-y-1 text-xs font-medium text-slate-600">
+              Date From
+              <input
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                type="date"
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+              />
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600">
+              Date To
+              <input
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                type="date"
+                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900"
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={() => {
+                void fetchAnalytics();
+              }}
+              disabled={isLoading || (scopeMode === "selected" && selectedFileIds.length === 0)}
+              className="self-end rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+            >
+              {isLoading ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+
+          {overview && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+              <div className="mb-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600">
+                Dataset covers: {overview.datasetDateMin || "-"} → {overview.datasetDateMax || "-"} | Months:{" "}
+                {overview.availableMonths?.length || 0} | Files: {overview.filesIncludedCount || 0}
+              </div>
+              <div>
+                Template: <span className="font-medium">{templateLabel(overview.templateType)}</span> (
+                {overview.templateType})
+              </div>
+              <div>
+                Header: {overview.quality?.headerFound ? "found" : "not found"} | Continuity:{" "}
+                {continuitySummary(overview.quality)}
+              </div>
+              <div>
+                Continuity skipped: {skippedSummary(overview.quality)}
+              </div>
+              <div>
+                Review: {overview.needsReview ? "yes" : "no"}
+                {overview.needsReview && overview.quality?.needsReviewReasons?.length
+                  ? ` (${overview.quality.needsReviewReasons.join(", ")})`
+                  : ""}
+              </div>
+              <div>
+                Scope: <span className="font-medium">{overview.appliedFilters?.scope || scopeMode}</span>
+                {scopeMode === "selected" && selectedFileIds.length
+                  ? ` · ${selectedFileIds.length} selected`
+                  : ""}
+              </div>
+              <div>
+                Files included: {overview.filesIncludedCount ?? 0}
+                {selectedFileNames.length ? ` · ${selectedFileNames.join(", ")}` : ""}
+              </div>
+              <div>
+                Tx before dedupe: {overview.txCountBeforeDedupe ?? 0} · deduped:{" "}
+                {overview.dedupedCount ?? 0}
+              </div>
+              {comparePeriods && (
+                <div>
+                  Compare window: {comparePeriods.label} · A {comparePeriods.a.dateFrom} →{" "}
+                  {comparePeriods.a.dateTo} · B {comparePeriods.b.dateFrom} → {comparePeriods.b.dateTo}
+                </div>
+              )}
+            </div>
+          )}
+
+          {error && (
+            <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {error.code}: {error.message}
+            </div>
+          )}
+        </header>
+
+        <section className="grid gap-4 md:grid-cols-3">
+          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-xs uppercase tracking-wide text-slate-500">Income</div>
+            <div className="mt-2 text-2xl font-semibold text-emerald-700">
+              {CURRENCY.format(overview?.totals.income || 0)}
+            </div>
+            {compare && <div className="mt-2 text-xs text-slate-500">vs B period: {deltaText(compare.delta.income)}</div>}
+          </article>
+
+          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-xs uppercase tracking-wide text-slate-500">Spend</div>
+            <div className="mt-2 text-2xl font-semibold text-rose-700">
+              {CURRENCY.format(overview?.totals.spend || 0)}
+            </div>
+            {compare && <div className="mt-2 text-xs text-slate-500">vs B period: {deltaText(compare.delta.spend)}</div>}
+          </article>
+
+          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="text-xs uppercase tracking-wide text-slate-500">Net</div>
+            <div
+              className={`mt-2 text-2xl font-semibold ${(overview?.totals.net || 0) >= 0 ? "text-emerald-700" : "text-rose-700"}`}
+            >
+              {CURRENCY.format(overview?.totals.net || 0)}
+            </div>
+            {compare && <div className="mt-2 text-xs text-slate-500">vs B period: {deltaText(compare.delta.net)}</div>}
+          </article>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-slate-900">Compare: Top Category Movers</h2>
+            <div className="text-xs text-slate-500">{comparePeriods?.label || "Period A vs Period B"}</div>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
+            {(compare?.categoryDeltas || []).slice(0, 5).map((row) => (
+              <div key={row.category} className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-800">{row.category}</span>
+                  <span className={row.delta >= 0 ? "text-rose-700" : "text-emerald-700"}>
+                    {row.delta >= 0 ? "+" : "-"}
+                    {CURRENCY.format(Math.abs(row.delta))}
+                  </span>
+                </div>
+                <div className="mt-1 text-slate-500">
+                  A {CURRENCY.format(row.current)} · B {CURRENCY.format(row.previous)} ·{" "}
+                  {row.percent >= 0 ? "+" : "-"}
+                  {PERCENT.format(Math.abs(row.percent))}
+                </div>
+              </div>
+            ))}
+            {!compare?.categoryDeltas?.length && (
+              <p className="text-sm text-slate-500">No comparison deltas in current range.</p>
+            )}
+          </div>
+        </section>
+
+        <section className="grid gap-4 xl:grid-cols-2">
+          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-900">Income / Spend / Net by Period</h2>
+            <div className="mt-4 space-y-3">
+              {(overview?.periods || []).map((row) => (
+                <div key={row.period}>
+                  <div className="flex items-center justify-between text-xs text-slate-600">
+                    <span className="font-medium text-slate-800">{row.period}</span>
+                    <span title={row.transactionIds.join(", ")}>{row.transactionIds.length} tx</span>
+                  </div>
+                  <div className="mt-1 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="w-12 text-[11px] text-slate-500">Income</span>
+                      <div className="h-2 flex-1 rounded-full bg-slate-100">
+                        <div
+                          className="h-2 rounded-full bg-emerald-500"
+                          style={{
+                            width:
+                              maxPeriodTotal > 0
+                                ? `${Math.max(2, (row.income / maxPeriodTotal) * 100)}%`
+                                : "0%",
+                          }}
+                        />
+                      </div>
+                      <span className="w-24 text-right text-[11px] text-slate-600">{CURRENCY.format(row.income)}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="w-12 text-[11px] text-slate-500">Spend</span>
+                      <div className="h-2 flex-1 rounded-full bg-slate-100">
+                        <div
+                          className="h-2 rounded-full bg-rose-500"
+                          style={{
+                            width:
+                              maxPeriodTotal > 0
+                                ? `${Math.max(2, (row.spend / maxPeriodTotal) * 100)}%`
+                                : "0%",
+                          }}
+                        />
+                      </div>
+                      <span className="w-24 text-right text-[11px] text-slate-600">{CURRENCY.format(row.spend)}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {!overview?.periods.length && <p className="text-sm text-slate-500">No period data yet.</p>}
+            </div>
+          </article>
+
+          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-900">Spend by Category</h2>
+            <div className="mt-4 grid gap-4 sm:grid-cols-[200px_1fr]">
+              <div
+                className="mx-auto h-48 w-48 rounded-full border border-slate-200"
+                style={donutStyle}
+                aria-label="Spend by category donut"
+              />
+              <div className="space-y-2">
+                {(overview?.spendByCategory || []).slice(0, 8).map((row) => (
+                  <div
+                    key={row.category}
+                    className="group relative w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs hover:border-blue-300 hover:bg-blue-50"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium text-slate-800">{row.category}</span>
+                      <span className="text-slate-600">{CURRENCY.format(row.amount)}</span>
+                    </div>
+                    <div className="mt-1 text-slate-500">
+                      {PERCENT.format(row.share)} · <span title={row.transactionIds.join(", ")}>{row.transactionIds.length} tx</span>
+                    </div>
+                    <div className="absolute left-0 top-full z-20 mt-1 hidden w-[320px] rounded-lg border border-slate-300 bg-white p-2 text-[11px] text-slate-700 shadow-xl group-hover:block">
+                      <div className="font-semibold text-slate-900">{row.category}</div>
+                      <div className="mt-1">
+                        total {CURRENCY.format(row.amount)} · {row.transactionIds.length} tx
+                      </div>
+                      <div className="mt-2 text-slate-500">Top merchants</div>
+                      <div>
+                        {(row.topMerchants || []).map((item) => (
+                          <div key={item.merchantNorm}>
+                            {item.merchantNorm}: {CURRENCY.format(item.amount)}
+                          </div>
+                        ))}
+                        {!(row.topMerchants || []).length && <div>-</div>}
+                      </div>
+                      <div className="mt-2 text-slate-500">Recent transactions</div>
+                      <div>
+                        {(row.recentTransactions || []).map((item) => (
+                          <div key={item.id}>
+                            {item.date} · {item.merchantNorm} · {CURRENCY.format(item.amount)}
+                          </div>
+                        ))}
+                        {!(row.recentTransactions || []).length && <div>-</div>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          goToCategoryDrilldown(row.category);
+                        }}
+                        className="mt-2 rounded border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        View transactions
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                {!(overview?.spendByCategory.length) && (
+                  <p className="text-sm text-slate-500">No spending rows in range.</p>
+                )}
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section className="grid gap-4 xl:grid-cols-2">
+          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-900">Balance Curve</h2>
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              {balancePath ? (
+                <svg viewBox="0 0 720 220" className="h-56 w-full">
+                  <path d={balancePath} fill="none" stroke="#2563eb" strokeWidth="2.5" />
+                </svg>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  {overview?.balanceSeriesDisabledReason || "Not enough balance points to draw curve."}
+                </p>
+              )}
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              Each point maps to the latest transaction balance for that date.
+            </p>
+          </article>
+
+          <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-900">Top Merchants (Spend)</h2>
+            <div className="mt-4 space-y-2">
+              {(overview?.topMerchants || []).map((row, index, arr) => {
+                const max = arr.length > 0 ? arr[0].amount : 1;
+                return (
+                  <div key={row.merchantNorm} className="rounded border border-slate-200 bg-slate-50 p-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-800">{index + 1}. {row.merchantNorm}</span>
+                      <span className="text-slate-600">{CURRENCY.format(row.amount)}</span>
+                    </div>
+                    <div className="mt-1 h-2 rounded-full bg-slate-200">
+                      <div
+                        className="h-2 rounded-full bg-indigo-500"
+                        style={{ width: `${Math.max(4, (row.amount / max) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-500" title={row.transactionIds.join(", ")}>
+                      {row.transactionIds.length} tx linked
+                    </div>
+                  </div>
+                );
+              })}
+              {!overview?.topMerchants.length && <p className="text-sm text-slate-500">No merchants in range.</p>}
+            </div>
+          </article>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-slate-900">Category Trend (Monthly)</h2>
+            <select
+              value={selectedTrendCategory}
+              onChange={(e) => setSelectedTrendCategory(e.target.value)}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800"
+            >
+              {(overview?.spendByCategory || []).map((row) => (
+                <option key={row.category} value={row.category}>
+                  {row.category}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mt-3 space-y-2">
+            {trendPoints.map((point) => (
+              <button
+                key={point.period}
+                type="button"
+                onClick={() => goToCategoryMonthDrilldown(selectedTrendCategory, point.period)}
+                className="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs hover:border-blue-300 hover:bg-blue-50"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-800">{point.period}</span>
+                  <span className="text-slate-600">{CURRENCY.format(point.amount)}</span>
+                </div>
+                <div className="mt-1 h-2 rounded-full bg-slate-200">
+                  <div
+                    className="h-2 rounded-full bg-blue-500"
+                    style={{
+                      width:
+                        maxTrendAmount > 0
+                          ? `${Math.max(3, (point.amount / maxTrendAmount) * 100)}%`
+                          : "0%",
+                    }}
+                  />
+                </div>
+                <div className="mt-1 text-[11px] text-slate-500">{point.transactionIds.length} tx</div>
+              </button>
+            ))}
+            {trendPoints.length === 0 && (
+              <p className="text-sm text-slate-500">No monthly points for this category.</p>
+            )}
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}

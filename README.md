@@ -3,6 +3,12 @@
 A Next.js App Router project that now supports a full CommBank PDF pipeline:
 upload -> text extract -> segment -> parse -> quality gates -> UI review.
 
+Phase 3 (current branch `feature/phase3-core`) adds:
+- normalized transaction schema for analytics
+- merchant normalization + rule/manual category assignment
+- chart-ready analysis APIs
+- dashboard + transactions pages for category-driven insights
+
 ## Tech Stack
 
 - Next.js 16 (App Router)
@@ -228,6 +234,60 @@ Expected success shape:
 }
 ```
 
+### Analysis overview (Phase 3)
+
+```bash
+curl "http://localhost:3000/api/analysis/overview?fileId=<id>&granularity=month"
+```
+
+Expected response includes:
+- `totals` (income/spend/net)
+- `periods` (chart-ready)
+- `spendByCategory` (+ `transactionIds` traceability)
+- `topMerchants` (+ `transactionIds`)
+- `balanceSeries` (date,balance)
+- `appliedFilters` (file/account/date/granularity actually used by backend)
+
+### Analysis compare (Phase 3)
+
+```bash
+curl "http://localhost:3000/api/analysis/compare?fileId=<id>&mode=month"
+```
+
+Expected response includes:
+- `current` vs `previous`
+- `deltas` for income/spend/net
+- `categoryDeltas`
+
+### Analysis transactions (Phase 3)
+
+```bash
+curl "http://localhost:3000/api/analysis/transactions?fileId=<id>&q=transfer&category=Transfers"
+```
+
+Expected response includes:
+- normalized `transactions` with `merchantNorm`, `category`, `categorySource`
+- parser quality info (`templateType`, `needsReview`, continuity fields)
+- `accountId` + `appliedFilters` for future multi-account integration
+
+### Category override (Phase 3)
+
+Set single transaction:
+
+```bash
+curl -X POST "http://localhost:3000/api/analysis/category-override" \
+  -H "Content-Type: application/json" \
+  -d '{"transactionId":"<txId>","category":"Groceries"}'
+```
+
+Apply to merchant:
+
+```bash
+curl -X POST "http://localhost:3000/api/analysis/category-override" \
+  -H "Content-Type: application/json" \
+  -d '{"merchantNorm":"WOOLWORTHS","category":"Groceries","applyToMerchant":true}'
+```
+
 ## Project Structure
 
 ```text
@@ -237,28 +297,55 @@ app/
     files/route.ts                   # list endpoint
     files/[id]/download/route.ts     # download endpoint
     parse/pdf-text/route.ts          # PDF text extract + cache endpoint
+    analysis/overview/route.ts       # chart overview dataset
+    analysis/compare/route.ts        # current vs previous month comparison
+    analysis/transactions/route.ts   # normalized/categorized rows endpoint
+    analysis/category-override/route.ts # manual category override endpoint
   page.tsx                           # upload/list UI
+  dashboard/page.tsx                 # analytics dashboard UI
+  transactions/page.tsx              # transactions table + category override UI
   layout.tsx                         # root layout
 lib/
   fileStore.ts                       # uploads/index.json read/write helpers
+  analysis/                          # normalization, categories, analytics builders
 uploads/                             # runtime files (gitignored)
 ```
 
 ## Known Boundaries and Risks (still open)
 
-- No user/session auth model yet (only optional shared token header).
-- `GET /api/files/:id/download` still reads full file into memory before returning.
-- Upload MIME check is stronger than before, but still not content-signature validation.
-- In-process write queue protects one Node process only (not multi-instance/distributed).
-- No delete/cleanup lifecycle for old files yet.
+- CommBank-only rules. No multi-bank abstraction yet.
+- Category rules are deterministic and local; no learning model is applied.
+- Override storage is local JSON (`uploads/category-overrides.json`) and in-process queued; not distributed-safe.
+- Charts are range/file scoped. Cross-file account portfolio merge is not implemented.
+- Parser smoke test currently validates snapshot schema and baseline fields; it is not a full regression matrix.
 
 ## Commands
 
 ```bash
 npm run lint
 npm run build
+npm run test
 npm run start
 ```
+
+## Git Workflow (Phase 3)
+
+- Keep `main` always demoable (only merged, validated work).
+- Stable parser baseline tag: `v0.2.0-parser-stable`.
+- Phase 3 integration branch: `feature/phase3-core`.
+- Optional short-lived feature branches:
+  - `feature/phase3-<scope>`
+  - `fix/phase3-<scope>`
+
+Suggested commit prefixes:
+- `feat(<scope>): ...`
+- `fix(<scope>): ...`
+- `chore(<scope>): ...`
+- `docs(<scope>): ...`
+
+Sample privacy:
+- keep sensitive statement PDFs outside git-tracked folders
+- private samples path is ignored: `samples/private/`
 
 ## CommBank Snapshot (Quick)
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 /**
  * Metadata shape from the backend. Duplicated here for clarity and type safety.
@@ -49,6 +49,7 @@ type ParsedTransaction = {
   date: string;
   description: string;
   amount: number;
+  amountSource?: "parsed_token" | "balance_diff_inferred";
   debit?: number;
   credit?: number;
   balance?: number;
@@ -67,6 +68,9 @@ type ParseQuality = {
   headerFound: boolean;
   balanceContinuityPassRate: number;
   balanceContinuityChecked: number;
+  balanceContinuityTotalRows?: number;
+  balanceContinuitySkipped?: number;
+  balanceContinuitySkippedReasons?: Record<string, number>;
   needsReviewReasons: string[];
 };
 
@@ -83,12 +87,39 @@ type ParseTransactionsResult = {
   debug?: SegmentDebug;
 };
 
+type PipelineStatus = {
+  key: string;
+  fileId?: string;
+  fileName: string;
+  stage: "uploading" | "parsing" | "done" | "failed";
+  message?: string;
+  txCount?: number;
+};
+
+function monthRangeFromKey(key: string) {
+  const match = /^(\d{4})-(\d{2})$/.exec(key);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return null;
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 0));
+  const toDate = (date: Date) => date.toISOString().slice(0, 10);
+  return { dateFrom: toDate(start), dateTo: toDate(end) };
+}
+
 export default function Home() {
   // Local UI state hooks.
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [sessionUserId, setSessionUserId] = useState<string>("");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isAutoPipelineRunning, setIsAutoPipelineRunning] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [pipelineStatuses, setPipelineStatuses] = useState<PipelineStatus[]>([]);
+  const [showAdvancedActions, setShowAdvancedActions] = useState(false);
+  const [unknownMerchantCount, setUnknownMerchantCount] = useState(0);
+  const [latestAvailableMonth, setLatestAvailableMonth] = useState("");
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
 
@@ -147,47 +178,211 @@ export default function Home() {
       }
       setFiles(data.files as FileMeta[]);
     } catch {
-      setError({ code: "FETCH_FAILED", message: "获取文件列表失败。" });
+      setError({ code: "FETCH_FAILED", message: "Failed to load file list." });
     } finally {
       setIsLoadingList(false);
     }
+  };
+
+  const upsertPipelineStatus = (next: PipelineStatus) => {
+    setPipelineStatuses((prev) => {
+      const idx = prev.findIndex((item) => item.key === next.key);
+      if (idx === -1) return [...prev, next];
+      const clone = [...prev];
+      clone[idx] = { ...clone[idx], ...next };
+      return clone;
+    });
+  };
+
+  const fetchUnknownMerchantSummary = useCallback(async () => {
+    try {
+      const overviewRes = await fetch("/api/analysis/overview?scope=all&granularity=month");
+      const overviewData = (await overviewRes.json()) as
+        | { ok: true; availableMonths?: string[] }
+        | { ok: false; error: ApiError };
+      if (!overviewData.ok) {
+        setUnknownMerchantCount(0);
+        setLatestAvailableMonth("");
+        return;
+      }
+
+      const months = [...(overviewData.availableMonths || [])].sort();
+      const latest = months[months.length - 1] || "";
+      setLatestAvailableMonth(latest);
+      const range = monthRangeFromKey(latest);
+      if (!range) {
+        setUnknownMerchantCount(0);
+        return;
+      }
+
+      const triageRes = await fetch(
+        `/api/analysis/triage/unknown-merchants?scope=all&dateFrom=${range.dateFrom}&dateTo=${range.dateTo}`
+      );
+      const triageData = (await triageRes.json()) as
+        | { ok: true; unknownMerchantCount?: number }
+        | { ok: false; error: ApiError };
+      if (!triageData.ok) {
+        setUnknownMerchantCount(0);
+        return;
+      }
+      setUnknownMerchantCount(triageData.unknownMerchantCount || 0);
+    } catch {
+      setUnknownMerchantCount(0);
+      setLatestAvailableMonth("");
+    }
+  }, []);
+
+  const runAutoPipeline = async (file: FileMeta, key: string) => {
+    upsertPipelineStatus({
+      key,
+      fileId: file.id,
+      fileName: file.originalName,
+      stage: "parsing",
+      message: "Running extract/segment/parse...",
+    });
+
+    const res = await fetch("/api/pipeline/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileId: file.id }),
+    });
+
+    const data = (await res.json()) as
+      | {
+          ok: true;
+          txCount?: number;
+          parsed?: {
+            ok: true;
+            templateType?: "commbank_manual_amount_balance" | "commbank_auto_debit_credit" | "unknown";
+            transactions: ParsedTransaction[];
+            warnings: ParseWarning[];
+            quality?: ParseQuality;
+            needsReview?: boolean;
+            reviewReasons?: string[];
+            sectionTextPreview?: string;
+            debug?: SegmentDebug;
+          };
+          cached?: { text?: boolean; segment?: boolean; parsed?: boolean };
+        }
+      | { ok: false; error: ApiError };
+
+    if (!data.ok) {
+      upsertPipelineStatus({
+        key,
+        fileId: file.id,
+        fileName: file.originalName,
+        stage: "failed",
+        message: `${data.error.code}: ${data.error.message}`,
+      });
+      return;
+    }
+
+    if (data.parsed?.ok) {
+      setTxResult({
+        fileId: file.id,
+        originalName: file.originalName,
+        templateType: data.parsed.templateType ?? "unknown",
+        transactions: data.parsed.transactions,
+        warnings: data.parsed.warnings,
+        quality: data.parsed.quality,
+        needsReview: data.parsed.needsReview === true,
+        reviewReasons: Array.isArray(data.parsed.reviewReasons) ? data.parsed.reviewReasons : [],
+        sectionTextPreview:
+          typeof data.parsed.sectionTextPreview === "string"
+            ? data.parsed.sectionTextPreview
+            : "",
+        debug: data.parsed.debug,
+      });
+    }
+
+    const cacheHint = data.cached
+      ? `cache(text:${data.cached.text ? "Y" : "N"}, segment:${data.cached.segment ? "Y" : "N"}, parsed:${data.cached.parsed ? "Y" : "N"})`
+      : "";
+
+    upsertPipelineStatus({
+      key,
+      fileId: file.id,
+      fileName: file.originalName,
+      stage: "done",
+      txCount: data.txCount,
+      message: `Pipeline complete. ${cacheHint}`.trim(),
+    });
   };
 
   /**
    * Upload handler: validates presence of a selected file then POSTs to API.
    */
   const handleUpload = async () => {
-    if (!selectedFile) {
-      setError({ code: "NO_FILE", message: "请先选择一个 PDF 或 CSV 文件。" });
+    if (selectedFiles.length === 0) {
+      setError({ code: "NO_FILE", message: "Please select at least one PDF file." });
       return;
     }
 
     setIsUploading(true);
+    setIsAutoPipelineRunning(true);
     setError(null);
     setSuccessMsg(null);
-
-    const form = new FormData();
-    form.append("file", selectedFile);
+    setPipelineStatuses([]);
 
     try {
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: form,
-      });
-      const data = await res.json();
+      let failedCount = 0;
+      for (let idx = 0; idx < selectedFiles.length; idx += 1) {
+        const current = selectedFiles[idx];
+        const statusKey = `${current.name}-${current.lastModified}-${idx}`;
 
-      if (!data.ok) {
-        setError(data.error);
-        return;
+        upsertPipelineStatus({
+          key: statusKey,
+          fileName: current.name,
+          stage: "uploading",
+          message: "Uploading...",
+        });
+
+        const form = new FormData();
+        form.append("file", current);
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: form,
+        });
+        const data = (await res.json()) as
+          | { ok: true; file: FileMeta }
+          | { ok: false; error: ApiError };
+
+        if (!data.ok) {
+          failedCount += 1;
+          upsertPipelineStatus({
+            key: statusKey,
+            fileName: current.name,
+            stage: "failed",
+            message:
+              data.error.code === "DUPLICATE_FILE"
+                ? "Already uploaded."
+                : `${data.error.code}: ${data.error.message}`,
+          });
+          continue;
+        }
+
+        upsertPipelineStatus({
+          key: statusKey,
+          fileId: data.file.id,
+          fileName: data.file.originalName,
+          stage: "parsing",
+          message: "Uploaded. Parsing...",
+        });
+        await runAutoPipeline(data.file as FileMeta, statusKey);
       }
 
-      setSuccessMsg("上传成功！");
-      setSelectedFile(null);
+      if (failedCount > 0) {
+        setSuccessMsg("Upload run finished. Some files need review in Advanced.");
+      } else {
+        setSuccessMsg("Upload run finished. All selected files parsed.");
+      }
+      setSelectedFiles([]);
       await fetchFiles();
     } catch {
-      setError({ code: "UPLOAD_FAILED", message: "上传失败，请稍后重试。" });
+      setError({ code: "UPLOAD_FAILED", message: "Upload failed. Please try again." });
     } finally {
       setIsUploading(false);
+      setIsAutoPipelineRunning(false);
     }
   };
 
@@ -225,7 +420,7 @@ export default function Home() {
     } catch {
       setExtractError({
         code: "EXTRACT_REQUEST_FAIL",
-        message: "调用文本抽取接口失败，请稍后重试。",
+        message: "Failed to call extract API.",
       });
     } finally {
       setExtractingFileId(null);
@@ -264,7 +459,7 @@ export default function Home() {
     } catch {
       setSegmentError({
         code: "SEGMENT_REQUEST_FAIL",
-        message: "调用分段接口失败，请稍后重试。",
+        message: "Failed to call segment API.",
       });
     } finally {
       setSegmentingFileId(null);
@@ -320,7 +515,7 @@ export default function Home() {
     } catch {
       setTxError({
         code: "TRANSACTIONS_REQUEST_FAIL",
-        message: "调用交易解析接口失败，请稍后重试。",
+        message: "Failed to call transaction parse API.",
       });
     } finally {
       setParsingTxFileId(null);
@@ -351,7 +546,7 @@ export default function Home() {
    * Phase 1.5: delete one file + caches via DELETE /api/files/[id].
    */
   const handleDeleteFile = async (file: FileMeta) => {
-    const ok = window.confirm(`确定删除文件 "${file.originalName}" 吗？`);
+    const ok = window.confirm(`Delete file "${file.originalName}"?`);
     if (!ok) return;
 
     setDeletingFileId(file.id);
@@ -370,10 +565,10 @@ export default function Home() {
       }
 
       clearPanelsForFile(file.id);
-      setSuccessMsg("文件删除成功。");
+      setSuccessMsg("File deleted.");
       await fetchFiles();
     } catch {
-      setError({ code: "DELETE_FAILED", message: "删除文件失败，请稍后重试。" });
+      setError({ code: "DELETE_FAILED", message: "Failed to delete file." });
     } finally {
       setDeletingFileId(null);
     }
@@ -383,10 +578,10 @@ export default function Home() {
    * Phase 1.5: clear all files + text cache with a typed confirmation token.
    */
   const handleDeleteAll = async () => {
-    const token = window.prompt('危险操作：输入 "DELETE" 以清空全部文件');
+    const token = window.prompt('Danger action: type "DELETE" to clear all files');
     if (token === null) return;
     if (token !== "DELETE") {
-      setError({ code: "BAD_CONFIRM", message: '确认口令错误，必须输入 "DELETE"。' });
+      setError({ code: "BAD_CONFIRM", message: 'Invalid confirmation token. Type "DELETE".' });
       return;
     }
 
@@ -418,10 +613,10 @@ export default function Home() {
       setTxError(null);
       setExpandedRawLines({});
       setCopyMsg(null);
-      setSuccessMsg(`已清空全部文件，删除 ${data.deletedCount} 条记录。`);
+      setSuccessMsg(`All files cleared. Removed ${data.deletedCount} record(s).`);
       await fetchFiles();
     } catch {
-      setError({ code: "CLEAR_FAILED", message: "清空文件失败，请稍后重试。" });
+      setError({ code: "CLEAR_FAILED", message: "Failed to clear files." });
     } finally {
       setIsClearingAll(false);
     }
@@ -436,9 +631,9 @@ export default function Home() {
 
     try {
       await navigator.clipboard.writeText(extractResult.text);
-      setCopyMsg("已复制文本到剪贴板。");
+      setCopyMsg("Copied to clipboard.");
     } catch {
-      setCopyMsg("复制失败（请检查浏览器权限）。");
+      setCopyMsg("Copy failed (check browser permission).");
     }
   };
 
@@ -446,12 +641,52 @@ export default function Home() {
     fetchFiles();
   }, []);
 
+  useEffect(() => {
+    if (files.length === 0) {
+      setUnknownMerchantCount(0);
+      setLatestAvailableMonth("");
+      return;
+    }
+    void fetchUnknownMerchantSummary();
+  }, [files.length, fetchUnknownMerchantSummary]);
+
+  useEffect(() => {
+    const cookieName = "pc_user_id";
+    const existing = document.cookie
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${cookieName}=`));
+
+    if (existing) {
+      setSessionUserId(existing.split("=")[1] || "");
+      return;
+    }
+
+    const nextId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `u_${Math.random().toString(36).slice(2)}`;
+    document.cookie = `${cookieName}=${nextId}; Max-Age=31536000; Path=/; SameSite=Lax`;
+    setSessionUserId(nextId);
+  }, []);
+
   const selectedSummary = useMemo(() => {
-    if (!selectedFile) return "未选择文件";
-    return `${selectedFile.name} · ${formatSize(selectedFile.size)} · ${
-      selectedFile.type || "unknown"
-    }`;
-  }, [selectedFile]);
+    if (selectedFiles.length === 0) return "No files selected";
+    if (selectedFiles.length === 1) {
+      const one = selectedFiles[0];
+      return `${one.name} · ${formatSize(one.size)} · ${one.type || "unknown"}`;
+    }
+    const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
+    return `${selectedFiles.length} files · ${formatSize(totalSize)}`;
+  }, [selectedFiles]);
+
+  const pipelineSummary = useMemo(() => {
+    const total = pipelineStatuses.length;
+    const done = pipelineStatuses.filter((item) => item.stage === "done").length;
+    const failed = pipelineStatuses.filter((item) => item.stage === "failed").length;
+    const finished = total > 0 && done + failed === total;
+    return { total, done, failed, finished };
+  }, [pipelineStatuses]);
 
   const visibleExtractText = useMemo(() => {
     if (!extractResult) return "";
@@ -470,53 +705,98 @@ export default function Home() {
     }
   };
 
+  const continuitySummary = (quality?: ParseQuality) => {
+    if (!quality || typeof quality.balanceContinuityPassRate !== "number") {
+      return "-";
+    }
+    const checked = quality.balanceContinuityChecked ?? 0;
+    const total = quality.balanceContinuityTotalRows ?? checked;
+    return `${(quality.balanceContinuityPassRate * 100).toFixed(1)}% (checked ${checked}/${total})`;
+  };
+
+  const skippedSummary = (quality?: ParseQuality) => {
+    if (!quality) return "-";
+    const skipped = quality.balanceContinuitySkipped ?? 0;
+    const reasons = quality.balanceContinuitySkippedReasons || {};
+    const reasonText = Object.entries(reasons)
+      .map(([reason, count]) => `${reason}:${count}`)
+      .join(", ");
+    return skipped > 0 ? `${skipped}${reasonText ? ` · ${reasonText}` : ""}` : "0";
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 p-8">
       <div className="mx-auto max-w-5xl space-y-8">
         <header>
-          <h1 className="text-3xl font-semibold text-slate-900">
-            Web Dropbox 1.0 — Phase 2.3
-          </h1>
+          <h1 className="text-4xl font-semibold text-slate-900">Personal Cashflow</h1>
           <p className="mt-2 text-slate-600">
-            PDF-only pipeline：Extract Text → Segment → Parse Transactions。
+            Upload CommBank statements. We&apos;ll parse and build your dashboard.
           </p>
         </header>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-semibold text-slate-900">文件上传</h2>
-          <p className="mt-1 text-sm text-slate-600">仅支持 PDF / CSV，单个文件 20MB 以内。</p>
+        {files.length > 0 && (
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-900">Welcome back</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              You have {files.length} statement{files.length > 1 ? "s" : ""} already parsed.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href="/phase3"
+                className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Open Dashboard
+              </a>
+              {unknownMerchantCount > 0 && latestAvailableMonth && (
+                <a
+                  href={`/phase3/period?type=month&key=${encodeURIComponent(latestAvailableMonth)}&openInbox=1`}
+                  className="inline-flex items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100"
+                >
+                  Review Unknown Merchants ({unknownMerchantCount})
+                </a>
+              )}
+            </div>
+          </section>
+        )}
 
-          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <label className="inline-flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-700 hover:border-blue-500 hover:bg-blue-50">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-slate-900">Upload &amp; Parse</h2>
+          <p className="mt-1 text-sm text-slate-600">Drop PDFs here. PDF only, text-based.</p>
+
+          <div className="mt-4">
+            <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-sm text-slate-700 hover:border-blue-500 hover:bg-blue-50">
               <input
                 type="file"
+                multiple
                 accept=".pdf,.csv,application/pdf,text/csv"
                 className="hidden"
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  setSelectedFile(file ?? null);
+                  const next = Array.from(e.target.files || []);
+                  setSelectedFiles(next);
                   setError(null);
                   setSuccessMsg(null);
                 }}
               />
-              <span className="font-medium">选择文件</span>
-              <span className="text-xs text-slate-500">支持 PDF / CSV</span>
+              <span className="text-base font-medium">Drop PDFs here</span>
+              <span className="text-xs text-slate-500">CommBank only for now. No OCR.</span>
             </label>
+          </div>
 
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="text-sm text-slate-700">{selectedSummary}</div>
 
             <button
               onClick={handleUpload}
-              disabled={isUploading}
+              disabled={isUploading || isAutoPipelineRunning}
               className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
-              {isUploading ? "上传中..." : "Upload"}
+              {isUploading || isAutoPipelineRunning ? "Uploading..." : "Upload & Parse"}
             </button>
           </div>
 
           {error && (
             <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              错误（{error.code}）：{error.message}
+              {error.code}: {error.message}
             </div>
           )}
           {successMsg && (
@@ -524,15 +804,70 @@ export default function Home() {
               {successMsg}
             </div>
           )}
+
+          {pipelineStatuses.length > 0 && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                Auto Pipeline Progress
+              </div>
+              <div className="mt-1 text-xs text-slate-600">
+                done {pipelineSummary.done}/{pipelineSummary.total} · failed {pipelineSummary.failed}
+              </div>
+              <div className="mt-2 space-y-2 text-xs text-slate-700">
+                {pipelineStatuses.map((item) => (
+                  <div key={item.key} className="rounded border border-slate-200 bg-white p-2">
+                    <div className="font-medium text-slate-800">{item.fileName}</div>
+                    <div className="mt-1">
+                      stage: {item.stage}
+                      {typeof item.txCount === "number" ? ` · txCount: ${item.txCount}` : ""}
+                    </div>
+                    {item.message && <div className="mt-1 text-slate-600">{item.message}</div>}
+                  </div>
+                ))}
+              </div>
+              {pipelineSummary.finished && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <a
+                    href="/phase3"
+                    className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                  >
+                    Open Dashboard
+                  </a>
+                  {pipelineSummary.failed > 0 && (
+                    <span className="text-xs text-amber-700">
+                      Some files need review. Use Advanced: File Library &amp; Debug.
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="mt-3 text-xs text-slate-500">
+            CommBank only for now. No OCR.
+          </div>
+          <div className="sr-only">
+            session {sessionUserId ? "ready" : "initializing"}
+          </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <details className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <summary className="cursor-pointer text-sm font-semibold text-slate-700">
+            Advanced: File Library &amp; Debug
+          </summary>
+          <section className="mt-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-semibold text-slate-900">已上传文件列表</h2>
-              <p className="text-sm text-slate-600">每次刷新或重新打开页面都会从 uploads/index.json 读取。</p>
+              <h2 className="text-xl font-semibold text-slate-900">File Library</h2>
+              <p className="text-sm text-slate-600">Download, delete, and re-run parse actions.</p>
             </div>
             <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowAdvancedActions((prev) => !prev)}
+                className="text-sm font-medium text-slate-600 hover:text-slate-800"
+              >
+                {showAdvancedActions ? "Hide Debug actions" : "Show Debug actions"}
+              </button>
               <button
                 onClick={() => {
                   void handleDeleteAll();
@@ -543,7 +878,7 @@ export default function Home() {
                 {isClearingAll ? "Clearing..." : "Delete All"}
               </button>
               <button onClick={fetchFiles} className="text-sm font-medium text-blue-600 hover:text-blue-700">
-                刷新
+                Refresh
               </button>
             </div>
           </div>
@@ -562,11 +897,11 @@ export default function Home() {
               <tbody>
                 {isLoadingList ? (
                   <tr>
-                    <td colSpan={5} className="px-3 py-4 text-center text-slate-500">加载中...</td>
+                    <td colSpan={5} className="px-3 py-4 text-center text-slate-500">Loading...</td>
                   </tr>
                 ) : files.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-3 py-4 text-center text-slate-500">暂无文件，请先上传。</td>
+                    <td colSpan={5} className="px-3 py-4 text-center text-slate-500">No files yet.</td>
                   </tr>
                 ) : (
                   files.map((file) => (
@@ -578,11 +913,12 @@ export default function Home() {
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <a href={`/api/files/${file.id}/download`} className="text-blue-600 hover:underline">
-                            下载
+                            Download
                           </a>
 
-                          {isPdfFile(file) && (
+                          {showAdvancedActions && isPdfFile(file) && (
                             <>
+                              <span className="text-[11px] text-slate-400">Debug actions:</span>
                               <button
                                 onClick={() => {
                                   void handleExtractText(file, false);
@@ -610,7 +946,7 @@ export default function Home() {
                                 disabled={parsingTxFileId === file.id}
                                 className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                               >
-                                {parsingTxFileId === file.id ? "Parsing..." : "Parse Transactions"}
+                                {parsingTxFileId === file.id ? "Parsing..." : "Re-run parse"}
                               </button>
                             </>
                           )}
@@ -635,19 +971,19 @@ export default function Home() {
 
           {extractError && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              文本抽取错误（{extractError.code}）：{extractError.message}
+              Extract error ({extractError.code}): {extractError.message}
             </div>
           )}
 
           {segmentError && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              分段错误（{segmentError.code}）：{segmentError.message}
+              Segment error ({segmentError.code}): {segmentError.message}
             </div>
           )}
 
           {txError && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              交易解析错误（{txError.code}）：{txError.message}
+              Parse error ({txError.code}): {txError.message}
             </div>
           )}
 
@@ -655,7 +991,7 @@ export default function Home() {
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <h3 className="text-base font-semibold text-slate-900">Extracted Text Preview</h3>
               <p className="mt-1 text-xs text-slate-600">
-                fileId: <span className="font-mono">{extractResult.fileId}</span> · 文件名: {extractResult.originalName}
+                fileId: <span className="font-mono">{extractResult.fileId}</span> · file: {extractResult.originalName}
               </p>
               <p className="mt-1 text-xs text-slate-600">
                 extractor: {extractResult.meta.extractor} · length: {extractResult.meta.length} · cached: {extractResult.meta.cached ? "true" : "false"} · truncated: {extractResult.meta.truncated ? "true" : "false"} · emptyText: {extractResult.meta.emptyText ? "true" : "false"}
@@ -704,7 +1040,7 @@ export default function Home() {
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <h3 className="text-base font-semibold text-slate-900">Segment Preview</h3>
               <p className="mt-1 text-xs text-slate-600">
-                fileId: <span className="font-mono">{segmentResult.fileId}</span> · 文件名: {segmentResult.originalName}
+                fileId: <span className="font-mono">{segmentResult.fileId}</span> · file: {segmentResult.originalName}
               </p>
               <p className="mt-1 text-xs text-slate-600">
                 headerFound: {segmentResult.debug.headerFound ? "true" : "false"} · startLine:{" "}
@@ -722,7 +1058,7 @@ export default function Home() {
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
               <h3 className="text-base font-semibold text-slate-900">Parsed Transactions v2 (CommBank)</h3>
               <p className="mt-1 text-xs text-slate-600">
-                fileId: <span className="font-mono">{txResult.fileId}</span> · 文件名: {txResult.originalName}
+                fileId: <span className="font-mono">{txResult.fileId}</span> · file: {txResult.originalName}
               </p>
               <p className="mt-1 text-xs text-slate-600">
                 transactions: {txResult.transactions.length} · warnings: {txResult.warnings.length}
@@ -735,12 +1071,10 @@ export default function Home() {
                 </p>
                 <p>Header: {txResult.quality?.headerFound ? "found" : "not found"}</p>
                 <p>
-                  Continuity:{" "}
-                  {typeof txResult.quality?.balanceContinuityPassRate === "number"
-                    ? `${(txResult.quality.balanceContinuityPassRate * 100).toFixed(1)}%`
-                    : "-"}
-                  {" · checked: "}
-                  {txResult.quality?.balanceContinuityChecked ?? 0}
+                  Continuity: {continuitySummary(txResult.quality)}
+                </p>
+                <p>
+                  Continuity skipped: {skippedSummary(txResult.quality)}
                 </p>
                 <p>Review Required: {txResult.needsReview ? "yes" : "no"}</p>
                 {txResult.needsReview && (
@@ -762,12 +1096,10 @@ export default function Home() {
                     ))}
                   </ul>
                   <div className="mt-2">
-                    Continuity:{" "}
-                    {typeof txResult.quality?.balanceContinuityPassRate === "number"
-                      ? `${(txResult.quality.balanceContinuityPassRate * 100).toFixed(1)}%`
-                      : "-"}
-                    {" · checked: "}
-                    {txResult.quality?.balanceContinuityChecked ?? 0}
+                    Continuity: {continuitySummary(txResult.quality)}
+                  </div>
+                  <div className="mt-1">
+                    Continuity skipped: {skippedSummary(txResult.quality)}
                   </div>
                   <div className="mt-2 font-medium">Section Preview</div>
                   <div className="mt-1 max-h-48 overflow-auto rounded border border-red-200 bg-white p-2 font-mono text-[11px] leading-5 whitespace-pre-wrap text-slate-700">
@@ -810,11 +1142,15 @@ export default function Home() {
                             <td className="px-3 py-2">
                               {typeof tx.debit === "number"
                                 ? `${Math.abs(tx.debit).toFixed(2)} ${tx.currency || ""}`
+                                : tx.amountSource === "balance_diff_inferred" && tx.amount < 0
+                                  ? `${Math.abs(tx.amount).toFixed(2)} ${tx.currency || ""} (inferred)`
                                 : "-"}
                             </td>
                             <td className="px-3 py-2">
                               {typeof tx.credit === "number"
                                 ? `${Math.abs(tx.credit).toFixed(2)} ${tx.currency || ""}`
+                                : tx.amountSource === "balance_diff_inferred" && tx.amount >= 0
+                                  ? `${Math.abs(tx.amount).toFixed(2)} ${tx.currency || ""} (inferred)`
                                 : "-"}
                             </td>
                           </>
@@ -851,6 +1187,7 @@ export default function Home() {
                         parsed: debit={typeof tx.debit === "number" ? tx.debit.toFixed(2) : "-"} ·
                         credit={typeof tx.credit === "number" ? tx.credit.toFixed(2) : "-"} ·
                         amount={Number.isFinite(tx.amount) ? tx.amount.toFixed(2) : "-"} ·
+                        amountSource={tx.amountSource || "parsed_token"} ·
                         balance={typeof tx.balance === "number" ? tx.balance.toFixed(2) : "-"}
                       </div>
                     )}
@@ -873,7 +1210,8 @@ export default function Home() {
               )}
             </div>
           )}
-        </section>
+          </section>
+        </details>
       </div>
     </main>
   );

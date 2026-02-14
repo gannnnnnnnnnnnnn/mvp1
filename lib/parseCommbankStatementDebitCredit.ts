@@ -22,6 +22,7 @@ type AmountResolution = {
   debit?: number;
   credit?: number;
   confidencePenalty: number;
+  amountSource: "parsed_token" | "balance_diff_inferred";
 };
 
 type MoneyTokenWithLine = {
@@ -327,6 +328,18 @@ function pushWarning(
   warnings.push({ rawLine, reason, confidence: clamp01(confidence) });
 }
 
+function removeWarningForRawLine(
+  warnings: ParseWarning[],
+  rawLine: string,
+  reason: string
+) {
+  for (let i = warnings.length - 1; i >= 0; i -= 1) {
+    if (warnings[i].rawLine === rawLine && warnings[i].reason === reason) {
+      warnings.splice(i, 1);
+    }
+  }
+}
+
 function pickBalanceCandidateIndex(tokens: MoneyTokenWithLine[]) {
   for (let i = tokens.length - 1; i >= 0; i -= 1) {
     const parsed = tokens[i].parsed;
@@ -419,10 +432,20 @@ function resolveAmount(params: {
         MONEY_EQ_TOLERANCE;
 
       if (creditFits && !debitFits) {
-        return { amount: v, credit: v, confidencePenalty: 0 };
+        return {
+          amount: v,
+          credit: v,
+          confidencePenalty: 0,
+          amountSource: "parsed_token",
+        };
       }
       if (debitFits && !creditFits) {
-        return { amount: -v, debit: v, confidencePenalty: 0 };
+        return {
+          amount: -v,
+          debit: v,
+          confidencePenalty: 0,
+          amountSource: "parsed_token",
+        };
       }
     }
 
@@ -452,9 +475,19 @@ function resolveAmount(params: {
 
   const v = candidate.parsed!.absValue;
   if (side === "debit") {
-    return { amount: -v, debit: v, confidencePenalty: 0.1 };
+    return {
+      amount: -v,
+      debit: v,
+      confidencePenalty: 0.1,
+      amountSource: "parsed_token",
+    };
   }
-  return { amount: v, credit: v, confidencePenalty: 0.1 };
+  return {
+    amount: v,
+    credit: v,
+    confidencePenalty: 0.1,
+    amountSource: "parsed_token",
+  };
 }
 
 function finalizeBlock(params: {
@@ -578,6 +611,44 @@ function finalizeBlock(params: {
   if (typeof balance !== "number") {
     pushWarning(warnings, rawBlock, "AUTO_BALANCE_NOT_FOUND", 0.35);
   }
+  if (
+    !amountResolved &&
+    typeof prevBalance === "number" &&
+    typeof balance === "number"
+  ) {
+    // Fallback: if token-based amount is missing but running balances exist,
+    // infer this row's amount from post-transaction balance semantics.
+    const inferredAmount = round2(balance - prevBalance);
+    if (Number.isFinite(inferredAmount)) {
+      if (Math.abs(inferredAmount) <= MONEY_EQ_TOLERANCE) {
+        amountResolved = {
+          amount: 0,
+          credit: 0,
+          confidencePenalty: 0.18,
+          amountSource: "balance_diff_inferred",
+        };
+      } else if (inferredAmount > 0) {
+        amountResolved = {
+          amount: inferredAmount,
+          credit: Math.abs(inferredAmount),
+          confidencePenalty: 0.18,
+          amountSource: "balance_diff_inferred",
+        };
+      } else {
+        amountResolved = {
+          amount: inferredAmount,
+          debit: Math.abs(inferredAmount),
+          confidencePenalty: 0.18,
+          amountSource: "balance_diff_inferred",
+        };
+      }
+      pushWarning(warnings, rawBlock, "AMOUNT_INFERRED_FROM_BALANCE_DIFF", 0.72);
+      // Suppress sign-uncertain warning for the same row once balance-diff
+      // inference has produced a deterministic final amount sign.
+      removeWarningForRawLine(warnings, rawBlock, "AMOUNT_SIGN_UNCERTAIN");
+    }
+  }
+
   if (!amountResolved) {
     pushWarning(warnings, rawBlock, "AUTO_AMOUNT_NOT_FOUND", 0.35);
   }
@@ -614,6 +685,7 @@ function finalizeBlock(params: {
         .filter(Boolean)
         .join(" | ") || "(no description)",
     amount,
+    amountSource: amountResolved?.amountSource,
     debit,
     credit,
     balance,

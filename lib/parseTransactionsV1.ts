@@ -13,6 +13,10 @@ export type ParsedTransaction = {
   date: string;
   description: string;
   amount: number;
+  // Tracks how amount was decided for debugging/UX explainability.
+  // Most rows are token-based; some auto-template rows may be inferred from
+  // running balance delta when debit/credit tokens are missing.
+  amountSource?: "parsed_token" | "balance_diff_inferred";
   debit?: number;
   credit?: number;
   balance?: number;

@@ -423,23 +423,26 @@
     }
   ],
   "warnings": [],
-  "needsReview": true,
-  "reviewReasons": [
-    "Balance continuity is below threshold (passRate < 0.85). Please review parsed rows."
-  ],
+  "needsReview": false,
+  "reviewReasons": [],
   "debug": {
     "startLine": 22,
     "endLine": 77,
     "removedLines": 1,
-    "headerFound": true
+    "headerFound": true,
+    "stopReason": "Any pending transactions haven’t been included",
+    "templateType": "commbank_manual_amount_balance"
   },
   "quality": {
     "headerFound": true,
-    "balanceContinuityPassRate": 0.0975609756097561,
+    "balanceContinuityPassRate": 1,
     "balanceContinuityChecked": 41,
-    "needsReviewReasons": [
-      "BALANCE_CONTINUITY_LOW"
-    ]
+    "needsReviewReasons": [],
+    "nonBlockingWarnings": [],
+    "statementTotalsCheck": {
+      "available": false
+    }
   },
+  "templateType": "commbank_manual_amount_balance",
   "sectionTextPreview": "18 Sep 2024Transfer from xx1463 CommBank app$2,000.00$2,000.00\n19 Sep 2024Direct Credit 617703 PAYPAL AUSTRALIA\n1037005494730\n$0.07$2,000.07\n19 Sep 2024Direct Credit 617703 PAYPAL AUSTRALIA\n1037005494734\n$0.12$2,000.19\n24 Sep 2024Transfer from xx1463 CommBank app$300.00$2,300.19\n26 Sep 2024Transfer to xx1463 CommBank app-$50.00$2,250.19\n27 Sep 2024Transfer to xx3620 CommBank app-$2,000.00$250.19\n28 Sep 2024Transfer to xx1463 CommBank app-$50.00$200.19\n29 Sep 2024Transfer to xx1463 CommBank app-$50.00$150.19\n30 Sep 2024Transfer to xx1463 CommBank app-$150.00$0.19\n01 Oct 2024Credit Interest$1.44$1.63\n14 Oct 2024Transfer from xx1463 CommBank app$4,000.00$4,001.63\n18 Oct 2024Transfer to xx3620 CommBank app-$600.00$3,401.63\n21 Oct 2024Transfer from xx1463 CommBank app$600.00$4,001.63\n25 Oct 2024Transfer to xx3620 CommBank app-$2,000.00$2,001.63\n25 Oct 2024Transfer to xx1463 CommBank app-$150.00$1,851.63\n29 Oct 2024Transfer to xx1463 CommBank app-$100.00$1,751.63\n31 Oct 2024Transfer to xx1463 CommBank app-$500.00$1,251.63\n01 Nov 2024Credit Interest$4.02$1,255.65\n05 Nov 2024Transfer from xx1463 CommBank app$4,500.00$5,755.65\n05 Nov 2024Transfer to xx3620 CommBank app-$500.00$5,255.65\n06 Nov 2024Transfer from xx1463 CommBank app$300.00$5,555.65\n\nCreated 10/12/24 05:25pm (Sydney/Melbourne time)\nWhile this letter is accurate at the time it’s produced,\nwe’re not responsible for any reliance on this information.\nTransaction Summary v1.0.5\nAccount Number06787215515441\nPage2 of 2\n08 Nov 2024Transfer to xx1463 CommBank app-$200.00$5,355.65\n10 Nov 2024Transfer to xx3620 CommBank app-$500.00$4,855.65\n11 Nov 2024Transfer to xx1463 CommBank app-$400.00$4,455.65\n12 Nov 2024Transfer to xx1463 CommBank app-$400.00$4,055.65\n12 Nov 2024Transfer from xx1463 CommBank app$300.00$4,355.65\n16 Nov 2024Transfer to xx1463 CommBank app-$200.00$4,155.65\n19 Nov 2024Transfer from xx1463 CommBank app$200.00$4,355.65\n19 Nov 2024Transfer from xx1463 CommBank app$150.00$4,505.65\n20 Nov 2024Transfer to xx1463 CommBank app-$100.00$4,405.65\n21 Nov 2024Transfer from xx1463 CommBank app$7,990.00$12,395.65\n21 Nov 2024Transfer to xx3620 CommBank app-$500.00$11,895.65\n22 Nov 2024Transfer to xx1463 CommBank app-$7,700.00$4,195.65\n26 Nov 2024Transfer to xx1463 CommBank app-$700.00$3,495.65\n27 Nov 2024Transfer to xx3620 CommBank app-$2,000.00$1,495.65\n30 Nov 2024Transfer to xx3620 CommBank app-$300.00$1,195.65\n30 Nov 2024Transfer to xx1463 CommBank app-$195.00$1,000.65\n01 Dec 2024Credit Interest$8.72$1,009.37\n03 Dec 2024Transfer from xx1463 CommBank app$4,100.00$5,109.37\n06 Dec 2024Transfer to xx3620 CommBank app-$100.00$5,009.37\n09 Dec 2024Transfer to xx3620 CommBank app-$100.00$4,909.37\n10 Dec 2024Transfer to xx1463 CommBank app-$100.00$4,809.37"
 }
