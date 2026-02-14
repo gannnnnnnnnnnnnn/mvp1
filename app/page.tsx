@@ -88,7 +88,8 @@ type ParseTransactionsResult = {
 };
 
 type PipelineStatus = {
-  fileId: string;
+  key: string;
+  fileId?: string;
   fileName: string;
   stage: "uploading" | "parsing" | "done" | "failed";
   message?: string;
@@ -98,7 +99,7 @@ type PipelineStatus = {
 export default function Home() {
   // Local UI state hooks.
   const [sessionUserId, setSessionUserId] = useState<string>("");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isAutoPipelineRunning, setIsAutoPipelineRunning] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -158,14 +159,7 @@ export default function Home() {
       const res = await fetch("/api/files");
       const data = await res.json();
       if (!data.ok) {
-        if (data.error?.code === "DUPLICATE_FILE") {
-          setError({
-            code: "DUPLICATE_FILE",
-            message: "File already uploaded. Please choose a different statement.",
-          });
-        } else {
-          setError(data.error);
-        }
+        setError(data.error);
         return;
       }
       setFiles(data.files as FileMeta[]);
@@ -178,7 +172,7 @@ export default function Home() {
 
   const upsertPipelineStatus = (next: PipelineStatus) => {
     setPipelineStatuses((prev) => {
-      const idx = prev.findIndex((item) => item.fileId === next.fileId);
+      const idx = prev.findIndex((item) => item.key === next.key);
       if (idx === -1) return [...prev, next];
       const clone = [...prev];
       clone[idx] = { ...clone[idx], ...next };
@@ -186,8 +180,9 @@ export default function Home() {
     });
   };
 
-  const runAutoPipeline = async (file: FileMeta) => {
+  const runAutoPipeline = async (file: FileMeta, key: string) => {
     upsertPipelineStatus({
+      key,
       fileId: file.id,
       fileName: file.originalName,
       stage: "parsing",
@@ -221,6 +216,7 @@ export default function Home() {
 
     if (!data.ok) {
       upsertPipelineStatus({
+        key,
         fileId: file.id,
         fileName: file.originalName,
         stage: "failed",
@@ -252,6 +248,7 @@ export default function Home() {
       : "";
 
     upsertPipelineStatus({
+      key,
       fileId: file.id,
       fileName: file.originalName,
       stage: "done",
@@ -264,8 +261,8 @@ export default function Home() {
    * Upload handler: validates presence of a selected file then POSTs to API.
    */
   const handleUpload = async () => {
-    if (!selectedFile) {
-      setError({ code: "NO_FILE", message: "请先选择一个 PDF 或 CSV 文件。" });
+    if (selectedFiles.length === 0) {
+      setError({ code: "NO_FILE", message: "Please select at least one PDF file." });
       return;
     }
 
@@ -273,34 +270,64 @@ export default function Home() {
     setIsAutoPipelineRunning(true);
     setError(null);
     setSuccessMsg(null);
-
-    const form = new FormData();
-    form.append("file", selectedFile);
+    setPipelineStatuses([]);
 
     try {
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: form,
-      });
-      const data = await res.json();
+      let failedCount = 0;
+      for (let idx = 0; idx < selectedFiles.length; idx += 1) {
+        const current = selectedFiles[idx];
+        const statusKey = `${current.name}-${current.lastModified}-${idx}`;
 
-      if (!data.ok) {
-        setError(data.error);
-        return;
+        upsertPipelineStatus({
+          key: statusKey,
+          fileName: current.name,
+          stage: "uploading",
+          message: "Uploading...",
+        });
+
+        const form = new FormData();
+        form.append("file", current);
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: form,
+        });
+        const data = (await res.json()) as
+          | { ok: true; file: FileMeta }
+          | { ok: false; error: ApiError };
+
+        if (!data.ok) {
+          failedCount += 1;
+          upsertPipelineStatus({
+            key: statusKey,
+            fileName: current.name,
+            stage: "failed",
+            message:
+              data.error.code === "DUPLICATE_FILE"
+                ? "Already uploaded."
+                : `${data.error.code}: ${data.error.message}`,
+          });
+          continue;
+        }
+
+        upsertPipelineStatus({
+          key: statusKey,
+          fileId: data.file.id,
+          fileName: data.file.originalName,
+          stage: "parsing",
+          message: "Uploaded. Parsing...",
+        });
+        await runAutoPipeline(data.file as FileMeta, statusKey);
       }
 
-      upsertPipelineStatus({
-        fileId: data.file.id,
-        fileName: data.file.originalName,
-        stage: "uploading",
-        message: "Uploaded. Queueing pipeline...",
-      });
-      setSuccessMsg("上传成功，正在自动执行解析流水线...");
-      await runAutoPipeline(data.file as FileMeta);
-      setSelectedFile(null);
+      if (failedCount > 0) {
+        setSuccessMsg("Upload run finished. Some files need review in Advanced.");
+      } else {
+        setSuccessMsg("Upload run finished. All selected files parsed.");
+      }
+      setSelectedFiles([]);
       await fetchFiles();
     } catch {
-      setError({ code: "UPLOAD_FAILED", message: "上传失败，请稍后重试。" });
+      setError({ code: "UPLOAD_FAILED", message: "Upload failed. Please try again." });
     } finally {
       setIsUploading(false);
       setIsAutoPipelineRunning(false);
@@ -583,11 +610,22 @@ export default function Home() {
   }, []);
 
   const selectedSummary = useMemo(() => {
-    if (!selectedFile) return "未选择文件";
-    return `${selectedFile.name} · ${formatSize(selectedFile.size)} · ${
-      selectedFile.type || "unknown"
-    }`;
-  }, [selectedFile]);
+    if (selectedFiles.length === 0) return "No files selected";
+    if (selectedFiles.length === 1) {
+      const one = selectedFiles[0];
+      return `${one.name} · ${formatSize(one.size)} · ${one.type || "unknown"}`;
+    }
+    const totalSize = selectedFiles.reduce((sum, file) => sum + file.size, 0);
+    return `${selectedFiles.length} files · ${formatSize(totalSize)}`;
+  }, [selectedFiles]);
+
+  const pipelineSummary = useMemo(() => {
+    const total = pipelineStatuses.length;
+    const done = pipelineStatuses.filter((item) => item.stage === "done").length;
+    const failed = pipelineStatuses.filter((item) => item.stage === "failed").length;
+    const finished = total > 0 && done + failed === total;
+    return { total, done, failed, finished };
+  }, [pipelineStatuses]);
 
   const visibleExtractText = useMemo(() => {
     if (!extractResult) return "";
@@ -660,11 +698,12 @@ export default function Home() {
             <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-sm text-slate-700 hover:border-blue-500 hover:bg-blue-50">
               <input
                 type="file"
+                multiple
                 accept=".pdf,.csv,application/pdf,text/csv"
                 className="hidden"
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  setSelectedFile(file ?? null);
+                  const next = Array.from(e.target.files || []);
+                  setSelectedFiles(next);
                   setError(null);
                   setSuccessMsg(null);
                 }}
@@ -702,9 +741,12 @@ export default function Home() {
               <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
                 Auto Pipeline Progress
               </div>
+              <div className="mt-1 text-xs text-slate-600">
+                done {pipelineSummary.done}/{pipelineSummary.total} · failed {pipelineSummary.failed}
+              </div>
               <div className="mt-2 space-y-2 text-xs text-slate-700">
                 {pipelineStatuses.map((item) => (
-                  <div key={item.fileId} className="rounded border border-slate-200 bg-white p-2">
+                  <div key={item.key} className="rounded border border-slate-200 bg-white p-2">
                     <div className="font-medium text-slate-800">{item.fileName}</div>
                     <div className="mt-1">
                       stage: {item.stage}
@@ -714,6 +756,21 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+              {pipelineSummary.finished && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <a
+                    href="/phase3"
+                    className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                  >
+                    Open Dashboard
+                  </a>
+                  {pipelineSummary.failed > 0 && (
+                    <span className="text-xs text-amber-700">
+                      Some files need review. Use Advanced: File Library &amp; Debug.
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
