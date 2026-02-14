@@ -276,60 +276,65 @@ export default function Phase3DatasetHomePage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Monthly Cashflow Trend</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Hover for details. Click a month to open Period view.
+            Tip: Click a month bar to open detailed Period analysis.
           </p>
-          <div className="mt-4 h-64 w-full">
+          <div className="mt-4 h-64 w-full rounded-xl border border-slate-100 bg-slate-50/50 p-2">
             {chartSeries.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart
-                  data={chartSeries}
-                  onClick={(state) => {
-                    const month = (state as { activeLabel?: string })?.activeLabel;
-                    if (month) {
-                      navigateToMonth(month);
-                    }
-                  }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#64748b" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "#64748b" }} />
-                  <RechartsTooltip
-                    contentStyle={{
-                      borderRadius: 10,
-                      borderColor: "#e2e8f0",
-                      boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
-                    }}
-                    formatter={(value, name) => {
-                      if (name === "txCount") {
-                        return [String(value), "Tx count"];
+              <div className="group relative h-full w-full cursor-pointer">
+                <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+                  Open period →
+                </div>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart
+                    data={chartSeries}
+                    onClick={(state) => {
+                      const month = (state as { activeLabel?: string })?.activeLabel;
+                      if (month) {
+                        navigateToMonth(month);
                       }
-                      const numeric =
-                        typeof value === "number" ? value : Number(value || 0);
-                      const label =
-                        name === "income"
-                          ? "Income"
-                          : name === "spend"
-                            ? "Spend"
-                            : "Net";
-                      return [CURRENCY.format(numeric), label];
                     }}
-                    labelFormatter={(label, payload) => {
-                      const txCount =
-                        payload?.[0] &&
-                        "payload" in payload[0] &&
-                        typeof payload[0].payload?.txCount === "number"
-                          ? payload[0].payload.txCount
-                          : 0;
-                      return `${label} · ${txCount} tx`;
-                    }}
-                  />
-                  <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} barSize={12} />
-                  <Bar dataKey="spend" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={12} />
-                  <Line dataKey="net" stroke="#2563eb" strokeWidth={2} dot={false} type="monotone" />
-                </ComposedChart>
-              </ResponsiveContainer>
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#64748b" }} />
+                    <YAxis tick={{ fontSize: 11, fill: "#64748b" }} />
+                    <RechartsTooltip
+                      contentStyle={{
+                        borderRadius: 10,
+                        borderColor: "#e2e8f0",
+                        boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+                      }}
+                      formatter={(value, name) => {
+                        if (name === "txCount") {
+                          return [String(value), "Tx count"];
+                        }
+                        const numeric =
+                          typeof value === "number" ? value : Number(value || 0);
+                        const label =
+                          name === "income"
+                            ? "Income"
+                            : name === "spend"
+                              ? "Spend"
+                              : "Net";
+                        return [CURRENCY.format(numeric), label];
+                      }}
+                      labelFormatter={(label, payload) => {
+                        const txCount =
+                          payload?.[0] &&
+                          "payload" in payload[0] &&
+                          typeof payload[0].payload?.txCount === "number"
+                            ? payload[0].payload.txCount
+                            : 0;
+                        return `${label} · ${txCount} tx`;
+                      }}
+                    />
+                    <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} barSize={12} />
+                    <Bar dataKey="spend" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={12} />
+                    <Line dataKey="net" stroke="#2563eb" strokeWidth={2} dot={false} type="monotone" />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
             ) : (
-              <p className="text-sm text-slate-500">No monthly cashflow points available.</p>
+              <p className="text-sm text-slate-500">Upload and parse PDFs to see trends here.</p>
             )}
           </div>
         </section>
