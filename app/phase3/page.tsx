@@ -5,6 +5,7 @@ import { FileMeta, OverviewResponse, ApiError } from "@/app/phase3/_lib/types";
 import {
   ScopeMode,
   buildScopeParams,
+  monthRange,
   parseScopeFromWindow,
   pushScopeIntoUrl,
 } from "@/app/phase3/_lib/timeNav";
@@ -20,6 +21,8 @@ export default function Phase3DatasetHomePage() {
   const [scopeMode, setScopeMode] = useState<ScopeMode>("all");
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
+  const [unknownMerchantCount, setUnknownMerchantCount] = useState(0);
+  const [unknownTransactionsCount, setUnknownTransactionsCount] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -66,12 +69,36 @@ export default function Phase3DatasetHomePage() {
       const data = (await res.json()) as OverviewResponse | { ok: false; error: ApiError };
       if (!data.ok) {
         setOverview(null);
+        setUnknownMerchantCount(0);
+        setUnknownTransactionsCount(0);
         setError(data.error);
         return;
       }
       setOverview(data);
+
+      const triageParams = buildScopeParams(nextScopeMode, nextSelectedFileIds);
+      const latestMonth = [...(data.availableMonths || [])].sort().pop() || "";
+      const range = monthRange(latestMonth);
+      if (range) {
+        triageParams.set("dateFrom", range.dateFrom);
+        triageParams.set("dateTo", range.dateTo);
+      }
+
+      const triageRes = await fetch(`/api/analysis/triage/unknown-merchants?${triageParams.toString()}`);
+      const triageData = (await triageRes.json()) as
+        | { ok: true; unknownMerchantCount: number; unknownTransactionsCount: number }
+        | { ok: false };
+      if (triageData.ok) {
+        setUnknownMerchantCount(triageData.unknownMerchantCount || 0);
+        setUnknownTransactionsCount(triageData.unknownTransactionsCount || 0);
+      } else {
+        setUnknownMerchantCount(0);
+        setUnknownTransactionsCount(0);
+      }
     } catch {
       setOverview(null);
+      setUnknownMerchantCount(0);
+      setUnknownTransactionsCount(0);
       setError({ code: "FETCH_FAILED", message: "Failed to load dataset home data." });
     } finally {
       setIsLoading(false);
@@ -153,6 +180,23 @@ export default function Phase3DatasetHomePage() {
           {error && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
               {error.code}: {error.message}
+            </div>
+          )}
+
+          {unknownMerchantCount > 0 && monthChips.length > 0 && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Help improve categories: review {unknownMerchantCount} unknown merchants ({unknownTransactionsCount} tx)
+              <a
+                href={`/phase3/month?${(() => {
+                  const params = buildScopeParams(scopeMode, selectedFileIds);
+                  params.set("m", monthChips[0]);
+                  params.set("openInbox", "1");
+                  return params.toString();
+                })()}`}
+                className="ml-2 font-medium underline hover:text-amber-900"
+              >
+                Open latest month inbox
+              </a>
             </div>
           )}
         </section>

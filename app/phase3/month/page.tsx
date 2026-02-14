@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Cell,
   Pie,
@@ -96,6 +96,12 @@ function readMonthFromUrl() {
   if (typeof window === "undefined") return "";
   const query = new URLSearchParams(window.location.search);
   return (query.get("m") || "").trim();
+}
+
+function readOpenInboxFlag() {
+  if (typeof window === "undefined") return false;
+  const query = new URLSearchParams(window.location.search);
+  return query.get("openInbox") === "1";
 }
 
 function readScopeLabel(value: unknown, fallback: ScopeMode) {
@@ -198,6 +204,9 @@ export default function Phase3MonthPage() {
   const [triageCategory, setTriageCategory] = useState<CategoryOption>("Other");
   const [triageSaving, setTriageSaving] = useState(false);
   const [triageStatus, setTriageStatus] = useState("");
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [openInboxRequested, setOpenInboxRequested] = useState(false);
+  const inboxRef = useRef<HTMLElement | null>(null);
 
   const selectedFileNames = useMemo(
     () =>
@@ -395,9 +404,12 @@ export default function Phase3MonthPage() {
   useEffect(() => {
     const parsed = parseScopeFromWindow();
     const initialMonth = readMonthFromUrl();
+    const openInbox = readOpenInboxFlag();
     setScopeMode(parsed.scopeMode);
     setSelectedFileIds(parsed.fileIds);
     setMonth(initialMonth);
+    setOpenInboxRequested(openInbox);
+    setInboxOpen(openInbox);
 
     void fetchFiles().catch(() => {
       setError({ code: "FILES_FAILED", message: "Failed to load file list." });
@@ -444,6 +456,25 @@ export default function Phase3MonthPage() {
     if (!month) return;
     void fetchTriage();
   }, [month, scopeMode, selectedFileIds, fetchTriage]);
+
+  useEffect(() => {
+    if (triageLoading || triageItems.length === 0) return;
+    if (typeof window === "undefined") return;
+
+    const sessionKey = "phase3_inbox_auto_opened";
+    const alreadyOpened = window.sessionStorage.getItem(sessionKey) === "1";
+
+    if (openInboxRequested || !alreadyOpened) {
+      setInboxOpen(true);
+      if (!alreadyOpened) {
+        window.sessionStorage.setItem(sessionKey, "1");
+      }
+      if (openInboxRequested) {
+        inboxRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        setOpenInboxRequested(false);
+      }
+    }
+  }, [triageItems.length, triageLoading, openInboxRequested]);
 
   return (
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
@@ -723,8 +754,17 @@ export default function Phase3MonthPage() {
             </div>
           </article>
 
-          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">Other Inbox (Month)</h2>
+          <article ref={inboxRef} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-900">Other Inbox (Month)</h2>
+              <button
+                type="button"
+                onClick={() => setInboxOpen((prev) => !prev)}
+                className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+              >
+                {inboxOpen ? "Collapse" : "Open"}
+              </button>
+            </div>
             <p className="mt-1 text-sm text-slate-600">
               Label unknown merchants quickly and remove them from `Other/default`.
             </p>
@@ -733,78 +773,84 @@ export default function Phase3MonthPage() {
               Other/default spend: <span className="font-medium text-slate-900">{CURRENCY.format(unknownOtherSpend)}</span>
             </div>
 
-            {triageError && (
-              <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {triageError.code}: {triageError.message}
-              </div>
-            )}
-
-            <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
-              <div className="space-y-2">
-                {triageItems.map((item) => (
-                  <button
-                    key={item.merchantNorm}
-                    type="button"
-                    onClick={() => setSelectedMerchant(item.merchantNorm)}
-                    className={`w-full rounded border px-3 py-2 text-left text-xs ${selectedMerchant === item.merchantNorm ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"}`}
-                  >
-                    <div className="font-medium text-slate-800">{item.displayName}</div>
-                    <div className="mt-1 text-slate-500">
-                      {item.txCount} tx · {CURRENCY.format(item.totalSpend)} · last {item.lastDate}
-                    </div>
-                  </button>
-                ))}
-                {triageLoading && <p className="text-sm text-slate-500">Loading inbox...</p>}
-                {!triageLoading && triageItems.length === 0 && (
-                  <p className="text-sm text-slate-500">No unknown merchants in this month. Good signal quality.</p>
-                )}
-              </div>
-
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="text-xs font-medium text-slate-700">
-                  Selected: {selectedMerchantItem?.displayName || "-"}
+            <div
+              className={`overflow-hidden transition-all duration-200 ${
+                inboxOpen ? "mt-3 max-h-[1400px] opacity-100" : "max-h-0 opacity-0"
+              }`}
+            >
+              {triageError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {triageError.code}: {triageError.message}
                 </div>
-                <div className="mt-2 text-xs text-slate-500">Sample transactions</div>
-                <div className="mt-1 space-y-1 text-xs text-slate-600">
-                  {(selectedMerchantItem?.sampleTransactions || []).slice(0, 5).map((tx) => (
-                    <div key={tx.id} className="rounded border border-slate-200 bg-white px-2 py-1">
-                      <div className="flex items-center justify-between">
-                        <span>{tx.date}</span>
-                        <span className={tx.amount >= 0 ? "text-emerald-700" : "text-rose-700"}>
-                          {CURRENCY.format(tx.amount)}
-                        </span>
+              )}
+
+              <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
+                <div className="space-y-2">
+                  {triageItems.map((item) => (
+                    <button
+                      key={item.merchantNorm}
+                      type="button"
+                      onClick={() => setSelectedMerchant(item.merchantNorm)}
+                      className={`w-full rounded border px-3 py-2 text-left text-xs ${selectedMerchant === item.merchantNorm ? "border-blue-300 bg-blue-50" : "border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50"}`}
+                    >
+                      <div className="font-medium text-slate-800">{item.displayName}</div>
+                      <div className="mt-1 text-slate-500">
+                        {item.txCount} tx · {CURRENCY.format(item.totalSpend)} · last {item.lastDate}
                       </div>
-                      <div className="truncate text-[11px] text-slate-500">{tx.descriptionRaw}</div>
-                    </div>
+                    </button>
                   ))}
-                  {!(selectedMerchantItem?.sampleTransactions || []).length && <div>-</div>}
+                  {triageLoading && <p className="text-sm text-slate-500">Loading inbox...</p>}
+                  {!triageLoading && triageItems.length === 0 && (
+                    <p className="text-sm text-slate-500">No unknown merchants in this month. Good signal quality.</p>
+                  )}
                 </div>
 
-                <label className="mt-3 block space-y-1 text-xs font-medium text-slate-600">
-                  Category
-                  <select
-                    value={triageCategory}
-                    onChange={(e) => setTriageCategory(e.target.value as CategoryOption)}
-                    className="h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-slate-900"
-                  >
-                    {CATEGORY_OPTIONS.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-xs font-medium text-slate-700">
+                    Selected: {selectedMerchantItem?.displayName || "-"}
+                  </div>
+                  <div className="mt-2 text-xs text-slate-500">Sample transactions</div>
+                  <div className="mt-1 space-y-1 text-xs text-slate-600">
+                    {(selectedMerchantItem?.sampleTransactions || []).slice(0, 5).map((tx) => (
+                      <div key={tx.id} className="rounded border border-slate-200 bg-white px-2 py-1">
+                        <div className="flex items-center justify-between">
+                          <span>{tx.date}</span>
+                          <span className={tx.amount >= 0 ? "text-emerald-700" : "text-rose-700"}>
+                            {CURRENCY.format(tx.amount)}
+                          </span>
+                        </div>
+                        <div className="truncate text-[11px] text-slate-500">{tx.descriptionRaw}</div>
+                      </div>
                     ))}
-                  </select>
-                </label>
+                    {!(selectedMerchantItem?.sampleTransactions || []).length && <div>-</div>}
+                  </div>
 
-                <button
-                  type="button"
-                  onClick={() => void applyMerchantCategory()}
-                  disabled={!selectedMerchant || triageSaving}
-                  className="mt-3 h-9 w-full rounded bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-                >
-                  {triageSaving ? "Applying..." : "Apply to merchant"}
-                </button>
+                  <label className="mt-3 block space-y-1 text-xs font-medium text-slate-600">
+                    Category
+                    <select
+                      value={triageCategory}
+                      onChange={(e) => setTriageCategory(e.target.value as CategoryOption)}
+                      className="h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-slate-900"
+                    >
+                      {CATEGORY_OPTIONS.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-                {triageStatus && <div className="mt-2 text-xs text-slate-600">{triageStatus}</div>}
+                  <button
+                    type="button"
+                    onClick={() => void applyMerchantCategory()}
+                    disabled={!selectedMerchant || triageSaving}
+                    className="mt-3 h-9 w-full rounded bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                  >
+                    {triageSaving ? "Applying..." : "Apply to merchant"}
+                  </button>
+
+                  {triageStatus && <div className="mt-2 text-xs text-slate-600">{triageStatus}</div>}
+                </div>
               </div>
             </div>
           </article>
