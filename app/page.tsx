@@ -784,6 +784,17 @@ export default function Home() {
     return dates[dates.length - 1] || "";
   }, [txResult]);
 
+  const flowProgress = useMemo(() => {
+    const total = flowStatuses.length;
+    if (total === 0) {
+      return { total: 0, done: 0 };
+    }
+    const done = flowStatuses.filter(
+      (item) => item.stage === "parsed" || item.stage === "failed"
+    ).length;
+    return { total, done };
+  }, [flowStatuses]);
+
   return (
     <main className="min-h-screen bg-slate-50 p-8">
       <div className="mx-auto max-w-5xl space-y-8">
@@ -873,6 +884,10 @@ export default function Home() {
         {flowStatuses.length > 0 && (
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="text-base font-semibold text-slate-900">Run Progress</h3>
+            <p className="mt-1 text-xs text-slate-600">
+              Auto-parse runs for each uploaded PDF. Progress: {flowProgress.done}/
+              {flowProgress.total}
+            </p>
             <div className="mt-3 space-y-2 text-sm text-slate-700">
               {flowStatuses.map((item) => (
                 <div key={item.localKey} className="rounded border border-slate-200 bg-slate-50 p-2">
