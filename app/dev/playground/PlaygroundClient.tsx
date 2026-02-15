@@ -360,11 +360,11 @@ export default function PlaygroundClient() {
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0 flex-1">
-            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <label className="block text-xs font-semibold uppercase tracking-wide text-slate-700">
               File Selector
             </label>
             <select
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
               value={selectedFileHash}
               onChange={(event) => setSelectedFileHash(event.target.value)}
               disabled={listLoading || files.length === 0}
@@ -377,7 +377,7 @@ export default function PlaygroundClient() {
             </select>
           </div>
           <div className="flex flex-wrap gap-2">
-            <label className="flex items-center gap-2 text-xs text-slate-600">
+            <label className="flex items-center gap-2 text-xs text-slate-700">
               <input
                 type="checkbox"
                 checked={runLegacyCommBankParser}
@@ -405,7 +405,7 @@ export default function PlaygroundClient() {
         </div>
 
         {selectedFile ? (
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-slate-700">
             fileHash: <span className="font-mono">{selectedFile.fileHash}</span> · fileId:{" "}
             <span className="font-mono">{selectedFile.fileId}</span>
           </p>
@@ -422,7 +422,7 @@ export default function PlaygroundClient() {
       </section>
 
       {inspectorLoading ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-sm">
           Loading inspector...
         </section>
       ) : null}
@@ -432,7 +432,7 @@ export default function PlaygroundClient() {
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-base font-semibold text-slate-900">Dev Template Run (registry)</h2>
             {inspector.source ? (
-              <p className="mt-1 text-xs text-slate-500">
+              <p className="mt-1 text-xs text-slate-700">
                 source: <span className="font-mono">{inspector.source}</span>
                 {inspector.devRun ? (
                   <>
@@ -443,18 +443,18 @@ export default function PlaygroundClient() {
             ) : null}
             <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-lg bg-slate-50 px-3 py-2">
-                <div className="text-xs text-slate-500">Template Type</div>
-                <div className="font-medium text-slate-800">{inspector.debug.templateType}</div>
+                <div className="text-xs text-slate-700">Template Type</div>
+                <div className="font-medium text-slate-900">{inspector.debug.templateType}</div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-2">
-                <div className="text-xs text-slate-500">Bank / Account</div>
-                <div className="font-medium text-slate-800">
+                <div className="text-xs text-slate-700">Bank / Account</div>
+                <div className="font-medium text-slate-900">
                   {(inspector.debug.bankId || "-")}/{inspector.debug.accountId || "-"}
                 </div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-2">
-                <div className="text-xs text-slate-500">Mode / Confidence</div>
-                <div className="font-medium text-slate-800">
+                <div className="text-xs text-slate-700">Mode / Confidence</div>
+                <div className="font-medium text-slate-900">
                   {inspector.debug.mode || "-"}
                   {typeof inspector.debug.confidence === "number"
                     ? ` · ${inspector.debug.confidence.toFixed(2)}`
@@ -462,28 +462,28 @@ export default function PlaygroundClient() {
                 </div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-2">
-                <div className="text-xs text-slate-500">Continuity</div>
-                <div className="font-medium text-slate-800">
+                <div className="text-xs text-slate-700">Continuity</div>
+                <div className="font-medium text-slate-900">
                   {(inspector.debug.continuity * 100).toFixed(1)}% · checked {inspector.debug.checked}
                 </div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-2">
-                <div className="text-xs text-slate-500">Needs Review</div>
-                <div className="font-medium text-slate-800">
+                <div className="text-xs text-slate-700">Needs Review</div>
+                <div className="font-medium text-slate-900">
                   {inspector.debug.needsReview ? "true" : "false"}
                 </div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-2">
-                <div className="text-xs text-slate-500">Warnings</div>
-                <div className="font-medium text-slate-800">{inspector.debug.warningCount}</div>
+                <div className="text-xs text-slate-700">Warnings</div>
+                <div className="font-medium text-slate-900">{inspector.debug.warningCount}</div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-2">
-                <div className="text-xs text-slate-500">Deduped Count</div>
-                <div className="font-medium text-slate-800">{inspector.debug.dedupedCount}</div>
+                <div className="text-xs text-slate-700">Deduped Count</div>
+                <div className="font-medium text-slate-900">{inspector.debug.dedupedCount}</div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-2">
-                <div className="text-xs text-slate-500">Artifacts</div>
-                <div className="font-medium text-slate-800">
+                <div className="text-xs text-slate-700">Artifacts</div>
+                <div className="font-medium text-slate-900">
                   text:{inspector.artifacts.hasText ? "Y" : "N"} · segment:{" "}
                   {inspector.artifacts.hasSegment ? "Y" : "N"} · parsed:{" "}
                   {inspector.artifacts.hasParsed ? "Y" : "N"} · devRun:{" "}
@@ -501,14 +501,14 @@ export default function PlaygroundClient() {
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-base font-semibold text-slate-900">Parsed Table</h2>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-700">
                 {inspector.transactions.length} rows shown (max 300)
               </p>
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full border-collapse text-xs">
+              <table className="min-w-full border-collapse text-xs text-slate-900">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left text-slate-500">
+                  <tr className="border-b border-slate-200 text-left text-slate-700">
                     <th className="px-2 py-2">#</th>
                     <th className="px-2 py-2">Date</th>
                     <th className="px-2 py-2">Description</th>
@@ -565,7 +565,7 @@ export default function PlaygroundClient() {
                               ? tx.confidence.toFixed(2)
                               : "-"}
                           </td>
-                          <td className="px-2 py-2 whitespace-nowrap font-mono text-[11px] text-slate-600">
+                          <td className="px-2 py-2 whitespace-nowrap font-mono text-[11px] text-slate-700">
                             {tx.source.lineIndex || tx.source.rowIndex
                               ? `L${tx.source.lineIndex || tx.source.rowIndex}`
                               : "-"}
@@ -683,12 +683,12 @@ export default function PlaygroundClient() {
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-base font-semibold text-slate-900">Raw context</h2>
             {!selectedTransaction ? (
-              <p className="mt-2 text-sm text-slate-500">
+              <p className="mt-2 text-sm text-slate-700">
                 Select a table row or click a warning &quot;Go to row&quot; to inspect raw context.
               </p>
             ) : (
               <div className="mt-3 space-y-2">
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-slate-700">
                   Row #{selectedTransaction.tableIndex} · line:{" "}
                   <span className="font-mono">
                     {selectedTransaction.source.lineIndex || selectedTransaction.source.rowIndex || "-"}
@@ -728,7 +728,7 @@ export default function PlaygroundClient() {
             <summary className="cursor-pointer text-base font-semibold text-slate-900">
               Raw artifacts
             </summary>
-            <p className="mt-2 text-xs text-slate-500">
+            <p className="mt-2 text-xs text-slate-700">
               Text preview and section preview are capped for readability.
             </p>
             <pre className="mt-3 max-h-[240px] overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
