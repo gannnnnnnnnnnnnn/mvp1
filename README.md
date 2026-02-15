@@ -131,6 +131,26 @@ What you can do:
 - Re-run parse for this file in dev mode and save outputs under:
   - `uploads/dev-runs/<fileHash>/<runId>/rerun-output.json`
 
+#### ANZ Template (dev-only)
+
+- ANZ parsing is available only in `/dev/playground` rerun flow.
+- It does **not** write back to main store/index by default.
+- Detected ANZ runs are persisted only under:
+  - `uploads/dev-runs/<fileHash>/<runId>/...`
+
+Manual validation for ANZ dev runs:
+
+```bash
+node scripts/parser_smoke_anz.mjs
+```
+
+This smoke script checks latest ANZ dev-run outputs and validates:
+- `detected.templateId === "anz_v1"`
+- `accountId` extracted
+- transactions exist
+- continuity is high
+- no standalone `Effective Date` rows as transactions
+
 ### 2) Optional auth setup
 
 If you want to protect list/download APIs, create `.env.local`:
