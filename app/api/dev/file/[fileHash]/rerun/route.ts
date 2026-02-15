@@ -6,7 +6,10 @@ import { rejectIfProdApi } from "@/lib/devOnly";
 import { loadCategorizedTransactionsForScope } from "@/lib/analysis/analytics";
 import { loadParsedTransactions } from "@/lib/analysis/loadParsed";
 import { detectDevTemplate } from "@/lib/templates/registry";
-import { DevTemplateWarning } from "@/lib/templates/types";
+import {
+  DevTemplateTransaction,
+  DevTemplateWarning,
+} from "@/lib/templates/types";
 import { anzTemplateV1 } from "@/lib/templates/anz_v1";
 
 type RerunRequest = {
@@ -22,10 +25,44 @@ type WarningGroup = {
   samples: string[];
 };
 
+type DevTxRow = {
+  tableIndex: number;
+  id?: string;
+  date: string;
+  description: string;
+  debit?: number;
+  credit?: number;
+  balance?: number;
+  amount: number;
+  direction: "debit" | "credit";
+  confidence?: number;
+  source: {
+    fileId?: string;
+    fileHash?: string;
+    rowIndex?: number;
+    lineIndex?: number;
+  };
+  rawLine: string;
+  rawLines: string[];
+};
+
+type DevWarningRow = {
+  warningIndex: number;
+  reason: string;
+  message?: string;
+  severity: "high" | "medium" | "low";
+  confidence?: number;
+  rawLine?: string;
+  lineIndex?: number;
+  txnIndex?: number;
+};
+
 const TEXT_CACHE_DIR = path.join(process.cwd(), "uploads", "text-cache");
 const SEGMENT_CACHE_DIR = path.join(process.cwd(), "uploads", "segment-cache");
 const PARSED_CACHE_DIR = path.join(process.cwd(), "uploads", "parsed-cache");
 const DEV_RUNS_DIR = path.join(process.cwd(), "uploads", "dev-runs");
+const MAX_TRANSACTIONS = 300;
+const MAX_PARSED_LINES = 2000;
 
 function sanitizeDirSegment(value: string) {
   return value.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 128) || "unknown";
@@ -57,9 +94,7 @@ function severityFromTemplateWarning(warning: DevTemplateWarning) {
   return "low" as const;
 }
 
-function buildGroupedWarnings(
-  rows: Array<{ severity: "high" | "medium" | "low"; reason: string; sample?: string }>
-) {
+function buildGroupedWarnings(rows: DevWarningRow[]) {
   const grouped: Record<"high" | "medium" | "low", WarningGroup[]> = {
     high: [],
     medium: [],
@@ -81,8 +116,8 @@ function buildGroupedWarnings(
         samples: [],
       };
     existing.count += 1;
-    if (row.sample && existing.samples.length < 3) {
-      existing.samples.push(row.sample.slice(0, 160));
+    if (row.rawLine && existing.samples.length < 3) {
+      existing.samples.push(row.rawLine.slice(0, 160));
     }
     cache.set(key, existing);
   }
@@ -102,26 +137,6 @@ function buildGroupedWarnings(
   return grouped;
 }
 
-function groupLegacyWarnings(warnings: LegacyWarning[]) {
-  return buildGroupedWarnings(
-    warnings.map((warning) => ({
-      severity: severityFromReason(warning.reason),
-      reason: warning.reason,
-      sample: warning.rawLine,
-    }))
-  );
-}
-
-function groupTemplateWarnings(warnings: DevTemplateWarning[]) {
-  return buildGroupedWarnings(
-    warnings.map((warning) => ({
-      severity: severityFromTemplateWarning(warning),
-      reason: warning.code,
-      sample: warning.rawLine,
-    }))
-  );
-}
-
 async function fileExists(filePath: string) {
   try {
     await fs.access(filePath);
@@ -131,6 +146,25 @@ async function fileExists(filePath: string) {
   }
 }
 
+async function readSegmentPreview(fileId: string) {
+  const segmentPath = path.join(SEGMENT_CACHE_DIR, `${fileId}.json`);
+  try {
+    const raw = await fs.readFile(segmentPath, "utf8");
+    const parsed = JSON.parse(raw) as { sectionText?: string };
+    return (parsed.sectionText || "").slice(0, 4000);
+  } catch {
+    return "";
+  }
+}
+
+function buildParsedLines(text: string, maxLines = MAX_PARSED_LINES) {
+  return text
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .slice(0, maxLines)
+    .map((line, idx) => ({ lineIndex: idx + 1, text: line }));
+}
+
 function resolveByHashOrLegacyId(
   fileHash: string,
   entries: Awaited<ReturnType<typeof readIndex>>
@@ -138,6 +172,177 @@ function resolveByHashOrLegacyId(
   return entries.find(
     (entry) => entry.contentHash === fileHash || `id:${entry.id}` === fileHash
   );
+}
+
+function normalizeRaw(rawLine?: string, fallbackLines?: string[]) {
+  if (rawLine && rawLine.trim()) return rawLine;
+  if (Array.isArray(fallbackLines) && fallbackLines.length > 0) {
+    return fallbackLines.join("\n");
+  }
+  return "";
+}
+
+function normalizeTemplateTransactions(transactions: DevTemplateTransaction[]) {
+  return transactions.slice(0, MAX_TRANSACTIONS).map((tx, idx) => {
+    const debit =
+      typeof tx.debit === "number"
+        ? tx.debit
+        : tx.amount < 0
+          ? Math.abs(tx.amount)
+          : undefined;
+    const credit =
+      typeof tx.credit === "number"
+        ? tx.credit
+        : tx.amount > 0
+          ? Math.abs(tx.amount)
+          : undefined;
+    const rawLine = normalizeRaw(tx.rawLine, tx.rawLines);
+    const rawLines = Array.isArray(tx.rawLines)
+      ? tx.rawLines
+      : rawLine
+        ? rawLine.split("\n")
+        : [];
+
+    return {
+      tableIndex: idx + 1,
+      id: tx.id,
+      date: String(tx.date || "").slice(0, 10),
+      description: tx.descriptionRaw || "",
+      debit,
+      credit,
+      balance: typeof tx.balance === "number" ? tx.balance : undefined,
+      amount: tx.amount,
+      direction: tx.amount >= 0 ? "credit" : "debit",
+      confidence: tx.confidence,
+      source: {
+        fileId: tx.source?.fileId,
+        fileHash: tx.source?.fileHash,
+        rowIndex: tx.source?.rowIndex,
+        lineIndex: tx.source?.rowIndex,
+      },
+      rawLine,
+      rawLines,
+    } satisfies DevTxRow;
+  });
+}
+
+function normalizeMainStoreTransactions(transactions: Array<Record<string, unknown>>) {
+  return transactions.slice(0, MAX_TRANSACTIONS).map((tx, idx) => {
+    const amount = Number(tx.amount || 0);
+    const rawLine =
+      typeof tx.quality === "object" && tx.quality !== null
+        ? String((tx.quality as { rawLine?: string }).rawLine || "")
+        : String((tx.rawLine as string) || "");
+    const lineIndex =
+      typeof tx.source === "object" && tx.source !== null
+        ? Number((tx.source as { lineIndex?: number }).lineIndex || 0) || undefined
+        : undefined;
+    const rawLines = rawLine ? rawLine.split("\n") : [];
+
+    return {
+      tableIndex: idx + 1,
+      id: String(tx.id || ""),
+      date: String(tx.date || "").slice(0, 10),
+      description: String(tx.descriptionRaw || tx.description || ""),
+      debit: amount < 0 ? Math.abs(amount) : undefined,
+      credit: amount > 0 ? Math.abs(amount) : undefined,
+      balance:
+        typeof tx.balance === "number" && Number.isFinite(tx.balance)
+          ? (tx.balance as number)
+          : undefined,
+      amount,
+      direction: amount >= 0 ? "credit" : "debit",
+      confidence:
+        typeof tx.quality === "object" && tx.quality !== null
+          ? (tx.quality as { confidence?: number }).confidence
+          : undefined,
+      source: {
+        fileId:
+          typeof tx.source === "object" && tx.source !== null
+            ? ((tx.source as { fileId?: string }).fileId || undefined)
+            : undefined,
+        fileHash: undefined,
+        rowIndex: lineIndex,
+        lineIndex,
+      },
+      rawLine,
+      rawLines,
+    } satisfies DevTxRow;
+  });
+}
+
+function fuzzyNormalize(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[^a-z0-9 .#_-]/g, "")
+    .trim();
+}
+
+function linkWarningsToTransactions(
+  warnings: DevWarningRow[],
+  transactions: DevTxRow[]
+) {
+  return warnings.map((warning, warningIndex) => {
+    let txnIndex: number | undefined;
+    let lineIndex = warning.lineIndex;
+
+    if (typeof lineIndex === "number") {
+      const byLine = transactions.findIndex(
+        (tx) =>
+          tx.source.lineIndex === lineIndex || tx.source.rowIndex === lineIndex
+      );
+      if (byLine >= 0) txnIndex = byLine;
+    }
+
+    if (txnIndex === undefined && warning.rawLine) {
+      const needle = fuzzyNormalize(warning.rawLine);
+      if (needle) {
+        const byRaw = transactions.findIndex((tx) => {
+          const hay = fuzzyNormalize(tx.rawLine || tx.description || "");
+          return hay.includes(needle) || needle.includes(hay);
+        });
+        if (byRaw >= 0) {
+          txnIndex = byRaw;
+          lineIndex =
+            transactions[byRaw].source.lineIndex || transactions[byRaw].source.rowIndex;
+        }
+      }
+    }
+
+    return {
+      ...warning,
+      warningIndex,
+      txnIndex,
+      lineIndex,
+    };
+  });
+}
+
+function normalizeTemplateWarnings(warnings: DevTemplateWarning[], transactions: DevTxRow[]) {
+  const normalized = warnings.map((warning, idx) => ({
+    warningIndex: idx,
+    reason: warning.code,
+    message: warning.message,
+    severity: severityFromTemplateWarning(warning),
+    confidence: warning.confidence,
+    rawLine: warning.rawLine,
+    lineIndex: warning.lineIndex,
+  }));
+  return linkWarningsToTransactions(normalized, transactions);
+}
+
+function normalizeLegacyWarnings(warnings: LegacyWarning[], transactions: DevTxRow[]) {
+  const normalized = warnings.map((warning, idx) => ({
+    warningIndex: idx,
+    reason: warning.reason,
+    message: warning.reason,
+    severity: severityFromReason(warning.reason),
+    confidence: warning.confidence,
+    rawLine: warning.rawLine,
+    lineIndex: undefined,
+  }));
+  return linkWarningsToTransactions(normalized, transactions);
 }
 
 async function ensureTextCache(fileId: string, request: Request, force: boolean) {
@@ -205,6 +410,8 @@ export async function POST(
     const textPath = path.join(TEXT_CACHE_DIR, `${indexEntry.id}.txt`);
     const text = await fs.readFile(textPath, "utf8");
     const textPreview = text.slice(0, 2000);
+    const parsedLines = buildParsedLines(text);
+    const sectionTextPreview = await readSegmentPreview(indexEntry.id);
 
     const detected = detectDevTemplate(text);
     const isLikelyAnzFile =
@@ -213,9 +420,8 @@ export async function POST(
       /BRANCH NUMBER \(BSB\)/i.test(text);
 
     let debug: Record<string, unknown>;
-    let sampleTransactions: Array<Record<string, unknown>> = [];
-    let warningsGrouped: ReturnType<typeof groupLegacyWarnings>;
-    let warningsSample: Array<Record<string, unknown>> = [];
+    let transactions: DevTxRow[] = [];
+    let warnings: DevWarningRow[] = [];
     let coverage: { startDate?: string; endDate?: string } | undefined;
     let parsedMeta: Record<string, unknown> | undefined;
     let detectedOut = detected.detection;
@@ -230,20 +436,13 @@ export async function POST(
         text,
       });
 
-      sampleTransactions = parsed.transactions.slice(0, 50) as Array<Record<string, unknown>>;
-      warningsGrouped = groupTemplateWarnings(parsed.warnings);
-      warningsSample = parsed.warnings.slice(0, 50).map((item) => ({
-        reason: item.code,
-        message: item.message,
-        severity: item.severity,
-        rawLine: item.rawLine,
-        confidence: item.confidence,
-      }));
+      transactions = normalizeTemplateTransactions(parsed.transactions);
+      warnings = normalizeTemplateWarnings(parsed.warnings, transactions);
       coverage = parsed.coverage;
 
-      const criticalReasons = parsed.warnings
-        .filter((item) => item.severity === "critical")
-        .map((item) => item.code);
+      const criticalReasons = warnings
+        .filter((item) => item.severity === "high")
+        .map((item) => item.reason);
       const continuityFail =
         parsed.debug.checkedCount >= 5 && parsed.debug.continuityRatio < 0.995;
 
@@ -256,7 +455,7 @@ export async function POST(
         continuity: parsed.debug.continuityRatio,
         checked: parsed.debug.checkedCount,
         dedupedCount: 0,
-        warningCount: parsed.warnings.length,
+        warningCount: warnings.length,
         needsReview: criticalReasons.length > 0 || continuityFail,
         needsReviewReasons: [...new Set(criticalReasons)],
       };
@@ -268,6 +467,7 @@ export async function POST(
         mode: parsed.mode,
         detection: selectedDetection,
       };
+
       detectedOut = {
         ...selectedDetection,
         matched: true,
@@ -283,13 +483,8 @@ export async function POST(
             confidence: detected.detection.confidence,
           },
         ];
-        warningsGrouped = groupTemplateWarnings(unknownWarnings);
-        warningsSample = unknownWarnings.map((item) => ({
-          reason: item.code,
-          message: item.message,
-          severity: item.severity,
-          confidence: item.confidence,
-        }));
+
+        warnings = normalizeTemplateWarnings(unknownWarnings, transactions);
         debug = {
           templateType: "unknown",
           bankId: "unknown",
@@ -299,7 +494,7 @@ export async function POST(
           continuity: 0,
           checked: 0,
           dedupedCount: 0,
-          warningCount: unknownWarnings.length,
+          warningCount: warnings.length,
           needsReview: true,
           needsReviewReasons: ["TEMPLATE_NOT_DETECTED"],
         };
@@ -308,41 +503,45 @@ export async function POST(
           legacyFallbackUsed: false,
         };
       } else {
-      const parsed = await loadParsedTransactions(indexEntry.id);
-      const analysis = await loadCategorizedTransactionsForScope({
-        fileId: indexEntry.id,
-        scope: "file",
-        accountId: indexEntry.accountId,
-      });
+        const parsed = await loadParsedTransactions(indexEntry.id);
+        const analysis = await loadCategorizedTransactionsForScope({
+          fileId: indexEntry.id,
+          scope: "file",
+          accountId: indexEntry.accountId,
+        });
 
-      sampleTransactions = analysis.transactions.slice(0, 50);
-      warningsGrouped = groupLegacyWarnings(analysis.warnings);
-      warningsSample = analysis.warnings.slice(0, 50);
+        transactions = normalizeMainStoreTransactions(
+          analysis.transactions as Array<Record<string, unknown>>
+        );
+        warnings = normalizeLegacyWarnings(analysis.warnings, transactions);
 
-      debug = {
-        templateType: analysis.templateType,
-        bankId: indexEntry.bankId || "cba",
-        accountId: indexEntry.accountId || "default",
-        mode: "legacy",
-        confidence: 1,
-        continuity: analysis.quality.balanceContinuityPassRate,
-        checked: analysis.quality.balanceContinuityChecked,
-        dedupedCount: analysis.dedupedCount,
-        warningCount: analysis.warnings.length,
-        needsReview: analysis.needsReview,
-        needsReviewReasons: analysis.quality.needsReviewReasons,
-      };
+        debug = {
+          templateType: analysis.templateType,
+          bankId: indexEntry.bankId || "cba",
+          accountId: indexEntry.accountId || "default",
+          mode: "legacy",
+          confidence: 1,
+          continuity: analysis.quality.balanceContinuityPassRate,
+          checked: analysis.quality.balanceContinuityChecked,
+          dedupedCount: analysis.dedupedCount,
+          warningCount: warnings.length,
+          needsReview: analysis.needsReview,
+          needsReviewReasons: analysis.quality.needsReviewReasons,
+        };
 
-      parsedMeta = {
-        parsed,
-        legacyFallbackUsed: true,
-      };
-      detectedOut = {
-        ...detected.detection,
-        matched: false,
-      };
+        parsedMeta = {
+          parsed,
+          legacyFallbackUsed: true,
+        };
+
+        detectedOut = {
+          ...detected.detection,
+          matched: false,
+        };
       }
     }
+
+    const warningsGrouped = buildGroupedWarnings(warnings);
 
     const runId = new Date().toISOString().replace(/[:.]/g, "-");
     const fileHashDir = sanitizeDirSegment(indexEntry.contentHash || `id:${indexEntry.id}`);
@@ -367,11 +566,15 @@ export async function POST(
       accountId: (debug.accountId as string) || indexEntry.accountId || "default",
       coverage,
       debug,
-      sampleTransactions,
+      transactions,
+      warnings,
       warningsGrouped,
-      warningsSample,
+      sampleTransactions: transactions.slice(0, 50),
+      warningsSample: warnings.slice(0, 50),
       rawArtifacts: {
         textPreview,
+        sectionTextPreview,
+        parsedLines,
       },
       artifacts: {
         hasText: true,
@@ -395,9 +598,12 @@ export async function POST(
       accountId: output.accountId,
       coverage: output.coverage,
       debug: output.debug,
-      sampleTransactions: output.sampleTransactions,
+      transactions: output.transactions,
+      warnings: output.warnings,
       warningsGrouped: output.warningsGrouped,
+      sampleTransactions: output.sampleTransactions,
       warningsSample: output.warningsSample,
+      rawArtifacts: output.rawArtifacts,
     });
   } catch (err) {
     console.error("/api/dev/file/[fileHash]/rerun failed", err);

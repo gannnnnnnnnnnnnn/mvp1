@@ -395,6 +395,7 @@ function parseAnzTransactions(params: {
         message: "Could not find both amount and balance in ANZ transaction block.",
         severity: "warning",
         rawLine: block.lines[0],
+        lineIndex: block.startLine,
         confidence: 0.4,
       });
       continue;
@@ -410,6 +411,7 @@ function parseAnzTransactions(params: {
         message: "ANZ amount candidate is invalid.",
         severity: "warning",
         rawLine: block.lines[0],
+        lineIndex: block.startLine,
         confidence: 0.35,
       });
       continue;
@@ -461,6 +463,7 @@ function parseAnzTransactions(params: {
           "Amount sign was inferred with fallback heuristics; verify line if needed.",
         severity: "warning",
         rawLine: block.lines[0],
+        lineIndex: block.startLine,
         confidence: 0.35,
       });
     }
@@ -479,6 +482,7 @@ function parseAnzTransactions(params: {
         message: "Failed to infer ANZ transaction year from statement context.",
         severity: "warning",
         rawLine: block.lines[0],
+        lineIndex: block.startLine,
         confidence: 0.25,
       });
       continue;
@@ -493,6 +497,7 @@ function parseAnzTransactions(params: {
         message: "Skipped standalone Effective Date row.",
         severity: "warning",
         rawLine: block.lines[0],
+        lineIndex: block.startLine,
         confidence: 0.4,
       });
       continue;

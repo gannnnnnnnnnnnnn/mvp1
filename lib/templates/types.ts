@@ -7,6 +7,7 @@ export type DevTemplateWarning = {
   message: string;
   severity: DevTemplateSeverity;
   rawLine?: string;
+  lineIndex?: number;
   confidence?: number;
 };
 

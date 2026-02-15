@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 type DevFileRow = {
   fileHash: string;
@@ -24,6 +24,38 @@ type WarningGroupedItem = {
   samples: string[];
 };
 
+type DevTxRow = {
+  tableIndex: number;
+  id?: string;
+  date: string;
+  description: string;
+  debit?: number;
+  credit?: number;
+  balance?: number;
+  amount: number;
+  direction: "debit" | "credit";
+  confidence?: number;
+  source: {
+    fileId?: string;
+    fileHash?: string;
+    rowIndex?: number;
+    lineIndex?: number;
+  };
+  rawLine: string;
+  rawLines: string[];
+};
+
+type DevWarningRow = {
+  warningIndex: number;
+  reason: string;
+  message?: string;
+  severity: "high" | "medium" | "low";
+  confidence?: number;
+  rawLine?: string;
+  lineIndex?: number;
+  txnIndex?: number;
+};
+
 type InspectorPayload = {
   source?: string;
   devRun?: { runId: string; path: string };
@@ -42,13 +74,14 @@ type InspectorPayload = {
     needsReview: boolean;
     needsReviewReasons: string[];
   };
-  transactions: Array<Record<string, unknown>>;
+  transactions: DevTxRow[];
+  warnings: DevWarningRow[];
   warningsGrouped: {
     high: WarningGroupedItem[];
     medium: WarningGroupedItem[];
     low: WarningGroupedItem[];
   };
-  warningsSample: Array<Record<string, unknown>>;
+  warningsSample: DevWarningRow[];
   artifacts: {
     hasText: boolean;
     hasSegment: boolean;
@@ -57,6 +90,8 @@ type InspectorPayload = {
   };
   rawArtifacts: {
     textPreview: string;
+    sectionTextPreview?: string;
+    parsedLines?: Array<{ lineIndex: number; text: string }>;
   };
 };
 
@@ -64,6 +99,15 @@ type RerunResult = {
   runId: string;
   runPath: string;
 };
+
+type WarningFilter = "all" | "critical" | "warning" | "info";
+
+const CURRENCY = new Intl.NumberFormat("en-AU", {
+  style: "currency",
+  currency: "AUD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
 
 function prettyJson(value: unknown) {
   return JSON.stringify(value, null, 2);
@@ -76,6 +120,43 @@ function fileOptionLabel(file: DevFileRow) {
   return `${file.fileName} · ${coverage} · ${file.bankId}/${file.accountId}/${file.templateId}`;
 }
 
+function formatAmount(value?: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+  return CURRENCY.format(value);
+}
+
+function severityLabel(severity: DevWarningRow["severity"]) {
+  if (severity === "high") return "Critical";
+  if (severity === "medium") return "Warning";
+  return "Info";
+}
+
+function matchesFilter(
+  warning: DevWarningRow,
+  filter: WarningFilter
+) {
+  if (filter === "all") return true;
+  if (filter === "critical") return warning.severity === "high";
+  if (filter === "warning") return warning.severity === "medium";
+  return warning.severity === "low";
+}
+
+function warningRank(severity: DevWarningRow["severity"]) {
+  if (severity === "high") return 3;
+  if (severity === "medium") return 2;
+  return 1;
+}
+
+function getContextLines(
+  parsedLines: Array<{ lineIndex: number; text: string }> | undefined,
+  lineIndex: number | undefined
+) {
+  if (!parsedLines || typeof lineIndex !== "number") return [];
+  const start = Math.max(1, lineIndex - 3);
+  const end = lineIndex + 3;
+  return parsedLines.filter((line) => line.lineIndex >= start && line.lineIndex <= end);
+}
+
 export default function PlaygroundClient() {
   const [files, setFiles] = useState<DevFileRow[]>([]);
   const [selectedFileHash, setSelectedFileHash] = useState<string>("");
@@ -86,6 +167,12 @@ export default function PlaygroundClient() {
   const [runLegacyCommBankParser, setRunLegacyCommBankParser] = useState(false);
   const [error, setError] = useState<string>("");
   const [rerunResult, setRerunResult] = useState<RerunResult | null>(null);
+  const [warningFilter, setWarningFilter] = useState<WarningFilter>("all");
+  const [selectedTableIndex, setSelectedTableIndex] = useState<number | null>(null);
+  const [flashTableIndex, setFlashTableIndex] = useState<number | null>(null);
+  const [expandedRawRows, setExpandedRawRows] = useState<Set<number>>(new Set());
+
+  const rowRefs = useRef<Record<number, HTMLTableRowElement | null>>({});
 
   async function loadFiles() {
     setListLoading(true);
@@ -137,11 +224,16 @@ export default function PlaygroundClient() {
         indexEntry: data.indexEntry,
         debug: data.debug,
         transactions: data.transactions,
+        warnings: data.warnings,
         warningsGrouped: data.warningsGrouped,
         warningsSample: data.warningsSample,
         artifacts: data.artifacts,
         rawArtifacts: data.rawArtifacts,
       });
+      setSelectedTableIndex(null);
+      setFlashTableIndex(null);
+      setExpandedRawRows(new Set());
+      rowRefs.current = {};
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load file inspector.");
       setInspector(null);
@@ -189,6 +281,31 @@ export default function PlaygroundClient() {
     }
   }
 
+  function jumpToWarningRow(warning: DevWarningRow) {
+    if (typeof warning.txnIndex !== "number") return;
+    const tableIndex = warning.txnIndex + 1;
+    const target = rowRefs.current[tableIndex];
+    if (!target) return;
+
+    setSelectedTableIndex(tableIndex);
+    setFlashTableIndex(tableIndex);
+    setExpandedRawRows((prev) => new Set(prev).add(tableIndex));
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    window.setTimeout(() => setFlashTableIndex((curr) => (curr === tableIndex ? null : curr)), 2000);
+  }
+
+  function toggleRawRow(tableIndex: number) {
+    setExpandedRawRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(tableIndex)) {
+        next.delete(tableIndex);
+      } else {
+        next.add(tableIndex);
+      }
+      return next;
+    });
+  }
+
   useEffect(() => {
     void loadFiles();
   }, []);
@@ -201,6 +318,42 @@ export default function PlaygroundClient() {
     () => files.find((file) => file.fileHash === selectedFileHash) || null,
     [files, selectedFileHash]
   );
+
+  const warningsByReason = useMemo(() => {
+    const map = new Map<string, DevWarningRow[]>();
+    const rows = inspector?.warnings || [];
+    for (const warning of rows) {
+      if (!matchesFilter(warning, warningFilter)) continue;
+      const list = map.get(warning.reason) || [];
+      list.push(warning);
+      map.set(warning.reason, list);
+    }
+    return Array.from(map.entries()).sort((a, b) => b[1].length - a[1].length);
+  }, [inspector?.warnings, warningFilter]);
+
+  const warningByTransaction = useMemo(() => {
+    const map = new Map<number, DevWarningRow["severity"]>();
+    for (const warning of inspector?.warnings || []) {
+      if (typeof warning.txnIndex !== "number") continue;
+      const tableIndex = warning.txnIndex + 1;
+      const current = map.get(tableIndex);
+      if (!current || warningRank(warning.severity) > warningRank(current)) {
+        map.set(tableIndex, warning.severity);
+      }
+    }
+    return map;
+  }, [inspector?.warnings]);
+
+  const selectedTransaction = useMemo(() => {
+    if (!inspector || selectedTableIndex === null) return null;
+    return inspector.transactions.find((tx) => tx.tableIndex === selectedTableIndex) || null;
+  }, [inspector, selectedTableIndex]);
+
+  const selectedContextLines = useMemo(() => {
+    if (!inspector || !selectedTransaction) return [];
+    const lineIndex = selectedTransaction.source.lineIndex || selectedTransaction.source.rowIndex;
+    return getContextLines(inspector.rawArtifacts.parsedLines, lineIndex);
+  }, [inspector, selectedTransaction]);
 
   return (
     <section className="space-y-4">
@@ -345,7 +498,224 @@ export default function PlaygroundClient() {
             ) : null}
           </section>
 
-          <details className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" open>
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold text-slate-900">Parsed Table</h2>
+              <p className="text-xs text-slate-500">
+                {inspector.transactions.length} rows shown (max 300)
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-left text-slate-500">
+                    <th className="px-2 py-2">#</th>
+                    <th className="px-2 py-2">Date</th>
+                    <th className="px-2 py-2">Description</th>
+                    <th className="px-2 py-2">Debit</th>
+                    <th className="px-2 py-2">Credit</th>
+                    <th className="px-2 py-2">Balance</th>
+                    <th className="px-2 py-2">Amount</th>
+                    <th className="px-2 py-2">Confidence</th>
+                    <th className="px-2 py-2">Source</th>
+                    <th className="px-2 py-2">Raw</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inspector.transactions.map((tx) => {
+                    const warningSeverity = warningByTransaction.get(tx.tableIndex);
+                    const isSelected = selectedTableIndex === tx.tableIndex;
+                    const isFlash = flashTableIndex === tx.tableIndex;
+                    const isRawOpen = expandedRawRows.has(tx.tableIndex);
+
+                    return (
+                      <Fragment key={`tx-row-${tx.tableIndex}`}>
+                        <tr
+                          ref={(node) => {
+                            rowRefs.current[tx.tableIndex] = node;
+                          }}
+                          onClick={() => setSelectedTableIndex(tx.tableIndex)}
+                          className={`cursor-pointer border-b border-slate-100 align-top ${
+                            warningSeverity === "high"
+                              ? "bg-rose-50"
+                              : warningSeverity === "medium"
+                                ? "bg-amber-50"
+                                : ""
+                          } ${isSelected ? "ring-1 ring-blue-200" : ""} ${
+                            isFlash ? "bg-blue-100" : ""
+                          }`}
+                        >
+                          <td className="px-2 py-2 font-mono">{tx.tableIndex}</td>
+                          <td className="px-2 py-2 whitespace-nowrap">{tx.date || "-"}</td>
+                          <td className="px-2 py-2 max-w-[420px] whitespace-pre-wrap break-words">
+                            {tx.description || "-"}
+                          </td>
+                          <td className="px-2 py-2 whitespace-nowrap text-rose-700">
+                            {formatAmount(tx.debit)}
+                          </td>
+                          <td className="px-2 py-2 whitespace-nowrap text-emerald-700">
+                            {formatAmount(tx.credit)}
+                          </td>
+                          <td className="px-2 py-2 whitespace-nowrap">{formatAmount(tx.balance)}</td>
+                          <td className="px-2 py-2 whitespace-nowrap font-medium">
+                            {formatAmount(tx.amount)}
+                          </td>
+                          <td className="px-2 py-2 whitespace-nowrap">
+                            {typeof tx.confidence === "number"
+                              ? tx.confidence.toFixed(2)
+                              : "-"}
+                          </td>
+                          <td className="px-2 py-2 whitespace-nowrap font-mono text-[11px] text-slate-600">
+                            {tx.source.lineIndex || tx.source.rowIndex
+                              ? `L${tx.source.lineIndex || tx.source.rowIndex}`
+                              : "-"}
+                          </td>
+                          <td className="px-2 py-2 whitespace-nowrap">
+                            <button
+                              type="button"
+                              className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleRawRow(tx.tableIndex);
+                                setSelectedTableIndex(tx.tableIndex);
+                              }}
+                            >
+                              {isRawOpen ? "Hide" : "Show"} raw
+                            </button>
+                          </td>
+                        </tr>
+                        {isRawOpen ? (
+                          <tr className="border-b border-slate-100 bg-slate-50">
+                            <td className="px-2 py-2" colSpan={10}>
+                              <pre className="overflow-auto whitespace-pre-wrap rounded bg-slate-900 p-2 font-mono text-[11px] text-slate-100">
+                                {tx.rawLine || "(raw line unavailable)"}
+                              </pre>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-base font-semibold text-slate-900">Warnings</h2>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {(
+                  [
+                    ["all", "All"],
+                    ["critical", "Critical"],
+                    ["warning", "Warning"],
+                    ["info", "Info"],
+                  ] as Array<[WarningFilter, string]>
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`rounded border px-2 py-1 ${
+                      warningFilter === value
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 text-slate-700"
+                    }`}
+                    onClick={() => setWarningFilter(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {warningsByReason.length === 0 ? (
+              <p className="text-sm text-slate-500">No warnings for selected filter.</p>
+            ) : (
+              <div className="space-y-2">
+                {warningsByReason.map(([reason, rows]) => (
+                  <details key={reason} className="rounded-lg border border-slate-200 p-3" open>
+                    <summary className="cursor-pointer text-sm font-medium text-slate-800">
+                      {reason} ({rows.length})
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      {rows.map((warning) => (
+                        <div
+                          key={`${reason}-${warning.warningIndex}`}
+                          className="rounded border border-slate-200 bg-slate-50 p-2"
+                        >
+                          <div className="mb-1 flex flex-wrap items-center gap-2 text-xs">
+                            <span className="rounded bg-slate-900 px-2 py-0.5 text-white">
+                              {severityLabel(warning.severity)}
+                            </span>
+                            <span className="text-slate-700">{warning.message || warning.reason}</span>
+                            {typeof warning.confidence === "number" ? (
+                              <span className="text-slate-500">
+                                confidence: {warning.confidence.toFixed(2)}
+                              </span>
+                            ) : null}
+                            {typeof warning.lineIndex === "number" ? (
+                              <span className="font-mono text-slate-500">L{warning.lineIndex}</span>
+                            ) : null}
+                          </div>
+                          <pre className="overflow-auto whitespace-pre-wrap rounded bg-white p-2 font-mono text-[11px] text-slate-700">
+                            {warning.rawLine || "(no rawLine)"}
+                          </pre>
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 disabled:opacity-50"
+                              disabled={typeof warning.txnIndex !== "number"}
+                              onClick={() => jumpToWarningRow(warning)}
+                            >
+                              Go to row
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-900">Raw context</h2>
+            {!selectedTransaction ? (
+              <p className="mt-2 text-sm text-slate-500">
+                Select a table row or click a warning &quot;Go to row&quot; to inspect raw context.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                <div className="text-xs text-slate-500">
+                  Row #{selectedTransaction.tableIndex} · line:{" "}
+                  <span className="font-mono">
+                    {selectedTransaction.source.lineIndex || selectedTransaction.source.rowIndex || "-"}
+                  </span>
+                </div>
+                <pre className="overflow-auto whitespace-pre-wrap rounded bg-slate-900 p-2 font-mono text-[11px] text-slate-100">
+                  {selectedTransaction.rawLine || "(raw line unavailable)"}
+                </pre>
+                {selectedContextLines.length > 0 ? (
+                  <pre className="overflow-auto whitespace-pre rounded bg-slate-100 p-2 font-mono text-[11px] text-slate-700">
+                    {selectedContextLines
+                      .map((line) => {
+                        const marker =
+                          line.lineIndex ===
+                          (selectedTransaction.source.lineIndex || selectedTransaction.source.rowIndex)
+                            ? ">"
+                            : " ";
+                        return `${marker} ${String(line.lineIndex).padStart(4, " ")} | ${line.text}`;
+                      })
+                      .join("\n")}
+                  </pre>
+                ) : null}
+              </div>
+            )}
+          </section>
+
+          <details className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <summary className="cursor-pointer text-base font-semibold text-slate-900">
               Index (normalized entry JSON)
             </summary>
@@ -354,42 +724,30 @@ export default function PlaygroundClient() {
             </pre>
           </details>
 
-          <details
-            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-            open={!(
-              inspector.source === "mainStore" &&
-              inspector.debug.bankId !== "cba"
-            )}
-          >
-            <summary className="cursor-pointer text-base font-semibold text-slate-900">
-              Transactions sample (first 50)
-            </summary>
-            <pre className="mt-3 max-h-[460px] overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
-              {prettyJson(inspector.transactions)}
-            </pre>
-          </details>
-
-          <details className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" open>
-            <summary className="cursor-pointer text-base font-semibold text-slate-900">
-              Warnings (grouped by severity)
-            </summary>
-            <pre className="mt-3 max-h-[360px] overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
-              {prettyJson(inspector.warningsGrouped)}
-            </pre>
-            <pre className="mt-3 max-h-[260px] overflow-auto rounded-lg bg-slate-100 p-3 text-xs text-slate-700">
-              {prettyJson(inspector.warningsSample)}
-            </pre>
-          </details>
-
-          <details className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" open>
+          <details className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <summary className="cursor-pointer text-base font-semibold text-slate-900">
               Raw artifacts
             </summary>
             <p className="mt-2 text-xs text-slate-500">
-              Text preview is capped for readability. Segment/raw files can be added later.
+              Text preview and section preview are capped for readability.
             </p>
-            <pre className="mt-3 max-h-[300px] overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
+            <pre className="mt-3 max-h-[240px] overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
               {inspector.rawArtifacts.textPreview || "(no text preview available)"}
+            </pre>
+            <pre className="mt-3 max-h-[220px] overflow-auto rounded-lg bg-slate-100 p-3 text-xs text-slate-700">
+              {inspector.rawArtifacts.sectionTextPreview || "(no section preview available)"}
+            </pre>
+          </details>
+
+          <details className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <summary className="cursor-pointer text-base font-semibold text-slate-900">
+              Legacy warning groups / samples
+            </summary>
+            <pre className="mt-3 max-h-[260px] overflow-auto rounded-lg bg-slate-900 p-3 text-xs text-slate-100">
+              {prettyJson(inspector.warningsGrouped)}
+            </pre>
+            <pre className="mt-3 max-h-[220px] overflow-auto rounded-lg bg-slate-100 p-3 text-xs text-slate-700">
+              {prettyJson(inspector.warningsSample)}
             </pre>
           </details>
         </>
