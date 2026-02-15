@@ -116,6 +116,21 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+### Dev Playground (Developer-only)
+
+Use this for parser inspection without touching the product flow.
+
+- Route: `/dev/playground`
+- Works only in development (`next dev`)
+- Blocked in production (`next build && next start` returns 404 for dev APIs and page not found)
+
+What you can do:
+- Select one uploaded file by `fileHash`
+- Inspect normalized index entry + debug summary
+- Inspect transaction sample / warning groups / text preview
+- Re-run parse for this file in dev mode and save outputs under:
+  - `uploads/dev-runs/<fileHash>/<runId>/rerun-output.json`
+
 ### 2) Optional auth setup
 
 If you want to protect list/download APIs, create `.env.local`:
