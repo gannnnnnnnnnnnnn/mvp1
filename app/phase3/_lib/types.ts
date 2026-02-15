@@ -81,10 +81,12 @@ export type OverviewResponse = {
   balanceSeries: Array<{ date: string; balance: number; transactionId: string }>;
   balanceSeriesDisabledReason?: string;
   transferStats?: {
-    matchedTransferCount: number;
-    matchedTransferTotal: number;
+    internalOffsetPairsCount: number;
+    internalOffsetAbs: number;
+    boundaryTransferPairsCount: number;
+    boundaryTransferAbs: number;
     uncertainTransferCount?: number;
-    uncertainTransferTotal?: number;
+    uncertainTransferAbs?: number;
   };
 };
 

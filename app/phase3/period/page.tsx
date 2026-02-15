@@ -1082,10 +1082,12 @@ export default function Phase3PeriodPage() {
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="text-xs uppercase tracking-wide text-slate-500">Transfers</div>
             <div className="mt-3 text-3xl font-semibold text-slate-900">
-              {CURRENCY.format(overview?.transferStats?.matchedTransferTotal || 0)}
+              {CURRENCY.format(overview?.transferStats?.internalOffsetAbs || 0)}
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              matched: {overview?.transferStats?.matchedTransferCount || 0}
+              internal: {overview?.transferStats?.internalOffsetPairsCount || 0}
+              {" · "}
+              boundary: {overview?.transferStats?.boundaryTransferPairsCount || 0}
               {" · "}
               uncertain: {overview?.transferStats?.uncertainTransferCount || 0}
             </div>

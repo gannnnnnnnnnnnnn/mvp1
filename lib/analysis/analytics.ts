@@ -4,6 +4,8 @@ import { readCategoryOverrides } from "@/lib/analysis/overridesStore";
 import { Category, NormalizedTransaction } from "@/lib/analysis/types";
 import { loadParsedTransactions } from "@/lib/analysis/loadParsed";
 import { matchTransfersV2 } from "@/lib/analysis/transfers/matchTransfersV2";
+import { decideTransferEffect } from "@/lib/analysis/transfers/decideTransferEffect";
+import { readBoundaryConfig } from "@/lib/boundary/store";
 import { findById, readIndex } from "@/lib/fileStore";
 
 export type Granularity = "month" | "week";
@@ -51,9 +53,14 @@ const DEFAULT_TRANSFER_V2_PARAMS = {
 
 type TransferV2Row = ReturnType<typeof matchTransfersV2>["rows"][number];
 
-function transferFromV2Row(row: TransferV2Row, side: "a" | "b"): NonNullable<NormalizedTransaction["transfer"]> {
+function transferFromV2Row(
+  row: TransferV2Row,
+  side: "a" | "b",
+  boundaryAccountIds: string[]
+): NonNullable<NormalizedTransaction["transfer"]> {
   const isOut = side === "a";
   const other = isOut ? row.b : row.a;
+  const effect = decideTransferEffect(row, boundaryAccountIds);
 
   return {
     matchId: row.matchId,
@@ -69,6 +76,10 @@ function transferFromV2Row(row: TransferV2Row, side: "a" | "b"): NonNullable<Nor
       descHints: row.explain.descHints,
       penalties: row.explain.penalties,
       score: row.explain.score,
+      decision: effect.decision,
+      kpiEffect: effect.kpiEffect,
+      why: effect.why,
+      sameFile: effect.sameFile,
     },
   };
 }
@@ -109,13 +120,16 @@ function mergeTransferMetadata(
   return candidate.confidence >= normalizedExisting.confidence ? candidate : normalizedExisting;
 }
 
-function annotateTransfersWithV2(transactions: NormalizedTransaction[]) {
+function annotateTransfersWithV2(
+  transactions: NormalizedTransaction[],
+  boundaryAccountIds: string[]
+) {
   const v2 = matchTransfersV2(transactions, DEFAULT_TRANSFER_V2_PARAMS);
   const candidates = new Map<string, NonNullable<NormalizedTransaction["transfer"]>>();
 
   for (const row of v2.rows) {
-    candidates.set(row.a.transactionId, transferFromV2Row(row, "a"));
-    candidates.set(row.b.transactionId, transferFromV2Row(row, "b"));
+    candidates.set(row.a.transactionId, transferFromV2Row(row, "a", boundaryAccountIds));
+    candidates.set(row.b.transactionId, transferFromV2Row(row, "b", boundaryAccountIds));
   }
 
   return transactions.map((tx) => {
@@ -304,33 +318,51 @@ export function runAnalysisCore(params: {
     return true;
   });
 
-  const matchedTransfers = filtered.filter(
-    (tx) => tx.transfer?.state === "matched" && tx.transfer.role === "out"
+  const internalOffsetTransfers = filtered.filter(
+    (tx) =>
+      tx.transfer?.state === "matched" &&
+      tx.transfer.role === "out" &&
+      tx.transfer.explain?.kpiEffect === "EXCLUDED"
+  );
+  const boundaryTransfers = filtered.filter(
+    (tx) =>
+      tx.transfer?.state === "matched" &&
+      tx.transfer.role === "out" &&
+      tx.transfer.explain?.decision === "BOUNDARY_TRANSFER"
   );
   const uncertainTransfers = filtered.filter(
-    (tx) => tx.transfer?.state === "uncertain" && tx.transfer.role === "out"
+    (tx) =>
+      tx.transfer?.role === "out" &&
+      (tx.transfer?.state === "uncertain" ||
+        tx.transfer?.explain?.decision === "UNCERTAIN")
   );
-  const matchedTransferCount = new Set(
-    matchedTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
+  const internalOffsetPairsCount = new Set(
+    internalOffsetTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
   ).size;
-  const matchedTransferTotal = matchedTransfers.reduce(
+  const internalOffsetAbs = internalOffsetTransfers.reduce(
+    (sum, tx) => sum + Math.abs(tx.amount),
+    0
+  );
+  const boundaryTransferPairsCount = new Set(
+    boundaryTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
+  ).size;
+  const boundaryTransferAbs = boundaryTransfers.reduce(
     (sum, tx) => sum + Math.abs(tx.amount),
     0
   );
   const uncertainTransferCount = new Set(
     uncertainTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
   ).size;
-  const uncertainTransferTotal = uncertainTransfers.reduce(
+  const uncertainTransferAbs = uncertainTransfers.reduce(
     (sum, tx) => sum + Math.abs(tx.amount),
     0
   );
 
   const transferFiltered = filtered.filter((tx) => {
     if (showTransfers === "all") return true;
-    const state = tx.transfer?.state || (tx.transfer?.matchId ? "matched" : undefined);
-    const matched = state === "matched";
-    if (showTransfers === "onlyMatched") return matched;
-    return !matched;
+    const excluded = tx.transfer?.explain?.kpiEffect === "EXCLUDED";
+    if (showTransfers === "onlyMatched") return excluded;
+    return !excluded;
   });
 
   const scope: AnalysisScope =
@@ -360,10 +392,12 @@ export function runAnalysisCore(params: {
   return {
     transactions: transferFiltered,
     transferStats: {
-      matchedTransferCount,
-      matchedTransferTotal,
+      internalOffsetPairsCount,
+      internalOffsetAbs,
+      boundaryTransferPairsCount,
+      boundaryTransferAbs,
       uncertainTransferCount,
-      uncertainTransferTotal,
+      uncertainTransferAbs,
     },
     appliedFilters,
   };
@@ -433,7 +467,12 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
 
   const txCountBeforeDedupe = allNormalized.length;
   const dedupedTransactions = dedupeTransactions(allNormalized);
-  const annotatedTransactions = annotateTransfersWithV2(dedupedTransactions);
+  const knownAccountIds = [...new Set(dedupedTransactions.map((tx) => tx.accountId))];
+  const boundary = await readBoundaryConfig(knownAccountIds);
+  const annotatedTransactions = annotateTransfersWithV2(
+    dedupedTransactions,
+    boundary.config.boundaryAccountIds
+  );
   const dedupedCount = txCountBeforeDedupe - dedupedTransactions.length;
   const datasetCoverage = buildDatasetCoverage(annotatedTransactions);
 
