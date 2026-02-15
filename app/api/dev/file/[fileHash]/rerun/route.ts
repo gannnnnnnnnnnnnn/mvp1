@@ -7,9 +7,11 @@ import { loadCategorizedTransactionsForScope } from "@/lib/analysis/analytics";
 import { loadParsedTransactions } from "@/lib/analysis/loadParsed";
 import { detectDevTemplate } from "@/lib/templates/registry";
 import { DevTemplateWarning } from "@/lib/templates/types";
+import { anzTemplateV1 } from "@/lib/templates/anz_v1";
 
 type RerunRequest = {
   force?: boolean;
+  runLegacyCommBankParser?: boolean;
 };
 
 type LegacyWarning = { rawLine: string; reason: string; confidence: number };
@@ -186,6 +188,7 @@ export async function POST(
   }
 
   const force = body.force === true;
+  const runLegacyCommBankParser = body.runLegacyCommBankParser === true;
 
   try {
     const entries = await readIndex();
@@ -204,6 +207,10 @@ export async function POST(
     const textPreview = text.slice(0, 2000);
 
     const detected = detectDevTemplate(text);
+    const isLikelyAnzFile =
+      /\banz\b/i.test(indexEntry.originalName || "") ||
+      /ACCOUNT STATEMENT/i.test(text) ||
+      /BRANCH NUMBER \(BSB\)/i.test(text);
 
     let debug: Record<string, unknown>;
     let sampleTransactions: Array<Record<string, unknown>> = [];
@@ -211,9 +218,12 @@ export async function POST(
     let warningsSample: Array<Record<string, unknown>> = [];
     let coverage: { startDate?: string; endDate?: string } | undefined;
     let parsedMeta: Record<string, unknown> | undefined;
+    let detectedOut = detected.detection;
 
-    if (detected.template) {
-      const parsed = detected.template.parse({
+    if (detected.template || isLikelyAnzFile) {
+      const selectedTemplate = detected.template || anzTemplateV1;
+      const selectedDetection = selectedTemplate.detect(text);
+      const parsed = selectedTemplate.parse({
         fileId: indexEntry.id,
         fileHash: indexEntry.contentHash,
         fileName: indexEntry.originalName,
@@ -242,7 +252,7 @@ export async function POST(
         bankId: parsed.bankId,
         accountId: parsed.accountId,
         mode: parsed.mode,
-        confidence: parsed.debug.detection.confidence,
+        confidence: selectedDetection.confidence,
         continuity: parsed.debug.continuityRatio,
         checked: parsed.debug.checkedCount,
         dedupedCount: 0,
@@ -256,9 +266,48 @@ export async function POST(
         accountId: parsed.accountId,
         templateId: parsed.templateId,
         mode: parsed.mode,
-        detection: parsed.debug.detection,
+        detection: selectedDetection,
+      };
+      detectedOut = {
+        ...selectedDetection,
+        matched: true,
       };
     } else {
+      if (!runLegacyCommBankParser) {
+        const unknownWarnings: DevTemplateWarning[] = [
+          {
+            code: "TEMPLATE_NOT_DETECTED",
+            message:
+              "No matching dev template was detected. Enable legacy CommBank parser fallback if needed.",
+            severity: "warning",
+            confidence: detected.detection.confidence,
+          },
+        ];
+        warningsGrouped = groupTemplateWarnings(unknownWarnings);
+        warningsSample = unknownWarnings.map((item) => ({
+          reason: item.code,
+          message: item.message,
+          severity: item.severity,
+          confidence: item.confidence,
+        }));
+        debug = {
+          templateType: "unknown",
+          bankId: "unknown",
+          accountId: indexEntry.accountId || "default",
+          mode: "unknown",
+          confidence: detected.detection.confidence,
+          continuity: 0,
+          checked: 0,
+          dedupedCount: 0,
+          warningCount: unknownWarnings.length,
+          needsReview: true,
+          needsReviewReasons: ["TEMPLATE_NOT_DETECTED"],
+        };
+        parsedMeta = {
+          detection: detected.detection,
+          legacyFallbackUsed: false,
+        };
+      } else {
       const parsed = await loadParsedTransactions(indexEntry.id);
       const analysis = await loadCategorizedTransactionsForScope({
         fileId: indexEntry.id,
@@ -286,7 +335,13 @@ export async function POST(
 
       parsedMeta = {
         parsed,
+        legacyFallbackUsed: true,
       };
+      detectedOut = {
+        ...detected.detection,
+        matched: false,
+      };
+      }
     }
 
     const runId = new Date().toISOString().replace(/[:.]/g, "-");
@@ -302,12 +357,12 @@ export async function POST(
       fileId: indexEntry.id,
       generatedAt: new Date().toISOString(),
       detected: {
-        matched: detected.detection.matched,
-        bankId: detected.detection.bankId,
-        templateId: detected.detection.templateId,
-        mode: detected.detection.mode,
-        confidence: detected.detection.confidence,
-        evidence: detected.detection.evidence,
+        matched: detectedOut.matched,
+        bankId: detectedOut.bankId,
+        templateId: detectedOut.templateId,
+        mode: detectedOut.mode,
+        confidence: detectedOut.confidence,
+        evidence: detectedOut.evidence,
       },
       accountId: (debug.accountId as string) || indexEntry.accountId || "default",
       coverage,

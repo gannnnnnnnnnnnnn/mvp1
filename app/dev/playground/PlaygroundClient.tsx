@@ -83,6 +83,7 @@ export default function PlaygroundClient() {
   const [listLoading, setListLoading] = useState(true);
   const [inspectorLoading, setInspectorLoading] = useState(false);
   const [rerunLoading, setRerunLoading] = useState(false);
+  const [runLegacyCommBankParser, setRunLegacyCommBankParser] = useState(false);
   const [error, setError] = useState<string>("");
   const [rerunResult, setRerunResult] = useState<RerunResult | null>(null);
 
@@ -157,23 +158,29 @@ export default function PlaygroundClient() {
     setError("");
     setRerunResult(null);
     try {
-      const res = await fetch(
+      const payload = {
+        force: true,
+        runLegacyCommBankParser,
+      };
+      const rerunRes = await fetch(
         `/api/dev/file/${encodeURIComponent(selectedFileHash)}/rerun`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ force: true }),
+          body: JSON.stringify(payload),
         }
       );
-      const data = (await res.json()) as
+      const rerunData = (await rerunRes.json()) as
         | { ok: true; runId: string; runPath: string }
         | { ok: false; error?: { message?: string } };
 
-      if (!res.ok || !data.ok) {
-        throw new Error(data.ok ? "Rerun failed." : data.error?.message || "Rerun failed.");
+      if (!rerunRes.ok || !rerunData.ok) {
+        throw new Error(
+          rerunData.ok ? "Rerun failed." : rerunData.error?.message || "Rerun failed."
+        );
       }
 
-      setRerunResult({ runId: data.runId, runPath: data.runPath });
+      setRerunResult({ runId: rerunData.runId, runPath: rerunData.runPath });
       await loadInspector(selectedFileHash);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to rerun parse.");
@@ -217,6 +224,14 @@ export default function PlaygroundClient() {
             </select>
           </div>
           <div className="flex flex-wrap gap-2">
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                checked={runLegacyCommBankParser}
+                onChange={(event) => setRunLegacyCommBankParser(event.target.checked)}
+              />
+              Run legacy CommBank parser fallback
+            </label>
             <button
               type="button"
               onClick={() => void loadFiles()}
@@ -262,7 +277,7 @@ export default function PlaygroundClient() {
       {!inspectorLoading && inspector ? (
         <>
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="text-base font-semibold text-slate-900">Debug Summary</h2>
+            <h2 className="text-base font-semibold text-slate-900">Dev Template Run (registry)</h2>
             {inspector.source ? (
               <p className="mt-1 text-xs text-slate-500">
                 source: <span className="font-mono">{inspector.source}</span>
@@ -339,7 +354,13 @@ export default function PlaygroundClient() {
             </pre>
           </details>
 
-          <details className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" open>
+          <details
+            className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+            open={!(
+              inspector.source === "mainStore" &&
+              inspector.debug.bankId !== "cba"
+            )}
+          >
             <summary className="cursor-pointer text-base font-semibold text-slate-900">
               Transactions sample (first 50)
             </summary>
