@@ -25,9 +25,16 @@ type WarningGroupedItem = {
 };
 
 type InspectorPayload = {
+  source?: string;
+  devRun?: { runId: string; path: string };
   indexEntry: Record<string, unknown>;
   debug: {
     templateType: string;
+    bankId?: string;
+    accountId?: string;
+    mode?: string;
+    confidence?: number;
+    evidence?: string[];
     continuity: number;
     checked: number;
     dedupedCount: number;
@@ -46,6 +53,7 @@ type InspectorPayload = {
     hasText: boolean;
     hasSegment: boolean;
     hasParsed: boolean;
+    hasDevRun?: boolean;
   };
   rawArtifacts: {
     textPreview: string;
@@ -123,6 +131,8 @@ export default function PlaygroundClient() {
         throw new Error(data.ok ? "Failed to load inspector." : data.error?.message || "Failed to load inspector.");
       }
       setInspector({
+        source: data.source,
+        devRun: data.devRun,
         indexEntry: data.indexEntry,
         debug: data.debug,
         transactions: data.transactions,
@@ -253,10 +263,35 @@ export default function PlaygroundClient() {
         <>
           <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="text-base font-semibold text-slate-900">Debug Summary</h2>
+            {inspector.source ? (
+              <p className="mt-1 text-xs text-slate-500">
+                source: <span className="font-mono">{inspector.source}</span>
+                {inspector.devRun ? (
+                  <>
+                    {" "}· runId: <span className="font-mono">{inspector.devRun.runId}</span>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
             <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
               <div className="rounded-lg bg-slate-50 px-3 py-2">
                 <div className="text-xs text-slate-500">Template Type</div>
                 <div className="font-medium text-slate-800">{inspector.debug.templateType}</div>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-3 py-2">
+                <div className="text-xs text-slate-500">Bank / Account</div>
+                <div className="font-medium text-slate-800">
+                  {(inspector.debug.bankId || "-")}/{inspector.debug.accountId || "-"}
+                </div>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-3 py-2">
+                <div className="text-xs text-slate-500">Mode / Confidence</div>
+                <div className="font-medium text-slate-800">
+                  {inspector.debug.mode || "-"}
+                  {typeof inspector.debug.confidence === "number"
+                    ? ` · ${inspector.debug.confidence.toFixed(2)}`
+                    : ""}
+                </div>
               </div>
               <div className="rounded-lg bg-slate-50 px-3 py-2">
                 <div className="text-xs text-slate-500">Continuity</div>
@@ -283,7 +318,8 @@ export default function PlaygroundClient() {
                 <div className="font-medium text-slate-800">
                   text:{inspector.artifacts.hasText ? "Y" : "N"} · segment:{" "}
                   {inspector.artifacts.hasSegment ? "Y" : "N"} · parsed:{" "}
-                  {inspector.artifacts.hasParsed ? "Y" : "N"}
+                  {inspector.artifacts.hasParsed ? "Y" : "N"} · devRun:{" "}
+                  {inspector.artifacts.hasDevRun ? "Y" : "N"}
                 </div>
               </div>
             </div>

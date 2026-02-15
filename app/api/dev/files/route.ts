@@ -66,9 +66,9 @@ export async function GET() {
           fileId: row.id,
           fileName: row.originalName,
           coverage,
-          bankId: row.bankId,
-          accountId: row.accountId,
-          templateId: row.templateId,
+          bankId: row.bankId || "cba",
+          accountId: row.accountId || "default",
+          templateId: row.templateId || "unknown",
           parseStatus: {
             textCached: hasTextCache,
             segmentCached: hasSegmentCache,
@@ -91,4 +91,3 @@ export async function GET() {
     );
   }
 }
-
