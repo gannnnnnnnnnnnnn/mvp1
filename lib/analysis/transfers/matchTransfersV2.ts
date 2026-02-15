@@ -56,7 +56,7 @@ export type TransferInspectorRow = {
     description: string;
     amountSigned: number;
     balance?: number;
-    source: { fileHash?: string; lineIndex: number };
+    source: { fileId?: string; fileHash?: string; lineIndex: number };
     merchantNorm?: string;
   };
   b: {
@@ -67,7 +67,7 @@ export type TransferInspectorRow = {
     description: string;
     amountSigned: number;
     balance?: number;
-    source: { fileHash?: string; lineIndex: number };
+    source: { fileId?: string; fileHash?: string; lineIndex: number };
     merchantNorm?: string;
   };
   explain: {
@@ -352,6 +352,7 @@ export function matchTransfersV2(
         amountSigned: item.debit.tx.amount,
         balance: item.debit.tx.balance,
         source: {
+          fileId: item.debit.tx.source.fileId,
           fileHash: item.debit.tx.source.fileHash,
           lineIndex: item.debit.tx.source.lineIndex,
         },
@@ -366,6 +367,7 @@ export function matchTransfersV2(
         amountSigned: best.credit.tx.amount,
         balance: best.credit.tx.balance,
         source: {
+          fileId: best.credit.tx.source.fileId,
           fileHash: best.credit.tx.source.fileHash,
           lineIndex: best.credit.tx.source.lineIndex,
         },

@@ -21,6 +21,12 @@ export type Category = (typeof CATEGORY_TAXONOMY)[number];
 
 export type CategorySource = "rule" | "manual" | "default";
 export type TransferState = "matched" | "uncertain" | "ignored";
+export type TransferDecision =
+  | "INTERNAL_OFFSET"
+  | "BOUNDARY_TRANSFER"
+  | "UNCERTAIN"
+  | "IGNORED";
+export type TransferKpiEffect = "EXCLUDED" | "INCLUDED";
 
 export type NormalizedTransaction = {
   id: string;
@@ -73,6 +79,10 @@ export type NormalizedTransaction = {
       descHints: string[];
       penalties: string[];
       score: number;
+      decision?: TransferDecision;
+      kpiEffect?: TransferKpiEffect;
+      why?: string;
+      sameFile?: boolean;
     };
   } | null;
 };
