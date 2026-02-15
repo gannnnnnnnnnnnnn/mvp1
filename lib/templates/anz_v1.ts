@@ -16,8 +16,22 @@ const AS_AT_RE =
 const TABLE_HEADER_RE =
   /DATE\s*DESCRIPTION\s*(?:CREDIT|DEPOSITS?)\s*(?:DEBIT|WITHDRAWALS?)\s*BALANCE/i;
 
-const STOP_MARKER_RE =
-  /(CLOSING\s+BALANCE|TOTAL\s+DEBITS|TOTAL\s+CREDITS|IMPORTANT\s+INFORMATION|TRANSACTION\s+SUMMARY|OPENING\s+BALANCE\s*-\s*TOTAL\s+DEBITS)/i;
+const TABLE_STOP_MARKERS: RegExp[] = [
+  /^Opening Balance\b/i,
+  /^Please check your statement\b/i,
+  /^If you notice any errors\b/i,
+  /^For information about your account\b/i,
+  /^Account Statement\b/i,
+  /^Australia and New Zealand Banking Group\b/i,
+  /^\s*AFSL\b/i,
+  /^\s*ABN\b/i,
+  /^\s*Page\s+\d+\s+of\s+\d+/i,
+  /^Closing Balance\b/i,
+  /^Total Debits\b/i,
+  /^Total Credits\b/i,
+  /^Important Information\b/i,
+  /^Transaction Summary\b/i,
+];
 
 const SHORT_MONTHS: Record<string, number> = {
   JAN: 0,
@@ -49,7 +63,10 @@ const LONG_MONTHS = [
   "DECEMBER",
 ] as const;
 
-const DATE_ROW_RE = /^(\d{1,2})\s+([A-Za-z]{3})(.*)$/;
+const TRANSACTION_ROW_RE =
+  /^\s*(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b(.*)$/i;
+const DATE_RANGE_HEADER_LINE_RE =
+  /^\s*\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\s*-\s*\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\s*$/i;
 
 const MONEY_TOKEN_RE = /\(?-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)?/g;
 
@@ -249,6 +266,14 @@ type TxBlock = {
   startLine: number;
 };
 
+type ParsedBlock = {
+  block: TxBlock;
+  descriptionRaw: string;
+  balance: number;
+  amountAbs?: number;
+  moneyTokens: string[];
+};
+
 function inferTransactionDateIso(params: {
   day: number;
   monthShort: string;
@@ -310,6 +335,10 @@ function inferTransactionDateIso(params: {
 function normalizeDescription(lines: string[], firstRemainder: string) {
   const merged = [firstRemainder, ...lines.slice(1)]
     .map((line) => line.trim())
+    .map((line) => {
+      const effective = /^Effective Date\b/i.exec(line);
+      return effective ? `| ${line}` : line;
+    })
     .filter(Boolean)
     .join(" ");
 
@@ -317,6 +346,15 @@ function normalizeDescription(lines: string[], firstRemainder: string) {
     .replace(/\s+/g, " ")
     .replace(/\s+\$/g, "")
     .trim();
+}
+
+function isStopMarkerLine(line: string) {
+  return TABLE_STOP_MARKERS.some((regex) => regex.test(line));
+}
+
+function getTransactionRowMatch(line: string) {
+  if (DATE_RANGE_HEADER_LINE_RE.test(line)) return null;
+  return TRANSACTION_ROW_RE.exec(line);
 }
 
 function parseAnzTransactions(params: {
@@ -353,7 +391,7 @@ function parseAnzTransactions(params: {
     const raw = lines[i].trim();
     if (!raw) continue;
 
-    if (STOP_MARKER_RE.test(raw)) {
+    if (isStopMarkerLine(raw)) {
       break;
     }
 
@@ -362,7 +400,7 @@ function parseAnzTransactions(params: {
       continue;
     }
 
-    const dateMatch = DATE_ROW_RE.exec(raw);
+    const dateMatch = getTransactionRowMatch(raw);
     if (dateMatch) {
       if (current) blocks.push(current);
       current = {
@@ -383,114 +421,63 @@ function parseAnzTransactions(params: {
 
   if (current) blocks.push(current);
 
-  const transactions: DevTemplateParseOutput["transactions"] = [];
-
+  const parsedBlocks: ParsedBlock[] = [];
   for (const block of blocks) {
-    const blockText = block.lines.join(" ");
-    const money = extractMoneyTokens(blockText);
+    const firstLineMoney = extractMoneyTokens(block.lines[0]);
+    const blockMoney =
+      firstLineMoney.length >= 2
+        ? firstLineMoney
+        : extractMoneyTokens(block.lines.join(" "));
 
-    if (money.length < 2) {
+    if (blockMoney.length < 1) {
       warnings.push({
         code: "ANZ_AMOUNT_OR_BALANCE_MISSING",
-        message: "Could not find both amount and balance in ANZ transaction block.",
+        message: "Could not find money tokens in ANZ transaction row.",
+        severity: "warning",
+        rawLine: block.lines[0],
+        lineIndex: block.startLine,
+        confidence: 0.35,
+      });
+      continue;
+    }
+
+    const balanceValue = blockMoney[blockMoney.length - 1].value;
+    if (!Number.isFinite(balanceValue)) {
+      warnings.push({
+        code: "ANZ_BALANCE_NOT_VALID",
+        message: "ANZ balance token was not a valid number.",
+        severity: "warning",
+        rawLine: block.lines[0],
+        lineIndex: block.startLine,
+        confidence: 0.3,
+      });
+      continue;
+    }
+
+    let amountAbs: number | undefined;
+    if (blockMoney.length >= 2) {
+      const amountCandidate = Math.abs(blockMoney[blockMoney.length - 2].value);
+      if (Number.isFinite(amountCandidate) && amountCandidate > 0) {
+        amountAbs = amountCandidate;
+      }
+    }
+
+    if (typeof amountAbs !== "number") {
+      warnings.push({
+        code: "ANZ_AMOUNT_OR_BALANCE_MISSING",
+        message: `Amount token missing on transaction row (tokens: ${blockMoney
+          .map((entry) => entry.token)
+          .join(", ") || "none"}).`,
         severity: "warning",
         rawLine: block.lines[0],
         lineIndex: block.startLine,
         confidence: 0.4,
       });
-      continue;
     }
 
-    const balanceValue = money[money.length - 1].value;
-    const amountCandidates = money.slice(0, -1).map((entry) => entry.value);
-    const amountAbs = Math.abs(amountCandidates[amountCandidates.length - 1]);
+    const descriptionRaw =
+      normalizeDescription(block.lines, block.firstRemainder) || "(no description)";
 
-    if (!Number.isFinite(balanceValue) || !Number.isFinite(amountAbs) || amountAbs === 0) {
-      warnings.push({
-        code: "ANZ_AMOUNT_NOT_VALID",
-        message: "ANZ amount candidate is invalid.",
-        severity: "warning",
-        rawLine: block.lines[0],
-        lineIndex: block.startLine,
-        confidence: 0.35,
-      });
-      continue;
-    }
-
-    const previousBalance =
-      transactions.length > 0 ? transactions[transactions.length - 1].balance : undefined;
-
-    let amountSigned: number | null = null;
-    const plusDelta =
-      typeof previousBalance === "number"
-        ? Math.abs(round2(previousBalance + amountAbs) - round2(balanceValue))
-        : null;
-    const minusDelta =
-      typeof previousBalance === "number"
-        ? Math.abs(round2(previousBalance - amountAbs) - round2(balanceValue))
-        : null;
-
-    if (plusDelta !== null && minusDelta !== null) {
-      if (plusDelta <= 0.01 && minusDelta > 0.01) {
-        amountSigned = amountAbs;
-      } else if (minusDelta <= 0.01 && plusDelta > 0.01) {
-        amountSigned = -amountAbs;
-      }
-    }
-
-    if (amountSigned === null) {
-      if (/(CREDIT|DEPOSIT|TRANSFER\s+FROM|REFUND|INTEREST\s+PAID|SALARY)/i.test(blockText)) {
-        amountSigned = amountAbs;
-      } else if (
-        /(DEBIT|TRANSFER\s+TO|WITHDRAWAL|PURCHASE|FEE|PAYMENT\s+TO|CARD|BPAY)/i.test(
-          blockText
-        )
-      ) {
-        amountSigned = -amountAbs;
-      }
-    }
-
-    if (amountSigned === null) {
-      const rawSigned = amountCandidates[amountCandidates.length - 1];
-      if (rawSigned < 0) {
-        amountSigned = -amountAbs;
-      } else {
-        amountSigned = -amountAbs;
-      }
-      warnings.push({
-        code: "ANZ_AMOUNT_SIGN_UNCERTAIN",
-        message:
-          "Amount sign was inferred with fallback heuristics; verify line if needed.",
-        severity: "warning",
-        rawLine: block.lines[0],
-        lineIndex: block.startLine,
-        confidence: 0.35,
-      });
-    }
-
-    const dateIso = inferTransactionDateIso({
-      day: block.day,
-      monthShort: block.monthShort,
-      coverageStart: params.coverage.startDate,
-      coverageEnd: params.coverage.endDate,
-      previousDate: transactions[transactions.length - 1]?.date,
-    });
-
-    if (!dateIso) {
-      warnings.push({
-        code: "ANZ_DATE_INFERENCE_FAILED",
-        message: "Failed to infer ANZ transaction year from statement context.",
-        severity: "warning",
-        rawLine: block.lines[0],
-        lineIndex: block.startLine,
-        confidence: 0.25,
-      });
-      continue;
-    }
-
-    const descriptionRaw = normalizeDescription(block.lines, block.firstRemainder) || "(no description)";
-
-    // Defensive: Effective Date continuation must not become a standalone tx description.
     if (/^EFFECTIVE\s+DATE\b/i.test(descriptionRaw) && block.lines.length === 1) {
       warnings.push({
         code: "ANZ_EFFECTIVE_DATE_STANDALONE_SKIPPED",
@@ -503,15 +490,119 @@ function parseAnzTransactions(params: {
       continue;
     }
 
+    parsedBlocks.push({
+      block,
+      descriptionRaw,
+      balance: round2(balanceValue),
+      amountAbs,
+      moneyTokens: blockMoney.map((entry) => entry.token),
+    });
+  }
+
+  // ANZ table rows are newest -> oldest. Reverse into chronological order for continuity checks.
+  const chronoBlocks = [...parsedBlocks].reverse();
+  const transactions: DevTemplateParseOutput["transactions"] = [];
+
+  for (const entry of chronoBlocks) {
+    const previousBalance =
+      transactions.length > 0 ? transactions[transactions.length - 1].balance : undefined;
+    const balance = entry.balance;
+    const deltaFromPrev =
+      typeof previousBalance === "number"
+        ? round2(balance - previousBalance)
+        : undefined;
+
+    const dateIso = inferTransactionDateIso({
+      day: entry.block.day,
+      monthShort: entry.block.monthShort,
+      coverageStart: params.coverage.startDate,
+      coverageEnd: params.coverage.endDate,
+      previousDate: transactions[transactions.length - 1]?.date,
+    });
+
+    if (!dateIso) {
+      warnings.push({
+        code: "ANZ_DATE_INFERENCE_FAILED",
+        message: "Failed to infer ANZ transaction year from statement context.",
+        severity: "warning",
+        rawLine: entry.block.lines[0],
+        lineIndex: entry.block.startLine,
+        confidence: 0.25,
+      });
+      continue;
+    }
+
+    let amountSigned: number | null = null;
+
+    if (typeof entry.amountAbs === "number" && typeof deltaFromPrev === "number") {
+      if (Math.abs(Math.abs(deltaFromPrev) - entry.amountAbs) <= 0.01 && Math.abs(deltaFromPrev) > 0) {
+        amountSigned = deltaFromPrev;
+      } else {
+        const plusHit = Math.abs(round2(previousBalance! + entry.amountAbs) - balance) <= 0.01;
+        const minusHit = Math.abs(round2(previousBalance! - entry.amountAbs) - balance) <= 0.01;
+        if (plusHit && !minusHit) amountSigned = entry.amountAbs;
+        if (minusHit && !plusHit) amountSigned = -entry.amountAbs;
+      }
+    }
+
+    if (amountSigned === null && typeof entry.amountAbs === "number") {
+      const blockText = entry.block.lines.join(" ");
+      if (/(CREDIT|DEPOSIT|TRANSFER\s+FROM|REFUND|INTEREST\s+PAID|SALARY)/i.test(blockText)) {
+        amountSigned = entry.amountAbs;
+      } else if (
+        /(DEBIT|TRANSFER\s+TO|WITHDRAWAL|PURCHASE|FEE|PAYMENT\s+TO|CARD|BPAY)/i.test(
+          blockText
+        )
+      ) {
+        amountSigned = -entry.amountAbs;
+      }
+    }
+
+    if (amountSigned === null && typeof deltaFromPrev === "number") {
+      amountSigned = deltaFromPrev;
+      warnings.push({
+        code: "ANZ_AMOUNT_INFERRED_FROM_BALANCE_DELTA",
+        message: `Amount inferred from balance delta (${deltaFromPrev.toFixed(2)}).`,
+        severity: "warning",
+        rawLine: entry.block.lines[0],
+        lineIndex: entry.block.startLine,
+        confidence: 0.7,
+      });
+    }
+
+    if (amountSigned === null && typeof entry.amountAbs === "number") {
+      amountSigned = -entry.amountAbs;
+      warnings.push({
+        code: "ANZ_AMOUNT_SIGN_UNCERTAIN",
+        message: `Amount sign uncertain; fell back to debit sign (tokens: ${entry.moneyTokens.join(", ") || "none"}).`,
+        severity: "warning",
+        rawLine: entry.block.lines[0],
+        lineIndex: entry.block.startLine,
+        confidence: 0.35,
+      });
+    }
+
+    if (amountSigned === null) {
+      warnings.push({
+        code: "ANZ_AMOUNT_NOT_VALID",
+        message: `ANZ amount candidate is invalid (tokens: ${entry.moneyTokens.join(", ") || "none"}).`,
+        severity: "warning",
+        rawLine: entry.block.lines[0],
+        lineIndex: entry.block.startLine,
+        confidence: 0.3,
+      });
+      continue;
+    }
+
     const direction = amountSigned >= 0 ? "credit" : "debit";
     const debit = amountSigned < 0 ? Math.abs(amountSigned) : undefined;
     const credit = amountSigned >= 0 ? Math.abs(amountSigned) : undefined;
 
     const id = createHash("sha1")
       .update(
-        `${params.input.fileHash || params.input.fileId}|${block.startLine}|${dateIso}|${round2(
+        `${params.input.fileHash || params.input.fileId}|${entry.block.startLine}|${dateIso}|${round2(
           amountSigned
-        ).toFixed(2)}|${descriptionRaw}`
+        ).toFixed(2)}|${entry.descriptionRaw}`
       )
       .digest("hex")
       .slice(0, 16);
@@ -519,50 +610,45 @@ function parseAnzTransactions(params: {
     transactions.push({
       id,
       date: dateIso,
-      descriptionRaw,
+      descriptionRaw: entry.descriptionRaw,
       amount: round2(amountSigned),
       direction,
       debit,
       credit,
-      balance: round2(balanceValue),
+      balance,
       bankId: "anz",
       accountId: params.accountId,
       templateId: "anz_v1",
-      confidence: block.lines.length > 1 ? 0.88 : 0.95,
-      rawLine: block.lines[0],
-      rawLines: block.lines,
+      confidence:
+        typeof entry.amountAbs === "number"
+          ? entry.block.lines.length > 1
+            ? 0.88
+            : 0.95
+          : 0.8,
+      rawLine: entry.block.lines[0],
+      rawLines: entry.block.lines,
       source: {
         fileId: params.input.fileId,
         fileHash: params.input.fileHash,
-        rowIndex: block.startLine,
+        rowIndex: entry.block.startLine,
         parserVersion: `anz_v1_${params.mode}`,
       },
     });
   }
 
-  const assess = (mode: "ascending" | "descending") => {
-    let checked = 0;
-    let pass = 0;
-    for (let i = 1; i < transactions.length; i += 1) {
-      const prev = transactions[i - 1];
-      const curr = transactions[i];
-      if (typeof prev.balance !== "number" || typeof curr.balance !== "number") continue;
-      checked += 1;
-
-      const hit =
-        mode === "ascending"
-          ? Math.abs(round2(prev.balance + curr.amount) - round2(curr.balance)) <= 0.01
-          : Math.abs(round2(curr.balance + prev.amount) - round2(prev.balance)) <= 0.01;
-      if (hit) pass += 1;
+  let checkedCount = 0;
+  let continuityPass = 0;
+  for (let i = 1; i < transactions.length; i += 1) {
+    const prev = transactions[i - 1];
+    const curr = transactions[i];
+    if (typeof prev.balance !== "number" || typeof curr.balance !== "number") continue;
+    checkedCount += 1;
+    if (Math.abs(round2(prev.balance + curr.amount) - round2(curr.balance)) <= 0.01) {
+      continuityPass += 1;
     }
-    return { checked, ratio: checked > 0 ? pass / checked : 1 };
-  };
+  }
+  const continuityRatio = checkedCount > 0 ? continuityPass / checkedCount : 1;
 
-  const asc = assess("ascending");
-  const desc = assess("descending");
-  const best = asc.ratio >= desc.ratio ? asc : desc;
-  const checkedCount = best.checked;
-  const continuityRatio = best.ratio;
   if (checkedCount >= 5 && continuityRatio < 0.995) {
     warnings.push({
       code: "ANZ_BALANCE_CONTINUITY_LOW",
