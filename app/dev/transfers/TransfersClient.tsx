@@ -184,6 +184,10 @@ function toWhyLabel(row: MatchRow) {
   return row.whySentence;
 }
 
+function boundaryMembershipLabel(accountId: string, boundaryAccountIds: string[]) {
+  return boundaryAccountIds.includes(accountId) ? "inside" : "outside";
+}
+
 export default function TransfersClient() {
   const [bankId, setBankId] = useState("");
   const [accountId, setAccountId] = useState("");
@@ -794,6 +798,17 @@ export default function TransfersClient() {
                         {selected.kpiEffect === "EXCLUDED" ? "No" : "Yes"}
                       </div>
                       <div className="md:col-span-2">
+                        <span className="font-medium text-slate-900">Boundary membership:</span>{" "}
+                        A={boundaryMembershipLabel(
+                          selected.a.accountId,
+                          summary?.boundary.boundaryAccountIds || []
+                        )}{" "}
+                        · B={boundaryMembershipLabel(
+                          selected.b.accountId,
+                          summary?.boundary.boundaryAccountIds || []
+                        )}
+                      </div>
+                      <div className="md:col-span-2">
                         <span className="font-medium text-slate-900">A contribution:</span>{" "}
                         {selected.a.amountSigned < 0 ? "Debit (outflow)" : "Credit (inflow)"}{" "}
                         {CURRENCY.format(selected.a.amountSigned)}
@@ -831,10 +846,21 @@ export default function TransfersClient() {
   {
     decision: selected.decision,
     kpiEffect: selected.kpiEffect,
+    transferState: toTransferState(selected),
     sameFile: selected.sameFile,
     whySentence: selected.whySentence,
+    boundaryA: boundaryMembershipLabel(
+      selected.a.accountId,
+      summary?.boundary.boundaryAccountIds || []
+    ),
+    boundaryB: boundaryMembershipLabel(
+      selected.b.accountId,
+      summary?.boundary.boundaryAccountIds || []
+    ),
     sourceA: selected.a.source,
     sourceB: selected.b.source,
+    fileHashA: selected.a.source.fileHash || null,
+    fileHashB: selected.b.source.fileHash || null,
   },
   null,
   2
