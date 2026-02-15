@@ -15,12 +15,16 @@ export async function GET(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const { scope, params, result } = await runTransferInspector(searchParams);
+    const { scope, params, loaded, result } = await runTransferInspector(searchParams);
 
     return NextResponse.json({
       ok: true,
       scope,
       params,
+      options: {
+        bankIds: loaded.bankIds || [],
+        accountIds: loaded.accountIds || [],
+      },
       stats: result.stats,
     });
   } catch (err: unknown) {
