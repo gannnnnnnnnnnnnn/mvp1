@@ -25,6 +25,27 @@ const CURRENCY = new Intl.NumberFormat("en-AU", {
   maximumFractionDigits: 2,
 });
 
+type BoundaryConfig = {
+  version: 1;
+  mode: "customAccounts";
+  boundaryAccountIds: string[];
+  lastUpdatedAt: string;
+};
+
+type KnownAccount = {
+  bankId: string;
+  accountId: string;
+  fileCount: number;
+  dateRange?: { from: string; to: string };
+};
+
+type BoundaryResponse = {
+  ok: true;
+  config: BoundaryConfig;
+  knownAccounts: KnownAccount[];
+  needsSetup: boolean;
+};
+
 export default function Phase3DatasetHomePage() {
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [scopeMode, setScopeMode] = useState<ScopeMode>("all");
@@ -34,6 +55,11 @@ export default function Phase3DatasetHomePage() {
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [boundary, setBoundary] = useState<BoundaryResponse | null>(null);
+  const [boundaryModalOpen, setBoundaryModalOpen] = useState(false);
+  const [boundaryDraft, setBoundaryDraft] = useState<string[]>([]);
+  const [boundarySaving, setBoundarySaving] = useState(false);
+  const [boundaryStatus, setBoundaryStatus] = useState("");
 
   const selectedFileNames = useMemo(
     () =>
@@ -65,6 +91,21 @@ export default function Phase3DatasetHomePage() {
       throw new Error(`${data.error.code}: ${data.error.message}`);
     }
     setFiles(data.files);
+  }
+
+  async function fetchBoundary() {
+    try {
+      const res = await fetch("/api/analysis/boundary", { cache: "no-store" });
+      const data = (await res.json()) as BoundaryResponse | { ok: false; error: ApiError };
+      if (!data.ok) {
+        setError(data.error);
+        return;
+      }
+      setBoundary(data);
+      setBoundaryDraft(data.config.boundaryAccountIds);
+    } catch {
+      setError({ code: "BOUNDARY_FAILED", message: "Failed to load boundary config." });
+    }
   }
 
   async function fetchOverview(
@@ -117,6 +158,7 @@ export default function Phase3DatasetHomePage() {
       parsed.bankId || "",
       parsed.accountId || ""
     );
+    void fetchBoundary();
   }, []);
 
   useEffect(() => {
@@ -138,6 +180,43 @@ export default function Phase3DatasetHomePage() {
 
   const bankOptions = useMemo(() => overview?.bankIds || [], [overview?.bankIds]);
   const accountOptions = useMemo(() => overview?.accountIds || [], [overview?.accountIds]);
+  const boundaryNeedsSetup = Boolean(
+    boundary && (boundary.needsSetup || boundary.config.boundaryAccountIds.length === 0)
+  );
+
+  function toggleBoundaryAccount(accountId: string) {
+    setBoundaryDraft((prev) => {
+      if (prev.includes(accountId)) {
+        return prev.filter((id) => id !== accountId);
+      }
+      return [...prev, accountId].sort();
+    });
+  }
+
+  async function saveBoundaryConfig() {
+    setBoundarySaving(true);
+    setBoundaryStatus("");
+    try {
+      const res = await fetch("/api/analysis/boundary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ boundaryAccountIds: boundaryDraft }),
+      });
+      const data = (await res.json()) as BoundaryResponse | { ok: false; error: ApiError };
+      if (!data.ok) {
+        setBoundaryStatus(`${data.error.code}: ${data.error.message}`);
+        return;
+      }
+      setBoundary(data);
+      setBoundaryDraft(data.config.boundaryAccountIds);
+      setBoundaryStatus("Saved.");
+      setBoundaryModalOpen(false);
+    } catch {
+      setBoundaryStatus("Failed to save boundary config.");
+    } finally {
+      setBoundarySaving(false);
+    }
+  }
 
   function applyScopeAndFetch(
     nextScopeMode: ScopeMode,
@@ -279,6 +358,26 @@ export default function Phase3DatasetHomePage() {
             </div>
           )}
         </section>
+
+        {boundaryNeedsSetup && (
+          <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="font-medium">Select boundary accounts</div>
+                <div className="text-xs text-blue-800">
+                  Used to offset internal transfers. Accounts inside boundary can offset each other.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBoundaryModalOpen(true)}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+              >
+                Configure
+              </button>
+            </div>
+          </section>
+        )}
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -445,6 +544,81 @@ export default function Phase3DatasetHomePage() {
               </div>
             ) : null}
           </section>
+        )}
+
+        {boundaryModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+            <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-slate-900">Boundary Accounts</h2>
+                <button
+                  type="button"
+                  onClick={() => setBoundaryModalOpen(false)}
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  Close
+                </button>
+              </div>
+              <p className="mt-1 text-sm text-slate-600">
+                Select account IDs inside your reporting boundary.
+              </p>
+
+              <div className="mt-3 max-h-72 space-y-2 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-3">
+                {(boundary?.knownAccounts || []).map((account) => {
+                  const checked = boundaryDraft.includes(account.accountId);
+                  return (
+                    <label
+                      key={`${account.bankId}:${account.accountId}`}
+                      className="flex cursor-pointer items-start gap-2 rounded border border-slate-200 bg-white px-3 py-2"
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                        checked={checked}
+                        onChange={() => toggleBoundaryAccount(account.accountId)}
+                      />
+                      <span className="text-xs text-slate-700">
+                        <span className="font-medium text-slate-900">
+                          {account.bankId} · {account.accountId}
+                        </span>
+                        <span className="ml-2 text-slate-500">
+                          files: {account.fileCount}
+                          {account.dateRange
+                            ? ` · ${account.dateRange.from} → ${account.dateRange.to}`
+                            : ""}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+                {boundary && boundary.knownAccounts.length === 0 && (
+                  <p className="text-xs text-slate-500">No known accounts yet. Upload and parse files first.</p>
+                )}
+              </div>
+
+              {boundaryStatus && (
+                <p className="mt-2 text-xs text-slate-600">{boundaryStatus}</p>
+              )}
+
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBoundaryModalOpen(false)}
+                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveBoundaryConfig()}
+                  disabled={boundarySaving}
+                  className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                >
+                  {boundarySaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </main>
