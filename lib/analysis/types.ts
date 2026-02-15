@@ -20,6 +20,7 @@ export const CATEGORY_TAXONOMY = [
 export type Category = (typeof CATEGORY_TAXONOMY)[number];
 
 export type CategorySource = "rule" | "manual" | "default";
+export type TransferState = "matched" | "uncertain" | "ignored";
 
 export type NormalizedTransaction = {
   id: string;
@@ -60,10 +61,19 @@ export type NormalizedTransaction = {
   };
   transfer?: {
     matchId: string;
+    state?: TransferState;
     role: "out" | "in";
     counterpartyTransactionId: string;
-    method: "amount_time_window_v1";
+    method: "amount_time_window_v1" | "amount_time_window_v2";
     confidence: number;
+    explain?: {
+      amountCents: number;
+      dateDiffDays: number;
+      sameAccount: boolean;
+      descHints: string[];
+      penalties: string[];
+      score: number;
+    };
   } | null;
 };
 

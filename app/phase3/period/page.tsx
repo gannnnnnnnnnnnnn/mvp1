@@ -51,10 +51,17 @@ type DrilldownTx = {
   source: { fileId: string };
   transfer?: {
     matchId: string;
+    state?: "matched" | "uncertain" | "ignored";
     role: "out" | "in";
     counterpartyTransactionId: string;
     method: string;
     confidence: number;
+    explain?: {
+      dateDiffDays?: number;
+      descHints?: string[];
+      penalties?: string[];
+      score?: number;
+    };
   } | null;
 };
 
@@ -1079,6 +1086,8 @@ export default function Phase3PeriodPage() {
             </div>
             <div className="mt-1 text-xs text-slate-500">
               matched: {overview?.transferStats?.matchedTransferCount || 0}
+              {" · "}
+              uncertain: {overview?.transferStats?.uncertainTransferCount || 0}
             </div>
           </article>
         </section>
@@ -1250,9 +1259,25 @@ export default function Phase3PeriodPage() {
                       </span>
                     )}
                     {tx.transfer?.matchId && (
-                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-800">
-                        Transfer matched · {tx.transfer.role} · pair {tx.transfer.counterpartyTransactionId.slice(0, 8)}
-                      </span>
+                      <>
+                        {tx.transfer.state === "uncertain" ? (
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                            Transfer uncertain · conf {tx.transfer.confidence.toFixed(2)} · pair{" "}
+                            {tx.transfer.counterpartyTransactionId.slice(0, 8)}
+                          </span>
+                        ) : (
+                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-800">
+                            Transfer matched · {tx.transfer.role} · pair{" "}
+                            {tx.transfer.counterpartyTransactionId.slice(0, 8)}
+                          </span>
+                        )}
+                        {tx.transfer.explain && (
+                          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-slate-700">
+                            score {tx.transfer.explain.score?.toFixed(2) || "-"} · d
+                            {tx.transfer.explain.dateDiffDays ?? "-"}
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                   <div className="mt-2 flex items-center gap-2">

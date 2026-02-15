@@ -3,7 +3,7 @@ import { normalizeParsedTransactions } from "@/lib/analysis/normalize";
 import { readCategoryOverrides } from "@/lib/analysis/overridesStore";
 import { Category, NormalizedTransaction } from "@/lib/analysis/types";
 import { loadParsedTransactions } from "@/lib/analysis/loadParsed";
-import { matchTransfers } from "@/lib/analysis/transfers/matchTransfers";
+import { matchTransfersV2 } from "@/lib/analysis/transfers/matchTransfersV2";
 import { findById, readIndex } from "@/lib/fileStore";
 
 export type Granularity = "month" | "week";
@@ -42,6 +42,88 @@ export type AppliedFilters = {
   // Balance chart stays scoped (file/account) for now; no mixed-file household balance yet.
   balanceScope: "file" | "account" | "none";
 };
+
+const DEFAULT_TRANSFER_V2_PARAMS = {
+  windowDays: 1,
+  minMatched: 0.85,
+  minUncertain: 0.6,
+} as const;
+
+type TransferV2Row = ReturnType<typeof matchTransfersV2>["rows"][number];
+
+function transferFromV2Row(row: TransferV2Row, side: "a" | "b"): NonNullable<NormalizedTransaction["transfer"]> {
+  const isOut = side === "a";
+  const other = isOut ? row.b : row.a;
+
+  return {
+    matchId: row.matchId,
+    state: row.state,
+    role: isOut ? "out" : "in",
+    counterpartyTransactionId: other.transactionId,
+    method: "amount_time_window_v2",
+    confidence: row.confidence,
+    explain: {
+      amountCents: row.explain.amountCents,
+      dateDiffDays: row.explain.dateDiffDays,
+      sameAccount: row.explain.sameAccount,
+      descHints: row.explain.descHints,
+      penalties: row.explain.penalties,
+      score: row.explain.score,
+    },
+  };
+}
+
+function normalizeLegacyTransfer(existing: NormalizedTransaction["transfer"] | null | undefined) {
+  if (!existing) return null;
+  if (existing.state) return existing;
+  if (existing.matchId) {
+    return {
+      ...existing,
+      state: "matched" as const,
+    };
+  }
+  return existing;
+}
+
+function mergeTransferMetadata(
+  existing: NormalizedTransaction["transfer"] | null | undefined,
+  candidate: NormalizedTransaction["transfer"] | null | undefined
+) {
+  const normalizedExisting = normalizeLegacyTransfer(existing);
+  if (!normalizedExisting && !candidate) return null;
+  if (!normalizedExisting) return candidate || null;
+  if (!candidate) return normalizedExisting;
+
+  if (normalizedExisting.method === "amount_time_window_v1") {
+    // Backward-compatible deterministic policy:
+    // keep v1 transfer unless v2 provides an equal/higher-confidence matched state.
+    const shouldUpgrade =
+      candidate.state === "matched" && candidate.confidence >= normalizedExisting.confidence;
+    return shouldUpgrade ? candidate : normalizedExisting;
+  }
+
+  if (candidate.state === "matched" && normalizedExisting.state !== "matched") {
+    return candidate;
+  }
+
+  return candidate.confidence >= normalizedExisting.confidence ? candidate : normalizedExisting;
+}
+
+function annotateTransfersWithV2(transactions: NormalizedTransaction[]) {
+  const v2 = matchTransfersV2(transactions, DEFAULT_TRANSFER_V2_PARAMS);
+  const candidates = new Map<string, NonNullable<NormalizedTransaction["transfer"]>>();
+
+  for (const row of v2.rows) {
+    candidates.set(row.a.transactionId, transferFromV2Row(row, "a"));
+    candidates.set(row.b.transactionId, transferFromV2Row(row, "b"));
+  }
+
+  return transactions.map((tx) => {
+    const candidate = candidates.get(tx.id) || null;
+    const transfer = mergeTransferMetadata(tx.transfer, candidate);
+    return { ...tx, transfer };
+  });
+}
 
 function startOfMonth(date: Date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
@@ -223,7 +305,10 @@ export function runAnalysisCore(params: {
   });
 
   const matchedTransfers = filtered.filter(
-    (tx) => tx.transfer?.matchId && tx.transfer.role === "out"
+    (tx) => tx.transfer?.state === "matched" && tx.transfer.role === "out"
+  );
+  const uncertainTransfers = filtered.filter(
+    (tx) => tx.transfer?.state === "uncertain" && tx.transfer.role === "out"
   );
   const matchedTransferCount = new Set(
     matchedTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
@@ -232,10 +317,18 @@ export function runAnalysisCore(params: {
     (sum, tx) => sum + Math.abs(tx.amount),
     0
   );
+  const uncertainTransferCount = new Set(
+    uncertainTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
+  ).size;
+  const uncertainTransferTotal = uncertainTransfers.reduce(
+    (sum, tx) => sum + Math.abs(tx.amount),
+    0
+  );
 
   const transferFiltered = filtered.filter((tx) => {
     if (showTransfers === "all") return true;
-    const matched = Boolean(tx.transfer?.matchId);
+    const state = tx.transfer?.state || (tx.transfer?.matchId ? "matched" : undefined);
+    const matched = state === "matched";
     if (showTransfers === "onlyMatched") return matched;
     return !matched;
   });
@@ -269,6 +362,8 @@ export function runAnalysisCore(params: {
     transferStats: {
       matchedTransferCount,
       matchedTransferTotal,
+      uncertainTransferCount,
+      uncertainTransferTotal,
     },
     appliedFilters,
   };
@@ -338,8 +433,7 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
 
   const txCountBeforeDedupe = allNormalized.length;
   const dedupedTransactions = dedupeTransactions(allNormalized);
-  const transferMatched = matchTransfers(dedupedTransactions);
-  const annotatedTransactions = transferMatched.annotatedTransactions;
+  const annotatedTransactions = annotateTransfersWithV2(dedupedTransactions);
   const dedupedCount = txCountBeforeDedupe - dedupedTransactions.length;
   const datasetCoverage = buildDatasetCoverage(annotatedTransactions);
 

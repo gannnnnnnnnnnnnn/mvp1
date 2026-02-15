@@ -83,6 +83,8 @@ export type OverviewResponse = {
   transferStats?: {
     matchedTransferCount: number;
     matchedTransferTotal: number;
+    uncertainTransferCount?: number;
+    uncertainTransferTotal?: number;
   };
 };
 
