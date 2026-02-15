@@ -348,6 +348,13 @@ export default function Phase3DatasetHomePage() {
               continuity: {(overview.quality?.balanceContinuityPassRate || 0).toFixed(3)} · checked: {overview.quality?.balanceContinuityChecked || 0}
             </div>
             <div>dedupedCount: {overview.dedupedCount || 0}</div>
+            {process.env.NODE_ENV !== "production" ? (
+              <div className="mt-1">
+                <a href="/dev/playground" className="font-medium text-blue-700 hover:text-blue-800">
+                  Open Dev Playground
+                </a>
+              </div>
+            ) : null}
           </section>
         )}
       </div>
