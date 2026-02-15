@@ -49,6 +49,13 @@ type DrilldownTx = {
   categorySource: "rule" | "manual" | "default";
   quality: { confidence: number; warnings: string[] };
   source: { fileId: string };
+  transfer?: {
+    matchId: string;
+    role: "out" | "in";
+    counterpartyTransactionId: string;
+    method: string;
+    confidence: number;
+  } | null;
 };
 
 type UnknownMerchantItem = {
@@ -229,6 +236,7 @@ export default function Phase3PeriodPage() {
 
   const [periodType, setPeriodType] = useState<PeriodType>("month");
   const [periodKey, setPeriodKey] = useState("");
+  const [excludeMatchedTransfers, setExcludeMatchedTransfers] = useState(true);
 
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -400,49 +408,54 @@ export default function Phase3PeriodPage() {
     setFiles(data.files);
   }
 
-  async function fetchPeriodOverview(
-    nextScope: ScopeMode,
-    nextIds: string[],
-    nextType: PeriodType,
-    nextKey: string,
-    nextBankId: string,
-    nextAccountId: string
-  ) {
-    setIsLoading(true);
-    setError(null);
+  const fetchPeriodOverview = useCallback(
+    async (
+      nextScope: ScopeMode,
+      nextIds: string[],
+      nextType: PeriodType,
+      nextKey: string,
+      nextBankId: string,
+      nextAccountId: string,
+      nextShowTransfers: "excludeMatched" | "all"
+    ) => {
+      setIsLoading(true);
+      setError(null);
 
-    try {
-      const params = buildScopeParams(nextScope, nextIds, {
-        bankId: nextBankId || undefined,
-        accountId: nextAccountId || undefined,
-      });
-      params.set("granularity", nextType === "month" ? "week" : "month");
-      const range = periodRange(nextType, nextKey);
-      if (range) {
-        params.set("dateFrom", range.dateFrom);
-        params.set("dateTo", range.dateTo);
-      }
+      try {
+        const params = buildScopeParams(nextScope, nextIds, {
+          bankId: nextBankId || undefined,
+          accountId: nextAccountId || undefined,
+        });
+        params.set("granularity", nextType === "month" ? "week" : "month");
+        const range = periodRange(nextType, nextKey);
+        if (range) {
+          params.set("dateFrom", range.dateFrom);
+          params.set("dateTo", range.dateTo);
+        }
+        params.set("showTransfers", nextShowTransfers);
 
-      const res = await fetch(`/api/analysis/overview?${params.toString()}`);
-      const data = (await res.json()) as OverviewResponse | { ok: false; error: ApiError };
-      if (!data.ok) {
+        const res = await fetch(`/api/analysis/overview?${params.toString()}`);
+        const data = (await res.json()) as OverviewResponse | { ok: false; error: ApiError };
+        if (!data.ok) {
+          setOverview(null);
+          setError(data.error);
+          return;
+        }
+
+        setOverview(data);
+        const nextAvailableKeys = availableKeysByType(data, nextType);
+        if (!nextKey && nextAvailableKeys.length > 0) {
+          setPeriodKey(nextAvailableKeys[nextAvailableKeys.length - 1]);
+        }
+      } catch {
         setOverview(null);
-        setError(data.error);
-        return;
+        setError({ code: "FETCH_FAILED", message: "Failed to load specific period data." });
+      } finally {
+        setIsLoading(false);
       }
-
-      setOverview(data);
-      const nextAvailableKeys = availableKeysByType(data, nextType);
-      if (!nextKey && nextAvailableKeys.length > 0) {
-        setPeriodKey(nextAvailableKeys[nextAvailableKeys.length - 1]);
-      }
-    } catch {
-      setOverview(null);
-      setError({ code: "FETCH_FAILED", message: "Failed to load specific period data." });
-    } finally {
-      setIsLoading(false);
-    }
-  }
+    },
+    []
+  );
 
   const fetchCategoryDrilldown = useCallback(
     async (category: string) => {
@@ -461,6 +474,7 @@ export default function Phase3PeriodPage() {
           params.set("dateTo", range.dateTo);
         }
         params.set("category", category);
+        params.set("showTransfers", excludeMatchedTransfers ? "excludeMatched" : "all");
 
         const res = await fetch(`/api/analysis/transactions?${params.toString()}`);
         const data = (await res.json()) as
@@ -481,7 +495,15 @@ export default function Phase3PeriodPage() {
         setDrilldownLoading(false);
       }
     },
-    [scopeMode, selectedFileIds, selectedBankId, selectedAccountId, periodType, periodKey]
+    [
+      scopeMode,
+      selectedFileIds,
+      selectedBankId,
+      selectedAccountId,
+      periodType,
+      periodKey,
+      excludeMatchedTransfers,
+    ]
   );
 
   const fetchTriage = useCallback(async () => {
@@ -498,6 +520,7 @@ export default function Phase3PeriodPage() {
         params.set("dateFrom", range.dateFrom);
         params.set("dateTo", range.dateTo);
       }
+      params.set("showTransfers", excludeMatchedTransfers ? "excludeMatched" : "all");
 
       const res = await fetch(`/api/analysis/triage/unknown-merchants?${params.toString()}`);
       const data = (await res.json()) as
@@ -526,7 +549,15 @@ export default function Phase3PeriodPage() {
     } finally {
       setTriageLoading(false);
     }
-  }, [scopeMode, selectedFileIds, selectedBankId, selectedAccountId, periodType, periodKey]);
+  }, [
+    scopeMode,
+    selectedFileIds,
+    selectedBankId,
+    selectedAccountId,
+    periodType,
+    periodKey,
+    excludeMatchedTransfers,
+  ]);
 
   const applyMerchantCategory = useCallback(async () => {
     if (!selectedMerchant) return;
@@ -558,7 +589,8 @@ export default function Phase3PeriodPage() {
           periodType,
           periodKey,
           selectedBankId,
-          selectedAccountId
+          selectedAccountId,
+          excludeMatchedTransfers ? "excludeMatched" : "all"
         ),
         fetchTriage(),
       ]);
@@ -579,6 +611,8 @@ export default function Phase3PeriodPage() {
     periodKey,
     selectedBankId,
     selectedAccountId,
+    excludeMatchedTransfers,
+    fetchPeriodOverview,
     fetchTriage,
     selectedCategory,
     fetchCategoryDrilldown,
@@ -686,9 +720,10 @@ export default function Phase3PeriodPage() {
       period.type,
       period.key,
       parsed.bankId || "",
-      parsed.accountId || ""
+      parsed.accountId || "",
+      "excludeMatched"
     );
-  }, []);
+  }, [fetchPeriodOverview]);
 
   useEffect(() => {
     const params = buildScopeParams(scopeMode, selectedFileIds, {
@@ -786,9 +821,19 @@ export default function Phase3PeriodPage() {
       periodType,
       periodKey,
       selectedBankId,
-      selectedAccountId
+      selectedAccountId,
+      excludeMatchedTransfers ? "excludeMatched" : "all"
     );
-  }, [periodType, periodKey, scopeMode, selectedFileIds, selectedBankId, selectedAccountId]);
+  }, [
+    periodType,
+    periodKey,
+    scopeMode,
+    selectedFileIds,
+    selectedBankId,
+    selectedAccountId,
+    excludeMatchedTransfers,
+    fetchPeriodOverview,
+  ]);
 
   const timelineAriaLabel = `${periodType} timeline`;
 
@@ -876,7 +921,8 @@ export default function Phase3PeriodPage() {
                     periodType,
                     periodKey,
                     selectedBankId,
-                    selectedAccountId
+                    selectedAccountId,
+                    excludeMatchedTransfers ? "excludeMatched" : "all"
                   )
                 }
                 disabled={
@@ -889,6 +935,16 @@ export default function Phase3PeriodPage() {
                 {isLoading ? "Loading..." : "Refresh"}
               </button>
             </div>
+
+            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 lg:col-span-2 lg:justify-end">
+              <input
+                type="checkbox"
+                checked={excludeMatchedTransfers}
+                onChange={(e) => setExcludeMatchedTransfers(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              />
+              Exclude matched transfers
+            </label>
           </div>
 
           <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -988,7 +1044,7 @@ export default function Phase3PeriodPage() {
           )}
         </section>
 
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <article
             ref={triageSectionRef}
             className={`rounded-2xl border bg-white p-6 shadow-sm transition ${
@@ -1012,6 +1068,15 @@ export default function Phase3PeriodPage() {
               className={`mt-3 text-3xl font-semibold ${(overview?.totals.net || 0) >= 0 ? "text-emerald-700" : "text-rose-700"}`}
             >
               {CURRENCY.format(overview?.totals.net || 0)}
+            </div>
+          </article>
+          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="text-xs uppercase tracking-wide text-slate-500">Transfers</div>
+            <div className="mt-3 text-3xl font-semibold text-slate-900">
+              {CURRENCY.format(overview?.transferStats?.matchedTransferTotal || 0)}
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              matched: {overview?.transferStats?.matchedTransferCount || 0}
             </div>
           </article>
         </section>
@@ -1180,6 +1245,11 @@ export default function Phase3PeriodPage() {
                     {tx.categorySource !== "default" && tx.category !== "Other" && tx.quality.confidence >= 0.6 && (
                       <span className="rounded bg-slate-200 px-1.5 py-0.5 text-slate-700">
                         In selected category
+                      </span>
+                    )}
+                    {tx.transfer?.matchId && (
+                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-800">
+                        Transfer matched · {tx.transfer.role} · pair {tx.transfer.counterpartyTransactionId.slice(0, 8)}
                       </span>
                     )}
                   </div>
