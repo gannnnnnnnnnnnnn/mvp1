@@ -3,6 +3,7 @@ import { normalizeParsedTransactions } from "@/lib/analysis/normalize";
 import { readCategoryOverrides } from "@/lib/analysis/overridesStore";
 import { Category, NormalizedTransaction } from "@/lib/analysis/types";
 import { loadParsedTransactions } from "@/lib/analysis/loadParsed";
+import { matchTransfers } from "@/lib/analysis/transfers/matchTransfers";
 import { findById, readIndex } from "@/lib/fileStore";
 
 export type Granularity = "month" | "week";
@@ -23,6 +24,7 @@ export type AnalysisOptions = {
   q?: string;
   category?: Category;
   granularity?: Granularity;
+  showTransfers?: "all" | "excludeMatched" | "onlyMatched";
 };
 
 export type AppliedFilters = {
@@ -36,6 +38,7 @@ export type AppliedFilters = {
   q?: string;
   category?: Category;
   granularity?: Granularity;
+  showTransfers?: "all" | "excludeMatched" | "onlyMatched";
   // Balance chart stays scoped (file/account) for now; no mixed-file household balance yet.
   balanceScope: "file" | "account" | "none";
 };
@@ -198,6 +201,7 @@ export function runAnalysisCore(params: {
   const resolvedAccountId =
     options.accountId || (uniqueAccountIds.length === 1 ? uniqueAccountIds[0] : undefined);
 
+  const showTransfers = params.options.showTransfers || "excludeMatched";
   const filtered = transactions.filter((tx) => {
     if (options.fileId && tx.source.fileId !== options.fileId) return false;
     if (targetFileIds.length > 0 && !targetFileIds.includes(tx.source.fileId)) return false;
@@ -218,6 +222,24 @@ export function runAnalysisCore(params: {
     return true;
   });
 
+  const matchedTransfers = filtered.filter(
+    (tx) => tx.transfer?.matchId && tx.transfer.role === "out"
+  );
+  const matchedTransferCount = new Set(
+    matchedTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
+  ).size;
+  const matchedTransferTotal = matchedTransfers.reduce(
+    (sum, tx) => sum + Math.abs(tx.amount),
+    0
+  );
+
+  const transferFiltered = filtered.filter((tx) => {
+    if (showTransfers === "all") return true;
+    const matched = Boolean(tx.transfer?.matchId);
+    if (showTransfers === "onlyMatched") return matched;
+    return !matched;
+  });
+
   const scope: AnalysisScope =
     options.scope || (options.fileId ? "file" : targetFileIds.length > 0 ? "selected" : "service");
 
@@ -232,8 +254,9 @@ export function runAnalysisCore(params: {
     q: options.q,
     category: options.category,
     granularity: options.granularity,
+    showTransfers,
     balanceScope: resolveBalanceScope({
-      transactions: filtered,
+      transactions: transferFiltered,
       fileId: resolvedFileId,
       accountId: resolvedAccountId,
       selectedFileCount: targetFileIds.length,
@@ -242,7 +265,11 @@ export function runAnalysisCore(params: {
   };
 
   return {
-    transactions: filtered,
+    transactions: transferFiltered,
+    transferStats: {
+      matchedTransferCount,
+      matchedTransferTotal,
+    },
     appliedFilters,
   };
 }
@@ -311,11 +338,13 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
 
   const txCountBeforeDedupe = allNormalized.length;
   const dedupedTransactions = dedupeTransactions(allNormalized);
+  const transferMatched = matchTransfers(dedupedTransactions);
+  const annotatedTransactions = transferMatched.annotatedTransactions;
   const dedupedCount = txCountBeforeDedupe - dedupedTransactions.length;
-  const datasetCoverage = buildDatasetCoverage(dedupedTransactions);
+  const datasetCoverage = buildDatasetCoverage(annotatedTransactions);
 
   const core = runAnalysisCore({
-    transactions: dedupedTransactions,
+    transactions: annotatedTransactions,
     options: {
       ...params,
       fileIds: targetFileIds,
@@ -324,9 +353,9 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
     },
   });
 
-  const uniqueAccountIds = [...new Set(dedupedTransactions.map((tx) => tx.accountId))];
+  const uniqueAccountIds = [...new Set(annotatedTransactions.map((tx) => tx.accountId))];
   const scopedTemplateTypes = new Set(core.transactions.map((tx) => tx.templateId));
-  const fallbackTemplateTypes = new Set(dedupedTransactions.map((tx) => tx.templateId));
+  const fallbackTemplateTypes = new Set(annotatedTransactions.map((tx) => tx.templateId));
 
   return {
     fileId: params.fileId,
@@ -356,7 +385,8 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
     },
     needsReview: reviewReasonSet.size > 0,
     transactions: core.transactions,
-    allTransactions: dedupedTransactions,
+    allTransactions: annotatedTransactions,
+    transferStats: core.transferStats,
     appliedFilters: core.appliedFilters,
   };
 }

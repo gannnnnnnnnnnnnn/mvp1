@@ -29,6 +29,11 @@ function isCategory(value: string) {
   return CATEGORY_TAXONOMY.includes(value as (typeof CATEGORY_TAXONOMY)[number]);
 }
 
+function parseShowTransfers(value: string | null): "all" | "excludeMatched" | "onlyMatched" {
+  if (value === "all" || value === "onlyMatched") return value;
+  return "excludeMatched";
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const fileId = (searchParams.get("fileId") || "").trim();
@@ -53,6 +58,7 @@ export async function GET(request: Request) {
   }
 
   const q = (searchParams.get("q") || "").trim() || undefined;
+  const showTransfers = parseShowTransfers(searchParams.get("showTransfers"));
   const categoryRaw = (searchParams.get("category") || "").trim() || undefined;
   if (categoryRaw && !isCategory(categoryRaw)) {
     return errorJson(400, "BAD_REQUEST", `Unsupported category: ${categoryRaw}`);
@@ -67,6 +73,7 @@ export async function GET(request: Request) {
       accountId: (searchParams.get("accountId") || "").trim() || undefined,
       q,
       category: categoryRaw as (typeof CATEGORY_TAXONOMY)[number] | undefined,
+      showTransfers,
     });
 
     const comparison = buildExplicitPeriodComparison({
@@ -104,6 +111,7 @@ export async function GET(request: Request) {
         periodBEnd,
         q,
         category: categoryRaw,
+        showTransfers,
       },
       txCount: result.transactions.length,
       ...comparison,

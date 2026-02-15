@@ -26,6 +26,11 @@ function parseFileIds(searchParams: URLSearchParams) {
   return [...new Set(direct)];
 }
 
+function parseShowTransfers(value: string | null): "all" | "excludeMatched" | "onlyMatched" {
+  if (value === "excludeMatched" || value === "onlyMatched") return value;
+  return "all";
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const fileId = (searchParams.get("fileId") || "").trim();
@@ -40,6 +45,7 @@ export async function GET(request: Request) {
   const dateFrom = (searchParams.get("dateFrom") || "").trim() || undefined;
   const dateTo = (searchParams.get("dateTo") || "").trim() || undefined;
   const q = (searchParams.get("q") || "").trim() || undefined;
+  const showTransfers = parseShowTransfers(searchParams.get("showTransfers"));
 
   const categoryRaw = (searchParams.get("category") || "").trim();
   const category = categoryRaw ? categoryRaw : undefined;
@@ -58,6 +64,7 @@ export async function GET(request: Request) {
       dateTo,
       q,
       category: category as (typeof CATEGORY_TAXONOMY)[number] | undefined,
+      showTransfers,
     });
 
     return NextResponse.json({
@@ -73,6 +80,7 @@ export async function GET(request: Request) {
       needsReview: result.needsReview,
       quality: result.quality,
       appliedFilters: result.appliedFilters,
+      transferStats: result.transferStats,
       warnings: result.warnings,
       transactions: result.transactions,
       totalTransactions: result.transactions.length,

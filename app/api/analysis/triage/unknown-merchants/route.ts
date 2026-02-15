@@ -21,6 +21,11 @@ function parseFileIds(searchParams: URLSearchParams) {
   return [...new Set(direct)];
 }
 
+function parseShowTransfers(value: string | null): "all" | "excludeMatched" | "onlyMatched" {
+  if (value === "all" || value === "onlyMatched") return value;
+  return "excludeMatched";
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const fileId = (searchParams.get("fileId") || "").trim();
@@ -41,6 +46,7 @@ export async function GET(request: Request) {
       accountId: (searchParams.get("accountId") || "").trim() || undefined,
       dateFrom: (searchParams.get("dateFrom") || "").trim() || undefined,
       dateTo: (searchParams.get("dateTo") || "").trim() || undefined,
+      showTransfers: parseShowTransfers(searchParams.get("showTransfers")),
     });
 
     const unknown = result.transactions.filter(
