@@ -5,15 +5,62 @@ import {
   DevTemplateParseOutput,
 } from "@/lib/templates/types";
 
+const MONTHLY_RANGE_RE =
+  /(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\s*-\s*(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})/i;
+
 function detectAnzV1(text: string): DevTemplateDetection {
-  void text;
+  const upper = (text || "").toUpperCase();
+  const evidence: string[] = [];
+  let score = 0;
+
+  if (upper.includes("ACCOUNT STATEMENT")) {
+    score += 0.35;
+    evidence.push("ACCOUNT_STATEMENT");
+  }
+  if (upper.includes("ANZ PLUS") || upper.includes("AUSTRALIA AND NEW ZEALAND")) {
+    score += 0.2;
+    evidence.push("ANZ_BRAND");
+  }
+  if (upper.includes("BRANCH NUMBER (BSB)") || upper.includes("BRANCH NUMBER")) {
+    score += 0.2;
+    evidence.push("BSB_LABEL");
+  }
+  if (upper.includes("ACCOUNT NUMBER")) {
+    score += 0.1;
+    evidence.push("ACCOUNT_NUMBER_LABEL");
+  }
+  if (
+    upper.includes("DATE DESCRIPTION CREDIT DEBIT BALANCE") ||
+    (upper.includes("DATE") &&
+      upper.includes("DESCRIPTION") &&
+      upper.includes("CREDIT") &&
+      upper.includes("DEBIT") &&
+      upper.includes("BALANCE"))
+  ) {
+    score += 0.25;
+    evidence.push("TABLE_HEADER");
+  }
+
+  const mode =
+    /TRANSACTIONS MADE SINCE YOUR LAST STATEMENT/i.test(text)
+      ? "incremental"
+      : MONTHLY_RANGE_RE.test(text)
+        ? "monthly"
+        : "unknown";
+
+  if (mode === "incremental") evidence.push("MODE_INCREMENTAL");
+  if (mode === "monthly") evidence.push("MODE_MONTHLY_RANGE");
+
+  const confidence = Math.min(1, Number(score.toFixed(2)));
+  const matched = confidence >= 0.6;
+
   return {
-    matched: false,
-    confidence: 0,
+    matched,
+    confidence,
     bankId: "anz",
     templateId: "anz_v1",
-    mode: "unknown",
-    evidence: [],
+    mode,
+    evidence,
   };
 }
 
