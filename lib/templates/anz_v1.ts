@@ -352,6 +352,14 @@ function isStopMarkerLine(line: string) {
   return TABLE_STOP_MARKERS.some((regex) => regex.test(line));
 }
 
+function extractOpeningBalance(line: string) {
+  const tokens = extractMoneyTokens(line);
+  if (tokens.length === 0) return undefined;
+  const last = tokens[tokens.length - 1].value;
+  if (!Number.isFinite(last)) return undefined;
+  return round2(last);
+}
+
 function getTransactionRowMatch(line: string) {
   if (DATE_RANGE_HEADER_LINE_RE.test(line)) return null;
   return TRANSACTION_ROW_RE.exec(line);
@@ -386,10 +394,21 @@ function parseAnzTransactions(params: {
 
   const blocks: TxBlock[] = [];
   let current: TxBlock | null = null;
+  let openingBalance: number | undefined;
 
   for (let i = headerLine + 1; i < lines.length; i += 1) {
     const raw = lines[i].trim();
     if (!raw) continue;
+
+    if (/^Opening Balance\b/i.test(raw)) {
+      openingBalance = extractOpeningBalance(raw);
+      if (current) {
+        blocks.push(current);
+        current = null;
+      }
+      // Opening Balance defines the lower boundary; do not parse below it.
+      break;
+    }
 
     if (isStopMarkerLine(raw)) {
       if (current) {
@@ -502,10 +521,13 @@ function parseAnzTransactions(params: {
 
   for (const entry of chronoBlocks) {
     const previousBalance =
-      transactions.length > 0 ? transactions[transactions.length - 1].balance : undefined;
+      transactions.length > 0
+        ? transactions[transactions.length - 1].balance
+        : openingBalance;
+    const hasPreviousBalance = typeof previousBalance === "number";
     const balance = entry.balance;
     const deltaFromPrev =
-      typeof previousBalance === "number"
+      hasPreviousBalance
         ? round2(balance - previousBalance)
         : undefined;
 
@@ -571,16 +593,19 @@ function parseAnzTransactions(params: {
 
     if (amountSigned === null && typeof entry.amountAbs === "number") {
       amountSigned = -entry.amountAbs;
-      warnings.push({
-        code: "ANZ_AMOUNT_SIGN_UNCERTAIN",
-        message: `Amount sign uncertain; fell back to debit sign (tokens: ${
-          entry.moneyTokens.join(", ") || "none"
-        }).`,
-        severity: "warning",
-        rawLine: entry.block.lines[0],
-        lineIndex: entry.block.startLine,
-        confidence: 0.35,
-      });
+      // Only warn when no opening/previous balance baseline exists.
+      if (!hasPreviousBalance) {
+        warnings.push({
+          code: "ANZ_AMOUNT_SIGN_UNCERTAIN",
+          message: `Amount sign uncertain; no opening/previous balance baseline (tokens: ${
+            entry.moneyTokens.join(", ") || "none"
+          }).`,
+          severity: "warning",
+          rawLine: entry.block.lines[0],
+          lineIndex: entry.block.startLine,
+          confidence: 0.35,
+        });
+      }
     }
 
     if (amountSigned === null) {
