@@ -64,7 +64,7 @@ const LONG_MONTHS = [
 ] as const;
 
 const TRANSACTION_ROW_RE =
-  /^\s*(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b(.*)$/i;
+  /^\s*(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(.*)$/i;
 const DATE_RANGE_HEADER_LINE_RE =
   /^\s*\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\s*-\s*\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\s*$/i;
 
@@ -392,6 +392,16 @@ function parseAnzTransactions(params: {
     if (!raw) continue;
 
     if (isStopMarkerLine(raw)) {
+      if (current) {
+        blocks.push(current);
+        current = null;
+      }
+      const hasAnotherHeaderAhead = lines
+        .slice(i + 1)
+        .some((line) => TABLE_HEADER_RE.test(line));
+      if (hasAnotherHeaderAhead) {
+        continue;
+      }
       break;
     }
 
@@ -460,19 +470,6 @@ function parseAnzTransactions(params: {
       if (Number.isFinite(amountCandidate) && amountCandidate > 0) {
         amountAbs = amountCandidate;
       }
-    }
-
-    if (typeof amountAbs !== "number") {
-      warnings.push({
-        code: "ANZ_AMOUNT_OR_BALANCE_MISSING",
-        message: `Amount token missing on transaction row (tokens: ${blockMoney
-          .map((entry) => entry.token)
-          .join(", ") || "none"}).`,
-        severity: "warning",
-        rawLine: block.lines[0],
-        lineIndex: block.startLine,
-        confidence: 0.4,
-      });
     }
 
     const descriptionRaw =
@@ -562,7 +559,9 @@ function parseAnzTransactions(params: {
       amountSigned = deltaFromPrev;
       warnings.push({
         code: "ANZ_AMOUNT_INFERRED_FROM_BALANCE_DELTA",
-        message: `Amount inferred from balance delta (${deltaFromPrev.toFixed(2)}).`,
+        message: `Amount inferred from balance delta (${deltaFromPrev.toFixed(2)}), tokens: ${
+          entry.moneyTokens.join(", ") || "none"
+        }.`,
         severity: "warning",
         rawLine: entry.block.lines[0],
         lineIndex: entry.block.startLine,
@@ -574,7 +573,9 @@ function parseAnzTransactions(params: {
       amountSigned = -entry.amountAbs;
       warnings.push({
         code: "ANZ_AMOUNT_SIGN_UNCERTAIN",
-        message: `Amount sign uncertain; fell back to debit sign (tokens: ${entry.moneyTokens.join(", ") || "none"}).`,
+        message: `Amount sign uncertain; fell back to debit sign (tokens: ${
+          entry.moneyTokens.join(", ") || "none"
+        }).`,
         severity: "warning",
         rawLine: entry.block.lines[0],
         lineIndex: entry.block.startLine,
@@ -583,9 +584,15 @@ function parseAnzTransactions(params: {
     }
 
     if (amountSigned === null) {
+      const warningCode =
+        typeof entry.amountAbs === "number"
+          ? "ANZ_AMOUNT_NOT_VALID"
+          : "ANZ_AMOUNT_OR_BALANCE_MISSING";
       warnings.push({
-        code: "ANZ_AMOUNT_NOT_VALID",
-        message: `ANZ amount candidate is invalid (tokens: ${entry.moneyTokens.join(", ") || "none"}).`,
+        code: warningCode,
+        message: `ANZ amount could not be resolved (tokens: ${
+          entry.moneyTokens.join(", ") || "none"
+        }).`,
         severity: "warning",
         rawLine: entry.block.lines[0],
         lineIndex: entry.block.startLine,
