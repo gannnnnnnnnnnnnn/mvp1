@@ -435,9 +435,12 @@ export default function Phase3DatasetHomePage() {
             </div>
             <div>dedupedCount: {overview.dedupedCount || 0}</div>
             {process.env.NODE_ENV !== "production" ? (
-              <div className="mt-1">
+              <div className="mt-1 flex flex-col gap-1">
                 <a href="/dev/playground" className="font-medium text-blue-700 hover:text-blue-800">
                   Open Dev Playground
+                </a>
+                <a href="/dev/transfers" className="font-medium text-blue-700 hover:text-blue-800">
+                  Open Transfer Inspector
                 </a>
               </div>
             ) : null}
