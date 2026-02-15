@@ -5,7 +5,8 @@ import {
   DevTemplateParseOutput,
 } from "@/lib/templates/types";
 
-function detectAnzV1(_text: string): DevTemplateDetection {
+function detectAnzV1(text: string): DevTemplateDetection {
+  void text;
   return {
     matched: false,
     confidence: 0,

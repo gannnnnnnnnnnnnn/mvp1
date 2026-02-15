@@ -120,7 +120,6 @@ export async function GET(
       fileId: indexEntry.id,
       scope: "file",
       accountId: indexEntry.accountId,
-      bankId: indexEntry.bankId,
     });
 
     const textPath = path.join(TEXT_CACHE_DIR, `${indexEntry.id}.txt`);
@@ -164,4 +163,3 @@ export async function GET(
     );
   }
 }
-

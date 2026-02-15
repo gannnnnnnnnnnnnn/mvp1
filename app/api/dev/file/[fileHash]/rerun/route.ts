@@ -166,7 +166,6 @@ export async function POST(
     const analysis = await loadCategorizedTransactionsForScope({
       fileId: indexEntry.id,
       scope: "file",
-      bankId: indexEntry.bankId,
       accountId: indexEntry.accountId,
     });
 
