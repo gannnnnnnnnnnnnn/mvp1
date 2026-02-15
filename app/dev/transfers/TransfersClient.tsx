@@ -162,6 +162,28 @@ function toSentence(row: MatchRow) {
   )}.`;
 }
 
+function toTransferState(row: MatchRow) {
+  if (row.decision === "UNCERTAIN" || row.state === "uncertain") return "Uncertain";
+  return "Matched";
+}
+
+function toKindLabel(row: MatchRow) {
+  if (row.decision === "INTERNAL_OFFSET") return "Internal offset";
+  if (row.decision === "BOUNDARY_TRANSFER") return "Boundary crossing";
+  return "Not offset";
+}
+
+function toEffectLabel(row: MatchRow) {
+  return row.kpiEffect === "EXCLUDED" ? "EXCLUDED" : "INCLUDED";
+}
+
+function toWhyLabel(row: MatchRow) {
+  if (toTransferState(row) === "Uncertain") {
+    return `Uncertain: ${row.why}`;
+  }
+  return row.why;
+}
+
 export default function TransfersClient() {
   const [bankId, setBankId] = useState("");
   const [accountId, setAccountId] = useState("");
@@ -608,11 +630,25 @@ export default function TransfersClient() {
 
           {activeTab === "matches" && (
             <div className="overflow-x-auto">
+              <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                <div>
+                  <span className="font-medium text-slate-900">Uncertain</span>: Candidate match found, but not confident
+                  enough. NO offset applied.
+                </div>
+                <div className="mt-1">
+                  <span className="font-medium text-slate-900">INCLUDED</span>: Both transactions remain counted in
+                  income/spend totals.
+                </div>
+                <div className="mt-1">
+                  <span className="font-medium text-slate-900">EXCLUDED</span>: Both transactions are removed from
+                  income/spend totals when excluding internal transfers.
+                </div>
+              </div>
               <table className="min-w-[1500px] divide-y divide-slate-200 text-sm text-slate-900">
                 <thead className="bg-slate-50 text-xs text-slate-700">
                   <tr>
-                    <th className="px-2 py-2 text-left">State</th>
-                    <th className="px-2 py-2 text-left">Decision</th>
+                    <th className="px-2 py-2 text-left">Transfer state</th>
+                    <th className="px-2 py-2 text-left">Kind</th>
                     <th className="px-2 py-2 text-left">KPI effect</th>
                     <th className="px-2 py-2 text-left">sameFile</th>
                     <th className="px-2 py-2 text-left">Conf</th>
@@ -628,8 +664,19 @@ export default function TransfersClient() {
                   {matches.map((row) => (
                     <tr key={row.matchId} className="hover:bg-slate-50">
                       <td className="px-2 py-2">
+                        <span
+                          className={`rounded px-2 py-0.5 text-xs font-medium ${
+                            toTransferState(row) === "Matched"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          {toTransferState(row)}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2">
                         <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800">
-                          {row.decision}
+                          {toKindLabel(row)}
                         </span>
                       </td>
                       <td className="px-2 py-2">
@@ -640,21 +687,10 @@ export default function TransfersClient() {
                               : "bg-slate-100 text-slate-800"
                           }`}
                         >
-                          {row.kpiEffect}
+                          {toEffectLabel(row)}
                         </span>
                       </td>
                       <td className="px-2 py-2">{row.sameFile ? "yes" : "no"}</td>
-                      <td className="px-2 py-2">
-                        <span
-                          className={`rounded px-2 py-0.5 text-xs font-medium ${
-                            row.state === "matched"
-                              ? "bg-emerald-100 text-emerald-800"
-                              : "bg-amber-100 text-amber-800"
-                          }`}
-                        >
-                          {row.state}
-                        </span>
-                      </td>
                       <td className="px-2 py-2">{row.confidence.toFixed(2)}</td>
                       <td className="px-2 py-2">{CURRENCY.format(row.amountCents / 100)}</td>
                       <td className="px-2 py-2">{row.dateDiffDays}</td>
@@ -672,7 +708,27 @@ export default function TransfersClient() {
                         </div>
                         <div className="text-xs text-slate-700">{CURRENCY.format(row.b.amountSigned)}</div>
                       </td>
-                      <td className="px-2 py-2 max-w-[280px] text-xs text-slate-700">{row.why}</td>
+                      <td className="px-2 py-2 max-w-[320px] text-xs text-slate-700">
+                        <div>{toWhyLabel(row)}</div>
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {(row.explain.descHints || []).map((hint) => (
+                            <span
+                              key={`${row.matchId}-hint-${hint}`}
+                              className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-800"
+                            >
+                              {hint}
+                            </span>
+                          ))}
+                          {(row.explain.penalties || []).map((penalty) => (
+                            <span
+                              key={`${row.matchId}-penalty-${penalty}`}
+                              className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] text-rose-800"
+                            >
+                              {penalty}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
                       <td className="px-2 py-2">
                         <button
                           type="button"
@@ -711,6 +767,44 @@ export default function TransfersClient() {
                       decision: {selected.decision} · effect: {selected.kpiEffect} · sameFile:{" "}
                       {selected.sameFile ? "yes" : "no"}
                     </p>
+                  </article>
+                  <article className="rounded border border-slate-200 bg-white p-3">
+                    <h4 className="font-semibold text-slate-900">Pair summary</h4>
+                    <div className="mt-2 grid gap-2 text-xs text-slate-700 md:grid-cols-2">
+                      <div>
+                        <span className="font-medium text-slate-900">Transfer state:</span>{" "}
+                        {toTransferState(selected)}
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">Kind:</span>{" "}
+                        {toKindLabel(selected)}
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">Effect on totals:</span>{" "}
+                        {toEffectLabel(selected)}
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">sameFile:</span>{" "}
+                        {selected.sameFile ? "yes" : "no"}
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">Counts as spending?</span>{" "}
+                        {selected.kpiEffect === "EXCLUDED" ? "No" : "Yes"}
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">Counts as income?</span>{" "}
+                        {selected.kpiEffect === "EXCLUDED" ? "No" : "Yes"}
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="font-medium text-slate-900">A contribution:</span>{" "}
+                        {selected.a.amountSigned < 0 ? "Debit (outflow)" : "Credit (inflow)"}{" "}
+                        {CURRENCY.format(selected.a.amountSigned)}
+                        {" · "}
+                        <span className="font-medium text-slate-900">B contribution:</span>{" "}
+                        {selected.b.amountSigned < 0 ? "Debit (outflow)" : "Credit (inflow)"}{" "}
+                        {CURRENCY.format(selected.b.amountSigned)}
+                      </div>
+                    </div>
                   </article>
                   <div className="grid gap-3 md:grid-cols-2">
                     <article className="rounded border border-slate-200 bg-white p-3">
