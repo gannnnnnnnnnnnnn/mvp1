@@ -24,6 +24,8 @@ export async function GET(request: Request) {
       params: {
         ...params,
         state: (searchParams.get("state") || "all").trim() || "all",
+        decision: (searchParams.get("decision") || "all").trim() || "all",
+        sameFile: (searchParams.get("sameFile") || "all").trim() || "all",
         amountCents: (searchParams.get("amountCents") || "").trim() || undefined,
         q: (searchParams.get("q") || "").trim() || undefined,
         limit: Number(searchParams.get("limit") || "200"),

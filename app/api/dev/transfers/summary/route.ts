@@ -15,17 +15,19 @@ export async function GET(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const { scope, params, loaded, result } = await runTransferInspector(searchParams);
+    const { scope, params, boundary, loaded, result } = await runTransferInspector(searchParams);
 
     return NextResponse.json({
       ok: true,
       scope,
       params,
+      boundary,
       options: {
         bankIds: loaded.bankIds || [],
         accountIds: loaded.accountIds || [],
       },
       stats: result.stats,
+      decisionStats: result.decisionStats,
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.message === "NO_FILES_SELECTED") {

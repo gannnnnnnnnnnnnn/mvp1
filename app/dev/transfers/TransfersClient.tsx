@@ -14,6 +14,11 @@ type SummaryResponse = {
   ok: true;
   scope: { bankId?: string; accountId?: string; dateFrom?: string; dateTo?: string };
   params: { windowDays: number; minMatched: number; minUncertain: number };
+  boundary: {
+    mode: "customAccounts";
+    boundaryAccountIds: string[];
+    lastUpdatedAt: string;
+  };
   options: { bankIds: string[]; accountIds: string[] };
   stats: {
     txCount: number;
@@ -26,6 +31,11 @@ type SummaryResponse = {
     topHints: Array<{ hint: string; count: number }>;
     ambiguousBuckets: number;
   };
+  decisionStats: {
+    internalOffsetPairs: number;
+    boundaryTransferPairs: number;
+    uncertainPairs: number;
+  };
 };
 
 type MatchRow = {
@@ -36,6 +46,10 @@ type MatchRow = {
   dateA: string;
   dateB: string;
   dateDiffDays: number;
+  decision: "INTERNAL_OFFSET" | "BOUNDARY_TRANSFER" | "UNCERTAIN" | "IGNORED";
+  kpiEffect: "EXCLUDED" | "INCLUDED";
+  sameFile: boolean;
+  why: string;
   a: {
     transactionId: string;
     bankId: string;
@@ -44,7 +58,7 @@ type MatchRow = {
     description: string;
     amountSigned: number;
     balance?: number;
-    source: { fileHash?: string; lineIndex: number };
+    source: { fileId?: string; fileHash?: string; lineIndex: number };
     merchantNorm?: string;
   };
   b: {
@@ -55,7 +69,7 @@ type MatchRow = {
     description: string;
     amountSigned: number;
     balance?: number;
-    source: { fileHash?: string; lineIndex: number };
+    source: { fileId?: string; fileHash?: string; lineIndex: number };
     merchantNorm?: string;
   };
   explain: {
@@ -72,6 +86,8 @@ type MatchesResponse = {
   ok: true;
   params: {
     state?: string;
+    decision?: string;
+    sameFile?: string;
     amountCents?: string;
     q?: string;
     limit?: number;
@@ -106,6 +122,8 @@ function buildParams(state: {
   minMatched: number;
   minUncertain: number;
   matchState: "all" | "matched" | "uncertain";
+  decision: "all" | "INTERNAL_OFFSET" | "BOUNDARY_TRANSFER" | "UNCERTAIN" | "IGNORED";
+  sameFile: "all" | "yes" | "no";
   q: string;
   amountCents: string;
   limit: number;
@@ -119,6 +137,8 @@ function buildParams(state: {
   params.set("minMatched", String(state.minMatched));
   params.set("minUncertain", String(state.minUncertain));
   params.set("state", state.matchState);
+  params.set("decision", state.decision);
+  params.set("sameFile", state.sameFile);
   if (state.q) params.set("q", state.q);
   if (state.amountCents) params.set("amountCents", state.amountCents);
   params.set("limit", String(state.limit));
@@ -135,7 +155,11 @@ function toSentence(row: MatchRow) {
   const penaltyText = row.explain.penalties.length
     ? `penalties: ${row.explain.penalties.join(", ")}`
     : "no penalties";
-  return `Matched by amount ${CURRENCY.format(row.amountCents / 100)}, ${row.explain.dateDiffDays} day gap, ${sideHint}; ${hintText}; ${penaltyText}; score ${row.explain.score.toFixed(2)}.`;
+  return `${row.decision} (${row.kpiEffect}) · ${row.why} Amount ${CURRENCY.format(
+    row.amountCents / 100
+  )}, ${row.explain.dateDiffDays} day gap, ${sideHint}; ${hintText}; ${penaltyText}; score ${row.explain.score.toFixed(
+    2
+  )}.`;
 }
 
 export default function TransfersClient() {
@@ -147,6 +171,10 @@ export default function TransfersClient() {
   const [minMatched, setMinMatched] = useState(0.85);
   const [minUncertain, setMinUncertain] = useState(0.6);
   const [matchState, setMatchState] = useState<"all" | "matched" | "uncertain">("all");
+  const [decision, setDecision] = useState<
+    "all" | "INTERNAL_OFFSET" | "BOUNDARY_TRANSFER" | "UNCERTAIN" | "IGNORED"
+  >("all");
+  const [sameFile, setSameFile] = useState<"all" | "yes" | "no">("all");
   const [q, setQ] = useState("");
   const [amountCents, setAmountCents] = useState("");
   const [limit, setLimit] = useState(200);
@@ -170,6 +198,8 @@ export default function TransfersClient() {
       minMatched,
       minUncertain,
       matchState,
+      decision,
+      sameFile,
       q,
       amountCents,
       limit,
@@ -183,6 +213,8 @@ export default function TransfersClient() {
       minMatched,
       minUncertain,
       matchState,
+      decision,
+      sameFile,
       q,
       amountCents,
       limit,
@@ -337,7 +369,7 @@ export default function TransfersClient() {
             </label>
           </div>
 
-          <div className="mt-3 grid gap-3 md:grid-cols-6">
+          <div className="mt-3 grid gap-3 md:grid-cols-8">
             <label className="text-xs font-medium text-slate-700">
               minUncertain
               <input
@@ -360,6 +392,41 @@ export default function TransfersClient() {
                 <option value="all">all</option>
                 <option value="matched">matched</option>
                 <option value="uncertain">uncertain</option>
+              </select>
+            </label>
+            <label className="text-xs font-medium text-slate-700">
+              Decision
+              <select
+                className="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-slate-900"
+                value={decision}
+                onChange={(e) =>
+                  setDecision(
+                    e.target.value as
+                      | "all"
+                      | "INTERNAL_OFFSET"
+                      | "BOUNDARY_TRANSFER"
+                      | "UNCERTAIN"
+                      | "IGNORED"
+                  )
+                }
+              >
+                <option value="all">all</option>
+                <option value="INTERNAL_OFFSET">INTERNAL_OFFSET</option>
+                <option value="BOUNDARY_TRANSFER">BOUNDARY_TRANSFER</option>
+                <option value="UNCERTAIN">UNCERTAIN</option>
+                <option value="IGNORED">IGNORED</option>
+              </select>
+            </label>
+            <label className="text-xs font-medium text-slate-700">
+              sameFile
+              <select
+                className="mt-1 h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm text-slate-900"
+                value={sameFile}
+                onChange={(e) => setSameFile(e.target.value as "all" | "yes" | "no")}
+              >
+                <option value="all">all</option>
+                <option value="yes">yes</option>
+                <option value="no">no</option>
               </select>
             </label>
             <label className="text-xs font-medium text-slate-700">
@@ -418,6 +485,28 @@ export default function TransfersClient() {
         </section>
 
         {summary && (
+          <section className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <span className="font-medium">Boundary accounts</span>:{" "}
+                {summary.boundary.boundaryAccountIds.length > 0
+                  ? summary.boundary.boundaryAccountIds.join(", ")
+                  : "(empty)"}
+                <span className="ml-2 text-blue-700">
+                  · mode {summary.boundary.mode} · updated {summary.boundary.lastUpdatedAt.slice(0, 10)}
+                </span>
+              </div>
+              <a
+                href="/phase3"
+                className="rounded border border-blue-300 bg-white px-2 py-1 font-medium text-blue-800 hover:bg-blue-100"
+              >
+                Configure in /phase3
+              </a>
+            </div>
+          </section>
+        )}
+
+        {summary && (
           <section className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
             <article className="rounded-xl border border-slate-200 bg-white p-3">
               <p className="text-xs text-slate-700">txCount</p>
@@ -428,15 +517,25 @@ export default function TransfersClient() {
               <p className="text-xl font-semibold text-slate-900">{summary.stats.candidateCount}</p>
             </article>
             <article className="rounded-xl border border-slate-200 bg-white p-3">
-              <p className="text-xs text-slate-700">matchedPairs</p>
-              <p className="text-xl font-semibold text-emerald-700">{summary.stats.matchedPairs}</p>
+              <p className="text-xs text-slate-700">internalOffsetPairs</p>
+              <p className="text-xl font-semibold text-emerald-700">
+                {summary.decisionStats.internalOffsetPairs}
+              </p>
+            </article>
+            <article className="rounded-xl border border-slate-200 bg-white p-3">
+              <p className="text-xs text-slate-700">boundaryTransferPairs</p>
+              <p className="text-xl font-semibold text-blue-700">
+                {summary.decisionStats.boundaryTransferPairs}
+              </p>
             </article>
             <article className="rounded-xl border border-slate-200 bg-white p-3">
               <p className="text-xs text-slate-700">uncertainPairs</p>
-              <p className="text-xl font-semibold text-amber-700">{summary.stats.uncertainPairs}</p>
+              <p className="text-xl font-semibold text-amber-700">
+                {summary.decisionStats.uncertainPairs}
+              </p>
             </article>
             <article className="rounded-xl border border-slate-200 bg-white p-3">
-              <p className="text-xs text-slate-700">excludedFromKpiAmountAbs</p>
+              <p className="text-xs text-slate-700">excludedFromKpiAmountAbs (internal)</p>
               <p className="text-xl font-semibold text-slate-900">
                 {CURRENCY.format(summary.stats.excludedFromKpiAmountAbs)}
               </p>
@@ -509,22 +608,42 @@ export default function TransfersClient() {
 
           {activeTab === "matches" && (
             <div className="overflow-x-auto">
-              <table className="min-w-[1200px] divide-y divide-slate-200 text-sm text-slate-900">
+              <table className="min-w-[1500px] divide-y divide-slate-200 text-sm text-slate-900">
                 <thead className="bg-slate-50 text-xs text-slate-700">
                   <tr>
                     <th className="px-2 py-2 text-left">State</th>
+                    <th className="px-2 py-2 text-left">Decision</th>
+                    <th className="px-2 py-2 text-left">KPI effect</th>
+                    <th className="px-2 py-2 text-left">sameFile</th>
                     <th className="px-2 py-2 text-left">Conf</th>
                     <th className="px-2 py-2 text-left">Amount</th>
                     <th className="px-2 py-2 text-left">Δdays</th>
                     <th className="px-2 py-2 text-left">A side</th>
                     <th className="px-2 py-2 text-left">B side</th>
-                    <th className="px-2 py-2 text-left">Explain</th>
+                    <th className="px-2 py-2 text-left">Why</th>
                     <th className="px-2 py-2 text-left">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {matches.map((row) => (
                     <tr key={row.matchId} className="hover:bg-slate-50">
+                      <td className="px-2 py-2">
+                        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800">
+                          {row.decision}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2">
+                        <span
+                          className={`rounded px-2 py-0.5 text-xs font-medium ${
+                            row.kpiEffect === "EXCLUDED"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-slate-100 text-slate-800"
+                          }`}
+                        >
+                          {row.kpiEffect}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2">{row.sameFile ? "yes" : "no"}</td>
                       <td className="px-2 py-2">
                         <span
                           className={`rounded px-2 py-0.5 text-xs font-medium ${
@@ -553,12 +672,7 @@ export default function TransfersClient() {
                         </div>
                         <div className="text-xs text-slate-700">{CURRENCY.format(row.b.amountSigned)}</div>
                       </td>
-                      <td className="px-2 py-2">
-                        <div className="max-w-[220px] text-xs text-slate-700">
-                          <div>hints: {row.explain.descHints.join(", ") || "-"}</div>
-                          <div>penalties: {row.explain.penalties.join(", ") || "-"}</div>
-                        </div>
-                      </td>
+                      <td className="px-2 py-2 max-w-[280px] text-xs text-slate-700">{row.why}</td>
                       <td className="px-2 py-2">
                         <button
                           type="button"
@@ -575,7 +689,7 @@ export default function TransfersClient() {
                   ))}
                   {matches.length === 0 && (
                     <tr>
-                      <td className="px-2 py-4 text-sm text-slate-700" colSpan={8}>
+                      <td className="px-2 py-4 text-sm text-slate-700" colSpan={11}>
                         No rows for current filters.
                       </td>
                     </tr>
@@ -593,6 +707,10 @@ export default function TransfersClient() {
                   <article className="rounded border border-slate-200 bg-slate-50 p-3">
                     <h3 className="font-semibold text-slate-900">{selected.matchId}</h3>
                     <p className="mt-1 text-slate-700">{toSentence(selected)}</p>
+                    <p className="mt-1 text-xs text-slate-600">
+                      decision: {selected.decision} · effect: {selected.kpiEffect} · sameFile:{" "}
+                      {selected.sameFile ? "yes" : "no"}
+                    </p>
                   </article>
                   <div className="grid gap-3 md:grid-cols-2">
                     <article className="rounded border border-slate-200 bg-white p-3">
@@ -612,6 +730,23 @@ export default function TransfersClient() {
                     <h4 className="font-semibold text-slate-900">Explain</h4>
                     <pre className="mt-2 whitespace-pre-wrap text-xs text-slate-800">
 {JSON.stringify(selected.explain, null, 2)}
+                    </pre>
+                  </article>
+                  <article className="rounded border border-slate-200 bg-white p-3">
+                    <h4 className="font-semibold text-slate-900">Decision</h4>
+                    <pre className="mt-2 whitespace-pre-wrap text-xs text-slate-800">
+{JSON.stringify(
+  {
+    decision: selected.decision,
+    kpiEffect: selected.kpiEffect,
+    sameFile: selected.sameFile,
+    why: selected.why,
+    sourceA: selected.a.source,
+    sourceB: selected.b.source,
+  },
+  null,
+  2
+)}
                     </pre>
                   </article>
                 </>
