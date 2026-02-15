@@ -281,11 +281,17 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
     }
 
     const fileMeta = await findById(fileId);
-    const resolvedAccountId = params.accountId || fileMeta?.accountId || fileId;
+    const resolvedAccountId = params.accountId || fileMeta?.accountId || parsed.accountId || "default";
+    const resolvedBankId = fileMeta?.bankId || parsed.bankId || "cba";
+    const resolvedTemplateId =
+      fileMeta?.templateId || parsed.templateId || parsed.templateType || "cba_v1";
 
     const normalized = normalizeParsedTransactions({
       fileId,
       accountId: resolvedAccountId,
+      bankId: resolvedBankId,
+      templateId: resolvedTemplateId,
+      fileHash: fileMeta?.contentHash,
       transactions: parsed.transactions,
       warnings: parsed.warnings,
     }).map((tx) => {

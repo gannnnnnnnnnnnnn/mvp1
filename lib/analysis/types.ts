@@ -24,7 +24,9 @@ export type NormalizedTransaction = {
   id: string;
   // Cross-file dedupe key. Keep id unique per source, dedupeKey stable by business fields.
   dedupeKey: string;
+  bankId: string;
   accountId: string;
+  templateId: string;
   date: string;
   descriptionRaw: string;
   descriptionNorm: string;
@@ -33,10 +35,15 @@ export type NormalizedTransaction = {
   balance?: number;
   currency: "AUD";
   source: {
+    bankId: string;
     accountId: string;
+    templateId: string;
     fileId: string;
+    fileHash?: string;
     page?: number;
     lineIndex: number;
+    rowIndex?: number;
+    parserVersion?: string;
   };
   quality: {
     warnings: string[];
@@ -47,6 +54,16 @@ export type NormalizedTransaction = {
   category: Category;
   categorySource: CategorySource;
   categoryRuleId?: string;
+  flags?: {
+    transferCandidate?: boolean;
+  };
+  transfer?: {
+    matchId: string;
+    role: "out" | "in";
+    counterpartyTransactionId: string;
+    method: "amount_time_window_v1";
+    confidence: number;
+  } | null;
 };
 
 export type CategoryRule = {

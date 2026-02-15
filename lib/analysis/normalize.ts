@@ -3,9 +3,24 @@ import { normalizeMerchantFromRaw } from "@/lib/analysis/merchant";
 import { ParsedTransaction, ParseWarning } from "@/lib/parseTransactionsV1";
 import { NormalizedTransaction } from "@/lib/analysis/types";
 
+type ParsedTransactionWithMeta = ParsedTransaction & {
+  bankId?: string;
+  accountId?: string;
+  templateId?: string;
+  source?: {
+    fileId?: string;
+    fileHash?: string;
+    rowIndex?: number;
+    lineIndex?: number;
+    parserVersion?: string;
+  };
+};
+
 function stableTxId(params: {
   fileId: string;
+  bankId: string;
   accountId: string;
+  templateId: string;
   index: number;
   date: string;
   descriptionNorm: string;
@@ -14,7 +29,9 @@ function stableTxId(params: {
 }) {
   const payload = [
     params.fileId,
+    params.bankId,
     params.accountId,
+    params.templateId,
     String(params.index),
     params.date,
     params.descriptionNorm,
@@ -26,14 +43,18 @@ function stableTxId(params: {
 }
 
 function stableDedupeKey(params: {
+  bankId: string;
   accountId: string;
+  templateId: string;
   date: string;
   merchantNorm: string;
   amount: number;
   descriptionNorm: string;
 }) {
   const payload = [
+    params.bankId,
     params.accountId,
+    params.templateId,
     params.date.slice(0, 10),
     params.merchantNorm,
     params.amount.toFixed(2),
@@ -57,17 +78,30 @@ function warningReasonsForTx(tx: ParsedTransaction, warnings: ParseWarning[]) {
 export function normalizeParsedTransactions(params: {
   fileId: string;
   accountId: string;
-  transactions: ParsedTransaction[];
+  bankId: string;
+  templateId: string;
+  fileHash?: string;
+  transactions: ParsedTransactionWithMeta[];
   warnings: ParseWarning[];
 }) {
-  const { fileId, accountId, transactions, warnings } = params;
+  const { fileId, accountId, bankId, templateId, fileHash, transactions, warnings } = params;
 
   const normalized: NormalizedTransaction[] = transactions.map((tx, index) => {
     const { descriptionNorm, merchantNorm } = normalizeMerchantFromRaw(tx.description || "");
+    const txBankId = tx.bankId || bankId || "cba";
+    const txAccountId = tx.accountId || accountId || "default";
+    const txTemplateId = tx.templateId || templateId || "cba_v1";
+    const sourceLineIndex =
+      tx.source?.lineIndex || tx.source?.rowIndex || index + 1;
+    const transferCandidate = /TRANSFER|OSKO|NPP|PAYMENT TO|PAYMENT FROM/i.test(
+      tx.description || ""
+    );
 
     const id = stableTxId({
       fileId,
-      accountId,
+      bankId: txBankId,
+      accountId: txAccountId,
+      templateId: txTemplateId,
       index,
       date: tx.date,
       descriptionNorm,
@@ -78,13 +112,17 @@ export function normalizeParsedTransactions(params: {
     return {
       id,
       dedupeKey: stableDedupeKey({
-        accountId,
+        bankId: txBankId,
+        accountId: txAccountId,
+        templateId: txTemplateId,
         date: tx.date,
         merchantNorm,
         amount: tx.amount,
         descriptionNorm,
       }),
-      accountId,
+      bankId: txBankId,
+      accountId: txAccountId,
+      templateId: txTemplateId,
       date: tx.date,
       descriptionRaw: tx.description,
       descriptionNorm,
@@ -93,9 +131,14 @@ export function normalizeParsedTransactions(params: {
       balance: tx.balance,
       currency: "AUD",
       source: {
-        accountId,
+        bankId: txBankId,
+        accountId: txAccountId,
+        templateId: txTemplateId,
         fileId,
-        lineIndex: index + 1,
+        fileHash: tx.source?.fileHash || fileHash,
+        lineIndex: sourceLineIndex,
+        rowIndex: tx.source?.rowIndex || sourceLineIndex,
+        parserVersion: tx.source?.parserVersion,
       },
       quality: {
         warnings: warningReasonsForTx(tx, warnings),
@@ -106,6 +149,8 @@ export function normalizeParsedTransactions(params: {
       // Category fields are attached in category assignment step.
       category: "Other",
       categorySource: "default",
+      flags: { transferCandidate },
+      transfer: null,
     };
   });
 
