@@ -13,8 +13,12 @@ import path from "path";
  */
 export type FileMeta = {
   id: string;
+  // Optional bank identifier for template development and future multi-bank support.
+  bankId?: string;
   // Optional account scoping field for future multi-account analytics.
   accountId?: string;
+  // Canonical parser template id when available.
+  templateId?: string;
   // SHA-256 hash of the file content for duplicate prevention.
   contentHash?: string;
   // Optional parser template tag populated after parsing.

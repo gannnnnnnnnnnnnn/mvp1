@@ -116,6 +116,41 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+### Dev Playground (Developer-only)
+
+Use this for parser inspection without touching the product flow.
+
+- Route: `/dev/playground`
+- Works only in development (`next dev`)
+- Blocked in production (`next build && next start` returns 404 for dev APIs and page not found)
+
+What you can do:
+- Select one uploaded file by `fileHash`
+- Inspect normalized index entry + debug summary
+- Inspect transaction sample / warning groups / text preview
+- Re-run parse for this file in dev mode and save outputs under:
+  - `uploads/dev-runs/<fileHash>/<runId>/rerun-output.json`
+
+#### ANZ Template (dev-only)
+
+- ANZ parsing is available only in `/dev/playground` rerun flow.
+- It does **not** write back to main store/index by default.
+- Detected ANZ runs are persisted only under:
+  - `uploads/dev-runs/<fileHash>/<runId>/...`
+
+Manual validation for ANZ dev runs:
+
+```bash
+node scripts/parser_smoke_anz.mjs
+```
+
+This smoke script checks latest ANZ dev-run outputs and validates:
+- `detected.templateId === "anz_v1"`
+- `accountId` extracted
+- transactions exist
+- continuity is high
+- no standalone `Effective Date` rows as transactions
+
 ### 2) Optional auth setup
 
 If you want to protect list/download APIs, create `.env.local`:
