@@ -1,5 +1,12 @@
 export type ScopeMode = "all" | "selected";
 
+export type ScopeSelection = {
+  scopeMode: ScopeMode;
+  fileIds: string[];
+  bankId?: string;
+  accountId?: string;
+};
+
 export function monthRange(month: string) {
   const match = /^(\d{4})-(\d{2})$/.exec(month);
   if (!match) return null;
@@ -32,12 +39,14 @@ export function yearRange(yearText: string) {
   return { dateFrom: toDate(start), dateTo: toDate(end) };
 }
 
-export function parseScopeFromWindow() {
+export function parseScopeFromWindow(): ScopeSelection {
   if (typeof window === "undefined") {
     return { scopeMode: "all" as ScopeMode, fileIds: [] as string[] };
   }
   const query = new URLSearchParams(window.location.search);
   const scopeRaw = (query.get("scope") || "").trim();
+  const bankId = (query.get("bankId") || "").trim() || undefined;
+  const accountId = (query.get("accountId") || "").trim() || undefined;
   const ids = query
     .getAll("fileIds")
     .flatMap((value) => value.split(","))
@@ -45,13 +54,27 @@ export function parseScopeFromWindow() {
     .filter(Boolean);
 
   if (scopeRaw === "selected" || ids.length > 0) {
-    return { scopeMode: "selected" as ScopeMode, fileIds: [...new Set(ids)] };
+    return {
+      scopeMode: "selected" as ScopeMode,
+      fileIds: [...new Set(ids)],
+      bankId,
+      accountId,
+    };
   }
 
-  return { scopeMode: "all" as ScopeMode, fileIds: [] as string[] };
+  return {
+    scopeMode: "all" as ScopeMode,
+    fileIds: [] as string[],
+    bankId,
+    accountId,
+  };
 }
 
-export function buildScopeParams(scopeMode: ScopeMode, selectedFileIds: string[]) {
+export function buildScopeParams(
+  scopeMode: ScopeMode,
+  selectedFileIds: string[],
+  filters?: { bankId?: string; accountId?: string }
+) {
   const params = new URLSearchParams();
   if (scopeMode === "all") {
     params.set("scope", "all");
@@ -60,12 +83,22 @@ export function buildScopeParams(scopeMode: ScopeMode, selectedFileIds: string[]
       params.append("fileIds", fileId);
     }
   }
+  if (filters?.bankId) {
+    params.set("bankId", filters.bankId);
+  }
+  if (filters?.accountId) {
+    params.set("accountId", filters.accountId);
+  }
   return params;
 }
 
-export function pushScopeIntoUrl(scopeMode: ScopeMode, selectedFileIds: string[]) {
+export function pushScopeIntoUrl(
+  scopeMode: ScopeMode,
+  selectedFileIds: string[],
+  filters?: { bankId?: string; accountId?: string }
+) {
   if (typeof window === "undefined") return;
-  const params = buildScopeParams(scopeMode, selectedFileIds);
+  const params = buildScopeParams(scopeMode, selectedFileIds, filters);
   const base = window.location.pathname;
   const next = params.toString();
   const url = next ? `${base}?${next}` : base;

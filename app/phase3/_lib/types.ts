@@ -20,6 +20,8 @@ export type OverviewResponse = {
   availableMonths?: string[];
   availableQuarters?: string[];
   availableYears?: string[];
+  bankIds?: string[];
+  bankId?: string;
   accountIds?: string[];
   accountId?: string;
   granularity: "month" | "week";

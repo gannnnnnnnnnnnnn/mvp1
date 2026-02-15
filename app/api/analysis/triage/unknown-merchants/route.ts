@@ -37,6 +37,7 @@ export async function GET(request: Request) {
       fileId,
       fileIds,
       scope,
+      bankId: (searchParams.get("bankId") || "").trim() || undefined,
       accountId: (searchParams.get("accountId") || "").trim() || undefined,
       dateFrom: (searchParams.get("dateFrom") || "").trim() || undefined,
       dateTo: (searchParams.get("dateTo") || "").trim() || undefined,

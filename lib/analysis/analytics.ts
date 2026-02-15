@@ -16,6 +16,7 @@ export type AnalysisOptions = {
   fileIds?: string[];
   // scope=all loads all files in uploads/index.json.
   scope?: AnalysisScope;
+  bankId?: string;
   accountId?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -28,6 +29,7 @@ export type AppliedFilters = {
   scope: AnalysisScope;
   fileId?: string;
   fileIds?: string[];
+  bankId?: string;
   accountId?: string;
   dateFrom?: string;
   dateTo?: string;
@@ -128,6 +130,7 @@ function buildDatasetCoverage(transactions: NormalizedTransaction[]) {
       availableMonths: [] as string[],
       availableQuarters: [] as string[],
       availableYears: [] as string[],
+      bankIds: [] as string[],
       accountIds: [] as string[],
     };
   }
@@ -136,6 +139,7 @@ function buildDatasetCoverage(transactions: NormalizedTransaction[]) {
   const availableMonths = [...new Set(sorted.map((tx) => monthKeyFromDate(tx.date)))].sort();
   const availableQuarters = [...new Set(sorted.map((tx) => quarterKeyFromDate(tx.date)))].sort();
   const availableYears = [...new Set(sorted.map((tx) => tx.date.slice(0, 4)))].sort();
+  const bankIds = [...new Set(sorted.map((tx) => tx.bankId))].sort();
   const accountIds = [...new Set(sorted.map((tx) => tx.accountId))].sort();
 
   return {
@@ -144,6 +148,7 @@ function buildDatasetCoverage(transactions: NormalizedTransaction[]) {
     availableMonths,
     availableQuarters,
     availableYears,
+    bankIds,
     accountIds,
   };
 }
@@ -185,15 +190,18 @@ export function runAnalysisCore(params: {
 
   const targetFileIds = uniqueStrings([...(options.fileIds || []), options.fileId]);
   const uniqueFileIds = [...new Set(transactions.map((tx) => tx.source.fileId))];
+  const uniqueBankIds = [...new Set(transactions.map((tx) => tx.bankId))];
   const uniqueAccountIds = [...new Set(transactions.map((tx) => tx.accountId))];
 
   const resolvedFileId = options.fileId || (uniqueFileIds.length === 1 ? uniqueFileIds[0] : undefined);
+  const resolvedBankId = options.bankId || (uniqueBankIds.length === 1 ? uniqueBankIds[0] : undefined);
   const resolvedAccountId =
     options.accountId || (uniqueAccountIds.length === 1 ? uniqueAccountIds[0] : undefined);
 
   const filtered = transactions.filter((tx) => {
     if (options.fileId && tx.source.fileId !== options.fileId) return false;
     if (targetFileIds.length > 0 && !targetFileIds.includes(tx.source.fileId)) return false;
+    if (options.bankId && tx.bankId !== options.bankId) return false;
     if (options.accountId && tx.accountId !== options.accountId) return false;
     if (!between(tx.date, options.dateFrom, options.dateTo)) return false;
     if (options.category && tx.category !== options.category) return false;
@@ -217,6 +225,7 @@ export function runAnalysisCore(params: {
     scope,
     fileId: resolvedFileId,
     fileIds: targetFileIds.length > 0 ? targetFileIds : undefined,
+    bankId: resolvedBankId,
     accountId: resolvedAccountId,
     dateFrom: options.dateFrom,
     dateTo: options.dateTo,
@@ -247,7 +256,6 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
   const overrides = await readCategoryOverrides();
   const allNormalized: NormalizedTransaction[] = [];
 
-  const templateTypes = new Set<string>();
   const allWarnings: Array<{ rawLine: string; reason: string; confidence: number }> = [];
   const reviewReasonSet = new Set<string>();
   const nonBlockingSet = new Set<string>();
@@ -260,7 +268,6 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
 
   for (const fileId of targetFileIds) {
     const parsed = await loadParsedTransactions(fileId);
-    templateTypes.add(parsed.templateType);
     allWarnings.push(...parsed.warnings);
 
     for (const reason of parsed.quality.needsReviewReasons || []) reviewReasonSet.add(reason);
@@ -318,6 +325,8 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
   });
 
   const uniqueAccountIds = [...new Set(dedupedTransactions.map((tx) => tx.accountId))];
+  const scopedTemplateTypes = new Set(core.transactions.map((tx) => tx.templateId));
+  const fallbackTemplateTypes = new Set(dedupedTransactions.map((tx) => tx.templateId));
 
   return {
     fileId: params.fileId,
@@ -326,8 +335,14 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
     txCountBeforeDedupe,
     dedupedCount,
     ...datasetCoverage,
+    bankId:
+      params.bankId ||
+      (datasetCoverage.bankIds.length === 1 ? datasetCoverage.bankIds[0] : undefined),
     accountId: params.accountId || (uniqueAccountIds.length === 1 ? uniqueAccountIds[0] : undefined),
-    templateType: templateTypes.size === 1 ? [...templateTypes][0] : "mixed",
+    templateType:
+      (scopedTemplateTypes.size > 0 ? scopedTemplateTypes.size : fallbackTemplateTypes.size) === 1
+        ? [...(scopedTemplateTypes.size > 0 ? scopedTemplateTypes : fallbackTemplateTypes)][0]
+        : "mixed",
     warnings: allWarnings,
     quality: {
       headerFound: headerFoundAll,

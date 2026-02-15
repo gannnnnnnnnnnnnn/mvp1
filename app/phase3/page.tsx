@@ -29,6 +29,8 @@ export default function Phase3DatasetHomePage() {
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [scopeMode, setScopeMode] = useState<ScopeMode>("all");
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [selectedBankId, setSelectedBankId] = useState("");
+  const [selectedAccountId, setSelectedAccountId] = useState("");
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -65,12 +67,20 @@ export default function Phase3DatasetHomePage() {
     setFiles(data.files);
   }
 
-  async function fetchOverview(nextScopeMode: ScopeMode, nextSelectedFileIds: string[]) {
+  async function fetchOverview(
+    nextScopeMode: ScopeMode,
+    nextSelectedFileIds: string[],
+    nextBankId: string,
+    nextAccountId: string
+  ) {
     setIsLoading(true);
     setError(null);
 
     try {
-      const params = buildScopeParams(nextScopeMode, nextSelectedFileIds);
+      const params = buildScopeParams(nextScopeMode, nextSelectedFileIds, {
+        bankId: nextBankId || undefined,
+        accountId: nextAccountId || undefined,
+      });
       params.set("granularity", "month");
       const res = await fetch(`/api/analysis/overview?${params.toString()}`);
       const data = (await res.json()) as OverviewResponse | { ok: false; error: ApiError };
@@ -94,17 +104,27 @@ export default function Phase3DatasetHomePage() {
       parsed.scopeMode === "selected" ? parsed.fileIds.slice(0, 1) : parsed.fileIds;
     setScopeMode(parsed.scopeMode);
     setSelectedFileIds(normalizedIds);
+    setSelectedBankId(parsed.bankId || "");
+    setSelectedAccountId(parsed.accountId || "");
 
     void fetchFiles().catch(() => {
       setError({ code: "FILES_FAILED", message: "Failed to load files list." });
     });
 
-    void fetchOverview(parsed.scopeMode, normalizedIds);
+    void fetchOverview(
+      parsed.scopeMode,
+      normalizedIds,
+      parsed.bankId || "",
+      parsed.accountId || ""
+    );
   }, []);
 
   useEffect(() => {
-    pushScopeIntoUrl(scopeMode, selectedFileIds);
-  }, [scopeMode, selectedFileIds]);
+    pushScopeIntoUrl(scopeMode, selectedFileIds, {
+      bankId: selectedBankId || undefined,
+      accountId: selectedAccountId || undefined,
+    });
+  }, [scopeMode, selectedFileIds, selectedBankId, selectedAccountId]);
 
   const latestMonth = useMemo(
     () => [...(overview?.availableMonths || [])].sort().at(-1) || "",
@@ -116,14 +136,27 @@ export default function Phase3DatasetHomePage() {
   );
   const selectedFileId = selectedFileIds[0] || "";
 
-  function applyScopeAndFetch(nextScopeMode: ScopeMode, nextFileIds: string[]) {
+  const bankOptions = useMemo(() => overview?.bankIds || [], [overview?.bankIds]);
+  const accountOptions = useMemo(() => overview?.accountIds || [], [overview?.accountIds]);
+
+  function applyScopeAndFetch(
+    nextScopeMode: ScopeMode,
+    nextFileIds: string[],
+    nextBankId = selectedBankId,
+    nextAccountId = selectedAccountId
+  ) {
     setScopeMode(nextScopeMode);
     setSelectedFileIds(nextFileIds);
-    void fetchOverview(nextScopeMode, nextFileIds);
+    setSelectedBankId(nextBankId);
+    setSelectedAccountId(nextAccountId);
+    void fetchOverview(nextScopeMode, nextFileIds, nextBankId, nextAccountId);
   }
 
   const navigateToMonth = (month: string) => {
-    const params = buildScopeParams(scopeMode, selectedFileIds);
+    const params = buildScopeParams(scopeMode, selectedFileIds, {
+      bankId: selectedBankId || undefined,
+      accountId: selectedAccountId || undefined,
+    });
     params.set("type", "month");
     params.set("key", month);
     window.location.href = `/phase3/period?${params.toString()}`;
@@ -139,7 +172,7 @@ export default function Phase3DatasetHomePage() {
           </p>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-12">
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-4">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-3">
               Dataset scope
               <select
                 value={scopeMode}
@@ -160,7 +193,7 @@ export default function Phase3DatasetHomePage() {
             </label>
 
             {scopeMode === "selected" && (
-              <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-6">
+              <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-3">
                 File
                 <select
                   value={selectedFileId}
@@ -183,10 +216,55 @@ export default function Phase3DatasetHomePage() {
               </label>
             )}
 
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
+              Bank
+              <select
+                value={selectedBankId}
+                onChange={(e) => {
+                  const nextBankId = e.target.value;
+                  applyScopeAndFetch(scopeMode, selectedFileIds, nextBankId, selectedAccountId);
+                }}
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
+              >
+                <option value="">All banks</option>
+                {bankOptions.map((bankId) => (
+                  <option key={bankId} value={bankId}>
+                    {bankId}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
+              Account
+              <select
+                value={selectedAccountId}
+                onChange={(e) => {
+                  const nextAccountId = e.target.value;
+                  applyScopeAndFetch(scopeMode, selectedFileIds, selectedBankId, nextAccountId);
+                }}
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
+              >
+                <option value="">All accounts</option>
+                {accountOptions.map((accountId) => (
+                  <option key={accountId} value={accountId}>
+                    {accountId}
+                  </option>
+                ))}
+              </select>
+            </label>
+
             <div className="flex items-end lg:col-span-2">
               <button
                 type="button"
-                onClick={() => void fetchOverview(scopeMode, selectedFileIds)}
+                onClick={() =>
+                  void fetchOverview(
+                    scopeMode,
+                    selectedFileIds,
+                    selectedBankId,
+                    selectedAccountId
+                  )
+                }
                 disabled={isLoading || (scopeMode === "selected" && !selectedFileId)}
                 className="h-9 w-full rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
               >
@@ -234,20 +312,25 @@ export default function Phase3DatasetHomePage() {
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Dataset Coverage</h2>
               <p className="mt-1 text-sm text-slate-600">
-                {overview?.datasetDateMin || "-"} → {overview?.datasetDateMax || "-"} ·{" "}
-                {overview?.availableMonths?.length || 0} months ·{" "}
-                {overview?.filesIncludedCount || 0} files
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                Scope: {scopeMode === "all" ? "All files" : selectedFileNames.join(", ") || "Selected files"}
-              </p>
-            </div>
+              {overview?.datasetDateMin || "-"} → {overview?.datasetDateMax || "-"} ·{" "}
+              {overview?.availableMonths?.length || 0} months ·{" "}
+              {overview?.filesIncludedCount || 0} files
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Scope: {scopeMode === "all" ? "All files" : selectedFileNames.join(", ") || "Selected files"}
+              {selectedBankId ? ` · bank ${selectedBankId}` : ""}
+              {selectedAccountId ? ` · account ${selectedAccountId}` : ""}
+            </p>
+          </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
               {latestMonth && (
                 <a
                   href={`/phase3/period?${(() => {
-                    const params = buildScopeParams(scopeMode, selectedFileIds);
+                    const params = buildScopeParams(scopeMode, selectedFileIds, {
+                      bankId: selectedBankId || undefined,
+                      accountId: selectedAccountId || undefined,
+                    });
                     params.set("type", "month");
                     params.set("key", latestMonth);
                     return params.toString();
@@ -258,7 +341,10 @@ export default function Phase3DatasetHomePage() {
                 </a>
               )}
               <a
-                href={`/phase3/compare?${buildScopeParams(scopeMode, selectedFileIds).toString()}`}
+                href={`/phase3/compare?${buildScopeParams(scopeMode, selectedFileIds, {
+                  bankId: selectedBankId || undefined,
+                  accountId: selectedAccountId || undefined,
+                }).toString()}`}
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
               >
                 Compare
