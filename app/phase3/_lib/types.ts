@@ -83,10 +83,10 @@ export type OverviewResponse = {
   transferStats?: {
     internalOffsetPairsCount: number;
     internalOffsetAbs: number;
-    boundaryTransferPairsCount: number;
-    boundaryTransferAbs: number;
-    uncertainTransferCount?: number;
-    uncertainTransferAbs?: number;
+    boundaryFlowPairsCount: number;
+    boundaryFlowAbs: number;
+    uncertainPairsCount?: number;
+    uncertainAbs?: number;
   };
 };
 

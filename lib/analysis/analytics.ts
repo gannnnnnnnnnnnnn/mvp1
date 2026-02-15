@@ -90,14 +90,20 @@ function transferFromV2Row(
 
 function normalizeLegacyTransfer(existing: NormalizedTransaction["transfer"] | null | undefined) {
   if (!existing) return null;
-  if (existing.state) return existing;
-  if (existing.matchId) {
-    return {
-      ...existing,
-      state: "matched" as const,
-    };
+  const normalized = { ...existing };
+  if (!normalized.state && normalized.matchId) {
+    normalized.state = "matched";
   }
-  return existing;
+  if (!normalized.decision) {
+    normalized.decision = "UNCERTAIN_NO_OFFSET";
+  }
+  if (!normalized.kpiEffect) {
+    normalized.kpiEffect = "INCLUDED";
+  }
+  if (!normalized.whySentence) {
+    normalized.whySentence = "Legacy transfer metadata retained; no boundary offset applied.";
+  }
+  return normalized;
 }
 
 function mergeTransferMetadata(
@@ -347,17 +353,17 @@ export function runAnalysisCore(params: {
     (sum, tx) => sum + Math.abs(tx.amount),
     0
   );
-  const boundaryTransferPairsCount = new Set(
+  const boundaryFlowPairsCount = new Set(
     boundaryTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
   ).size;
-  const boundaryTransferAbs = boundaryTransfers.reduce(
+  const boundaryFlowAbs = boundaryTransfers.reduce(
     (sum, tx) => sum + Math.abs(tx.amount),
     0
   );
-  const uncertainTransferCount = new Set(
+  const uncertainPairsCount = new Set(
     uncertainTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
   ).size;
-  const uncertainTransferAbs = uncertainTransfers.reduce(
+  const uncertainAbs = uncertainTransfers.reduce(
     (sum, tx) => sum + Math.abs(tx.amount),
     0
   );
@@ -398,10 +404,10 @@ export function runAnalysisCore(params: {
     transferStats: {
       internalOffsetPairsCount,
       internalOffsetAbs,
-      boundaryTransferPairsCount,
-      boundaryTransferAbs,
-      uncertainTransferCount,
-      uncertainTransferAbs,
+      boundaryFlowPairsCount,
+      boundaryFlowAbs,
+      uncertainPairsCount,
+      uncertainAbs,
     },
     appliedFilters,
   };

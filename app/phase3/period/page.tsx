@@ -1087,9 +1087,9 @@ export default function Phase3PeriodPage() {
             <div className="mt-1 text-xs text-slate-500">
               internal: {overview?.transferStats?.internalOffsetPairsCount || 0}
               {" · "}
-              boundary: {overview?.transferStats?.boundaryTransferPairsCount || 0}
+              boundary: {overview?.transferStats?.boundaryFlowPairsCount || 0}
               {" · "}
-              uncertain: {overview?.transferStats?.uncertainTransferCount || 0}
+              uncertain: {overview?.transferStats?.uncertainPairsCount || 0}
             </div>
           </article>
         </section>
