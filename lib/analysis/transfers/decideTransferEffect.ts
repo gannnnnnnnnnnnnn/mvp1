@@ -7,7 +7,7 @@ import { TransferInspectorRow } from "@/lib/analysis/transfers/matchTransfersV2"
 export type TransferDecisionResult = {
   decision: TransferDecision;
   kpiEffect: TransferKpiEffect;
-  why: string;
+  whySentence: string;
   sameFile: boolean;
 };
 
@@ -29,52 +29,45 @@ export function decideTransferEffect(
 
   const sourceA = resolveSourceKey(row.a.source);
   const sourceB = resolveSourceKey(row.b.source);
-  const sameFile = sourceA && sourceB ? sourceA === sourceB : true;
+  const sameFile = sourceA && sourceB ? sourceA === sourceB : false;
 
   const oppositeSign = row.a.amountSigned < 0 && row.b.amountSigned > 0;
   const amountMatch = toMoneyCents(row.a.amountSigned) === toMoneyCents(row.b.amountSigned);
-  const differentAccount = row.a.accountId !== row.b.accountId;
   const matchedState = row.state === "matched";
+  const bothInsideBoundary =
+    boundarySet.has(row.a.accountId) && boundarySet.has(row.b.accountId);
+  const fileHashA = String(row.a.source.fileHash || "").trim();
+  const fileHashB = String(row.b.source.fileHash || "").trim();
+  const differentFileHashIfAvailable =
+    fileHashA && fileHashB ? fileHashA !== fileHashB : true;
 
   if (!matchedState) {
     return {
-      decision: "UNCERTAIN",
+      decision: "UNCERTAIN_NO_OFFSET",
       kpiEffect: "INCLUDED",
       sameFile,
-      why: "Matcher state is uncertain.",
+      whySentence: "Candidate match, not confident enough; no offset applied.",
     };
   }
 
-  if (!oppositeSign || !amountMatch || !differentAccount || sameFile) {
-    const reasons: string[] = [];
-    if (!oppositeSign) reasons.push("sign mismatch");
-    if (!amountMatch) reasons.push("amount mismatch");
-    if (!differentAccount) reasons.push("same account");
-    if (sameFile) reasons.push("same source file");
-    return {
-      decision: "UNCERTAIN",
-      kpiEffect: "INCLUDED",
-      sameFile,
-      why: `Strict internal constraints failed: ${reasons.join(", ")}.`,
-    };
-  }
-
-  const outInBoundary = boundarySet.has(row.a.accountId);
-  const inInBoundary = boundarySet.has(row.b.accountId);
-
-  if (outInBoundary && inInBoundary) {
+  if (
+    oppositeSign &&
+    amountMatch &&
+    bothInsideBoundary &&
+    differentFileHashIfAvailable
+  ) {
     return {
       decision: "INTERNAL_OFFSET",
       kpiEffect: "EXCLUDED",
       sameFile,
-      why: "Matched cross-account transfer fully inside boundary.",
+      whySentence: "Matched internal transfer (both accounts inside boundary).",
     };
   }
 
   return {
-    decision: "BOUNDARY_TRANSFER",
+    decision: "BOUNDARY_FLOW",
     kpiEffect: "INCLUDED",
     sameFile,
-    why: "Matched transfer crosses boundary (one side outside selected accounts).",
+    whySentence: "Matched transfer crosses boundary (counts as boundary in/out).",
   };
 }

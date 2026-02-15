@@ -69,6 +69,10 @@ function transferFromV2Row(
     counterpartyTransactionId: other.transactionId,
     method: "amount_time_window_v2",
     confidence: row.confidence,
+    decision: effect.decision,
+    kpiEffect: effect.kpiEffect,
+    whySentence: effect.whySentence,
+    sameFile: effect.sameFile,
     explain: {
       amountCents: row.explain.amountCents,
       dateDiffDays: row.explain.dateDiffDays,
@@ -78,7 +82,7 @@ function transferFromV2Row(
       score: row.explain.score,
       decision: effect.decision,
       kpiEffect: effect.kpiEffect,
-      why: effect.why,
+      whySentence: effect.whySentence,
       sameFile: effect.sameFile,
     },
   };
@@ -328,13 +332,13 @@ export function runAnalysisCore(params: {
     (tx) =>
       tx.transfer?.state === "matched" &&
       tx.transfer.role === "out" &&
-      tx.transfer.explain?.decision === "BOUNDARY_TRANSFER"
+      tx.transfer.decision === "BOUNDARY_FLOW"
   );
   const uncertainTransfers = filtered.filter(
     (tx) =>
       tx.transfer?.role === "out" &&
       (tx.transfer?.state === "uncertain" ||
-        tx.transfer?.explain?.decision === "UNCERTAIN")
+        tx.transfer?.decision === "UNCERTAIN_NO_OFFSET")
   );
   const internalOffsetPairsCount = new Set(
     internalOffsetTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
@@ -360,7 +364,7 @@ export function runAnalysisCore(params: {
 
   const transferFiltered = filtered.filter((tx) => {
     if (showTransfers === "all") return true;
-    const excluded = tx.transfer?.explain?.kpiEffect === "EXCLUDED";
+    const excluded = tx.transfer?.kpiEffect === "EXCLUDED";
     if (showTransfers === "onlyMatched") return excluded;
     return !excluded;
   });

@@ -37,9 +37,8 @@ function parseDecisionFilter(raw: string | null) {
   const value = String(raw || "").trim().toUpperCase();
   if (
     value === "INTERNAL_OFFSET" ||
-    value === "BOUNDARY_TRANSFER" ||
-    value === "UNCERTAIN" ||
-    value === "IGNORED"
+    value === "BOUNDARY_FLOW" ||
+    value === "UNCERTAIN_NO_OFFSET"
   ) {
     return value;
   }
@@ -47,10 +46,10 @@ function parseDecisionFilter(raw: string | null) {
 }
 
 export type DecoratedInspectorRow = TransferInspectorResult["rows"][number] & {
-  decision: "INTERNAL_OFFSET" | "BOUNDARY_TRANSFER" | "UNCERTAIN" | "IGNORED";
+  decision: "INTERNAL_OFFSET" | "BOUNDARY_FLOW" | "UNCERTAIN_NO_OFFSET";
   kpiEffect: "EXCLUDED" | "INCLUDED";
   sameFile: boolean;
-  why: string;
+  whySentence: string;
 };
 
 export type DecoratedInspectorResult = Omit<TransferInspectorResult, "rows"> & {
@@ -89,13 +88,13 @@ export async function runTransferInspector(searchParams: URLSearchParams) {
       decision: effect.decision,
       kpiEffect: effect.kpiEffect,
       sameFile: effect.sameFile,
-      why: effect.why,
+      whySentence: effect.whySentence,
     };
   });
 
   const internal = rows.filter((row) => row.decision === "INTERNAL_OFFSET");
-  const boundaryTransfers = rows.filter((row) => row.decision === "BOUNDARY_TRANSFER");
-  const uncertain = rows.filter((row) => row.decision === "UNCERTAIN");
+  const boundaryTransfers = rows.filter((row) => row.decision === "BOUNDARY_FLOW");
+  const uncertain = rows.filter((row) => row.decision === "UNCERTAIN_NO_OFFSET");
 
   const decoratedResult: DecoratedInspectorResult = {
     ...result,

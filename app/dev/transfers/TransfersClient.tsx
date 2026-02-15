@@ -46,10 +46,10 @@ type MatchRow = {
   dateA: string;
   dateB: string;
   dateDiffDays: number;
-  decision: "INTERNAL_OFFSET" | "BOUNDARY_TRANSFER" | "UNCERTAIN" | "IGNORED";
+  decision: "INTERNAL_OFFSET" | "BOUNDARY_FLOW" | "UNCERTAIN_NO_OFFSET";
   kpiEffect: "EXCLUDED" | "INCLUDED";
   sameFile: boolean;
-  why: string;
+  whySentence: string;
   a: {
     transactionId: string;
     bankId: string;
@@ -122,7 +122,7 @@ function buildParams(state: {
   minMatched: number;
   minUncertain: number;
   matchState: "all" | "matched" | "uncertain";
-  decision: "all" | "INTERNAL_OFFSET" | "BOUNDARY_TRANSFER" | "UNCERTAIN" | "IGNORED";
+  decision: "all" | "INTERNAL_OFFSET" | "BOUNDARY_FLOW" | "UNCERTAIN_NO_OFFSET";
   sameFile: "all" | "yes" | "no";
   q: string;
   amountCents: string;
@@ -155,7 +155,7 @@ function toSentence(row: MatchRow) {
   const penaltyText = row.explain.penalties.length
     ? `penalties: ${row.explain.penalties.join(", ")}`
     : "no penalties";
-  return `${row.decision} (${row.kpiEffect}) · ${row.why} Amount ${CURRENCY.format(
+  return `${row.decision} (${row.kpiEffect}) · ${row.whySentence} Amount ${CURRENCY.format(
     row.amountCents / 100
   )}, ${row.explain.dateDiffDays} day gap, ${sideHint}; ${hintText}; ${penaltyText}; score ${row.explain.score.toFixed(
     2
@@ -163,13 +163,13 @@ function toSentence(row: MatchRow) {
 }
 
 function toTransferState(row: MatchRow) {
-  if (row.decision === "UNCERTAIN" || row.state === "uncertain") return "Uncertain";
+  if (row.decision === "UNCERTAIN_NO_OFFSET" || row.state === "uncertain") return "Uncertain";
   return "Matched";
 }
 
 function toKindLabel(row: MatchRow) {
   if (row.decision === "INTERNAL_OFFSET") return "Internal offset";
-  if (row.decision === "BOUNDARY_TRANSFER") return "Boundary crossing";
+  if (row.decision === "BOUNDARY_FLOW") return "Boundary crossing";
   return "Not offset";
 }
 
@@ -179,9 +179,9 @@ function toEffectLabel(row: MatchRow) {
 
 function toWhyLabel(row: MatchRow) {
   if (toTransferState(row) === "Uncertain") {
-    return `Uncertain: ${row.why}`;
+    return `Uncertain: ${row.whySentence}`;
   }
-  return row.why;
+  return row.whySentence;
 }
 
 export default function TransfersClient() {
@@ -194,7 +194,7 @@ export default function TransfersClient() {
   const [minUncertain, setMinUncertain] = useState(0.6);
   const [matchState, setMatchState] = useState<"all" | "matched" | "uncertain">("all");
   const [decision, setDecision] = useState<
-    "all" | "INTERNAL_OFFSET" | "BOUNDARY_TRANSFER" | "UNCERTAIN" | "IGNORED"
+    "all" | "INTERNAL_OFFSET" | "BOUNDARY_FLOW" | "UNCERTAIN_NO_OFFSET"
   >("all");
   const [sameFile, setSameFile] = useState<"all" | "yes" | "no">("all");
   const [q, setQ] = useState("");
@@ -426,17 +426,15 @@ export default function TransfersClient() {
                     e.target.value as
                       | "all"
                       | "INTERNAL_OFFSET"
-                      | "BOUNDARY_TRANSFER"
-                      | "UNCERTAIN"
-                      | "IGNORED"
+                      | "BOUNDARY_FLOW"
+                      | "UNCERTAIN_NO_OFFSET"
                   )
                 }
               >
                 <option value="all">all</option>
                 <option value="INTERNAL_OFFSET">INTERNAL_OFFSET</option>
-                <option value="BOUNDARY_TRANSFER">BOUNDARY_TRANSFER</option>
-                <option value="UNCERTAIN">UNCERTAIN</option>
-                <option value="IGNORED">IGNORED</option>
+                <option value="BOUNDARY_FLOW">BOUNDARY_FLOW</option>
+                <option value="UNCERTAIN_NO_OFFSET">UNCERTAIN_NO_OFFSET</option>
               </select>
             </label>
             <label className="text-xs font-medium text-slate-700">
@@ -834,7 +832,7 @@ export default function TransfersClient() {
     decision: selected.decision,
     kpiEffect: selected.kpiEffect,
     sameFile: selected.sameFile,
-    why: selected.why,
+    whySentence: selected.whySentence,
     sourceA: selected.a.source,
     sourceB: selected.b.source,
   },

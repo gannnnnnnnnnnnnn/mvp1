@@ -20,12 +20,11 @@ export const CATEGORY_TAXONOMY = [
 export type Category = (typeof CATEGORY_TAXONOMY)[number];
 
 export type CategorySource = "rule" | "manual" | "default";
-export type TransferState = "matched" | "uncertain" | "ignored";
+export type TransferState = "matched" | "uncertain";
 export type TransferDecision =
   | "INTERNAL_OFFSET"
-  | "BOUNDARY_TRANSFER"
-  | "UNCERTAIN"
-  | "IGNORED";
+  | "BOUNDARY_FLOW"
+  | "UNCERTAIN_NO_OFFSET";
 export type TransferKpiEffect = "EXCLUDED" | "INCLUDED";
 
 export type NormalizedTransaction = {
@@ -72,6 +71,10 @@ export type NormalizedTransaction = {
     counterpartyTransactionId: string;
     method: "amount_time_window_v1" | "amount_time_window_v2";
     confidence: number;
+    decision?: TransferDecision;
+    kpiEffect?: TransferKpiEffect;
+    whySentence?: string;
+    sameFile?: boolean;
     explain?: {
       amountCents: number;
       dateDiffDays: number;
@@ -81,7 +84,7 @@ export type NormalizedTransaction = {
       score: number;
       decision?: TransferDecision;
       kpiEffect?: TransferKpiEffect;
-      why?: string;
+      whySentence?: string;
       sameFile?: boolean;
     };
   } | null;
