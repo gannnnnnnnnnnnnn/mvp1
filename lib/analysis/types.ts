@@ -7,6 +7,7 @@ export const CATEGORY_TAXONOMY = [
   "Bills&Utilities",
   "Rent/Mortgage",
   "Health",
+  "Insurance",
   "Pet",
   "Entertainment",
   "Travel",

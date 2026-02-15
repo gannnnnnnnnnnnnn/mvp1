@@ -82,6 +82,7 @@ type CategoryOption =
   | "Bills&Utilities"
   | "Rent/Mortgage"
   | "Health"
+  | "Insurance"
   | "Pet"
   | "Entertainment"
   | "Travel"
@@ -99,6 +100,7 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
   "Bills&Utilities",
   "Rent/Mortgage",
   "Health",
+  "Insurance",
   "Pet",
   "Entertainment",
   "Travel",
@@ -119,7 +121,7 @@ const CATEGORY_GROUPS: Array<{ label: string; options: CategoryOption[] }> = [
     label: "Lifestyle Spend",
     options: ["Dining", "Food Delivery", "Entertainment", "Shopping", "Travel"],
   },
-  { label: "Health & Pet", options: ["Health", "Pet"] },
+  { label: "Health, Insurance & Pet", options: ["Health", "Insurance", "Pet"] },
   { label: "Other / Uncategorized", options: ["Fees/Interest/Bank", "Other"] },
 ];
 
