@@ -19,6 +19,11 @@ function parseGranularity(value: string | null): Granularity {
   return value === "week" ? "week" : "month";
 }
 
+function parseShowTransfers(value: string | null): "all" | "excludeMatched" | "onlyMatched" {
+  if (value === "all" || value === "onlyMatched") return value;
+  return "excludeMatched";
+}
+
 function parseFileIds(searchParams: URLSearchParams) {
   const direct = searchParams.getAll("fileIds").flatMap((value) =>
     value
@@ -41,6 +46,7 @@ export async function GET(request: Request) {
   }
 
   const granularity = parseGranularity(searchParams.get("granularity"));
+  const showTransfers = parseShowTransfers(searchParams.get("showTransfers"));
   const dateFrom = (searchParams.get("dateFrom") || "").trim() || undefined;
   const dateTo = (searchParams.get("dateTo") || "").trim() || undefined;
 
@@ -49,10 +55,12 @@ export async function GET(request: Request) {
       fileId,
       fileIds,
       scope,
+      bankId: (searchParams.get("bankId") || "").trim() || undefined,
       accountId: (searchParams.get("accountId") || "").trim() || undefined,
       dateFrom,
       dateTo,
       granularity,
+      showTransfers,
     });
 
     const overview = buildOverview({
@@ -73,6 +81,8 @@ export async function GET(request: Request) {
       availableMonths: result.availableMonths,
       availableQuarters: result.availableQuarters,
       availableYears: result.availableYears,
+      bankIds: result.bankIds,
+      bankId: result.bankId,
       accountIds: result.accountIds,
       accountId: result.accountId,
       granularity,
@@ -82,9 +92,11 @@ export async function GET(request: Request) {
       appliedFilters: {
         ...result.appliedFilters,
         granularity,
+        showTransfers,
       },
       warnings: result.warnings,
       txCount: result.transactions.length,
+      transferStats: result.transferStats,
       balanceSeriesDisabledReason:
         result.appliedFilters.balanceScope === "none"
           ? "Balance curve is disabled for mixed multi-file scope. Pick a single file/account."

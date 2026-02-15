@@ -20,6 +20,8 @@ export type OverviewResponse = {
   availableMonths?: string[];
   availableQuarters?: string[];
   availableYears?: string[];
+  bankIds?: string[];
+  bankId?: string;
   accountIds?: string[];
   accountId?: string;
   granularity: "month" | "week";
@@ -78,6 +80,10 @@ export type OverviewResponse = {
   }>;
   balanceSeries: Array<{ date: string; balance: number; transactionId: string }>;
   balanceSeriesDisabledReason?: string;
+  transferStats?: {
+    matchedTransferCount: number;
+    matchedTransferTotal: number;
+  };
 };
 
 export type CompareResponse = {

@@ -25,6 +25,15 @@ export default function LegacyMonthRouteRedirect() {
       target.append("fileIds", fileId);
     }
 
+    const bankId = (query.get("bankId") || "").trim();
+    if (bankId) {
+      target.set("bankId", bankId);
+    }
+    const accountId = (query.get("accountId") || "").trim();
+    if (accountId) {
+      target.set("accountId", accountId);
+    }
+
     const legacyMonth = (query.get("m") || "").trim();
     if (legacyMonth) {
       target.set("type", "month");

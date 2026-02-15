@@ -119,6 +119,8 @@ export default function Phase3ComparePage() {
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [scopeMode, setScopeMode] = useState<ScopeMode>("all");
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [selectedBankId, setSelectedBankId] = useState("");
+  const [selectedAccountId, setSelectedAccountId] = useState("");
 
   const [compareMode, setCompareMode] = useState<CompareMode>("month_prev");
   const [customMonthA, setCustomMonthA] = useState("");
@@ -148,13 +150,22 @@ export default function Phase3ComparePage() {
     setFiles(data.files);
   }
 
-  const fetchCompare = useCallback(async (nextScope: ScopeMode, nextIds: string[]) => {
+  const fetchCompare = useCallback(
+    async (
+      nextScope: ScopeMode,
+      nextIds: string[],
+      nextBankId: string,
+      nextAccountId: string
+    ) => {
     setIsLoading(true);
     setError(null);
     setFriendlyNote("");
 
     try {
-      const overviewParams = buildScopeParams(nextScope, nextIds);
+      const overviewParams = buildScopeParams(nextScope, nextIds, {
+        bankId: nextBankId || undefined,
+        accountId: nextAccountId || undefined,
+      });
       overviewParams.set("granularity", "month");
       const overviewRes = await fetch(`/api/analysis/overview?${overviewParams.toString()}`);
       const overviewData = (await overviewRes.json()) as
@@ -196,7 +207,10 @@ export default function Phase3ComparePage() {
       }
 
       setCompareLabel(periods.label);
-      const compareParams = buildScopeParams(nextScope, nextIds);
+      const compareParams = buildScopeParams(nextScope, nextIds, {
+        bankId: nextBankId || undefined,
+        accountId: nextAccountId || undefined,
+      });
       compareParams.set("periodAStart", periods.a.dateFrom);
       compareParams.set("periodAEnd", periods.a.dateTo);
       compareParams.set("periodBStart", periods.b.dateFrom);
@@ -221,27 +235,39 @@ export default function Phase3ComparePage() {
       setIsLoading(false);
     }
   }, [compareMode, customMonthA, customMonthB]);
+  const bankOptions = useMemo(() => overview?.bankIds || [], [overview?.bankIds]);
+  const accountOptions = useMemo(() => overview?.accountIds || [], [overview?.accountIds]);
 
   useEffect(() => {
     const parsed = parseScopeFromWindow();
     setScopeMode(parsed.scopeMode);
     setSelectedFileIds(parsed.fileIds);
+    setSelectedBankId(parsed.bankId || "");
+    setSelectedAccountId(parsed.accountId || "");
 
     void fetchFiles().catch(() => {
       setError({ code: "FILES_FAILED", message: "Failed to load files list." });
     });
-    void fetchCompare(parsed.scopeMode, parsed.fileIds);
+    void fetchCompare(
+      parsed.scopeMode,
+      parsed.fileIds,
+      parsed.bankId || "",
+      parsed.accountId || ""
+    );
   }, [fetchCompare]);
 
   useEffect(() => {
     if (scopeMode === "selected" && selectedFileIds.length === 0) return;
-    void fetchCompare(scopeMode, selectedFileIds);
-  }, [scopeMode, selectedFileIds, fetchCompare]);
+    void fetchCompare(scopeMode, selectedFileIds, selectedBankId, selectedAccountId);
+  }, [scopeMode, selectedFileIds, selectedBankId, selectedAccountId, fetchCompare]);
 
   useEffect(() => {
-    const params = buildScopeParams(scopeMode, selectedFileIds);
+    const params = buildScopeParams(scopeMode, selectedFileIds, {
+      bankId: selectedBankId || undefined,
+      accountId: selectedAccountId || undefined,
+    });
     window.history.replaceState(null, "", `/phase3/compare?${params.toString()}`);
-  }, [scopeMode, selectedFileIds]);
+  }, [scopeMode, selectedFileIds, selectedBankId, selectedAccountId]);
 
   return (
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
@@ -265,7 +291,7 @@ export default function Phase3ComparePage() {
               </select>
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-4">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-3">
               Files
               <select
                 multiple
@@ -285,7 +311,39 @@ export default function Phase3ComparePage() {
               </select>
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-3">
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
+              Bank
+              <select
+                value={selectedBankId}
+                onChange={(e) => setSelectedBankId(e.target.value)}
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
+              >
+                <option value="">All banks</option>
+                {bankOptions.map((bankId) => (
+                  <option key={bankId} value={bankId}>
+                    {bankId}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
+              Account
+              <select
+                value={selectedAccountId}
+                onChange={(e) => setSelectedAccountId(e.target.value)}
+                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
+              >
+                <option value="">All accounts</option>
+                {accountOptions.map((accountId) => (
+                  <option key={accountId} value={accountId}>
+                    {accountId}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
               Compare Mode
               <select
                 value={compareMode}
@@ -300,10 +358,17 @@ export default function Phase3ComparePage() {
               </select>
             </label>
 
-            <div className="flex items-end lg:col-span-3">
+            <div className="flex items-end lg:col-span-1">
               <button
                 type="button"
-                onClick={() => void fetchCompare(scopeMode, selectedFileIds)}
+                onClick={() =>
+                  void fetchCompare(
+                    scopeMode,
+                    selectedFileIds,
+                    selectedBankId,
+                    selectedAccountId
+                  )
+                }
                 disabled={isLoading || (scopeMode === "selected" && selectedFileIds.length === 0)}
                 className="h-10 w-full rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
               >
@@ -352,6 +417,8 @@ export default function Phase3ComparePage() {
               {overview.availableMonths?.length || 0} · Files: {overview.filesIncludedCount || 0}
               <br />
               selected files: {selectedFileNames.length ? selectedFileNames.join(", ") : "All files"}
+              {selectedBankId ? ` · bank ${selectedBankId}` : ""}
+              {selectedAccountId ? ` · account ${selectedAccountId}` : ""}
             </div>
           )}
 

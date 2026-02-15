@@ -192,3 +192,26 @@ export async function removeById(id: string): Promise<FileMeta | undefined> {
     return removed;
   });
 }
+
+/**
+ * Patch selected metadata fields by id atomically.
+ * No-op when target row does not exist.
+ */
+export async function patchMetadataById(
+  id: string,
+  patch: Partial<Pick<FileMeta, "bankId" | "accountId" | "templateId" | "templateType">>
+): Promise<FileMeta | undefined> {
+  return withIndexWriteLock(async () => {
+    const current = await readIndex();
+    const idx = current.findIndex((item) => item.id === id);
+    if (idx < 0) return undefined;
+
+    const next = {
+      ...current[idx],
+      ...patch,
+    };
+    current[idx] = next;
+    await writeIndexSafe(current);
+    return next;
+  });
+}
