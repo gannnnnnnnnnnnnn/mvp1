@@ -77,11 +77,14 @@ async function loadBoundaryPayload() {
   const knownAccounts = buildKnownAccounts(indexRows);
   const knownAccountIds = [...new Set(knownAccounts.map((item) => item.accountId))];
   const { config, exists } = await readBoundaryConfig(knownAccountIds);
+  const persistedConfig = exists
+    ? config
+    : await writeBoundaryConfig({ boundaryAccountIds: config.boundaryAccountIds });
 
   return {
-    config,
+    config: persistedConfig,
     knownAccounts,
-    needsSetup: !exists || config.boundaryAccountIds.length === 0,
+    needsSetup: !exists || persistedConfig.boundaryAccountIds.length === 0,
   };
 }
 
