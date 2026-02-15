@@ -14,7 +14,7 @@ const AS_AT_RE =
   /AS AT\s+(\d{1,2}\s+(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d{4})/i;
 
 const TABLE_HEADER_RE =
-  /DATE\s+DESCRIPTION\s+CREDIT\s+DEBIT\s+BALANCE/i;
+  /DATE\s*DESCRIPTION\s*(?:CREDIT|DEPOSITS?)\s*(?:DEBIT|WITHDRAWALS?)\s*BALANCE/i;
 
 const STOP_MARKER_RE =
   /(CLOSING\s+BALANCE|TOTAL\s+DEBITS|TOTAL\s+CREDITS|IMPORTANT\s+INFORMATION|TRANSACTION\s+SUMMARY|OPENING\s+BALANCE\s*-\s*TOTAL\s+DEBITS)/i;
@@ -49,7 +49,7 @@ const LONG_MONTHS = [
   "DECEMBER",
 ] as const;
 
-const DATE_ROW_RE = /^(\d{1,2})\s+([A-Za-z]{3})\b(.*)$/;
+const DATE_ROW_RE = /^(\d{1,2})\s+([A-Za-z]{3})(.*)$/;
 
 const MONEY_TOKEN_RE = /\(?-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)?/g;
 
@@ -166,11 +166,17 @@ function extractHeaderMeta(text: string, mode: DevTemplateDetection["mode"]) {
   let bsb = "";
   let accountNumber = "";
 
+  const combinedRow = /(\d{3}\s?\d{3})\s*([0-9 ]{6,}?)(?=\$)/.exec(text);
+  if (combinedRow) {
+    bsb = digitsOnly(combinedRow[1]).slice(0, 6);
+    accountNumber = digitsOnly(combinedRow[2]);
+  }
+
   const bsbInline = /BRANCH NUMBER \(BSB\)\s*[:\-]?\s*([0-9 ]{6,})/i.exec(text);
-  if (bsbInline) bsb = digitsOnly(bsbInline[1]).slice(0, 6);
+  if (bsbInline && !bsb) bsb = digitsOnly(bsbInline[1]).slice(0, 6);
 
   const accountInline = /ACCOUNT NUMBER\s*[:\-]?\s*([0-9 ]{6,})/i.exec(text);
-  if (accountInline) accountNumber = digitsOnly(accountInline[1]);
+  if (accountInline && !accountNumber) accountNumber = digitsOnly(accountInline[1]);
 
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i].trim();
@@ -529,19 +535,29 @@ function parseAnzTransactions(params: {
     });
   }
 
-  let checkedCount = 0;
-  let passCount = 0;
-  for (let i = 1; i < transactions.length; i += 1) {
-    const prev = transactions[i - 1];
-    const curr = transactions[i];
-    if (typeof prev.balance !== "number" || typeof curr.balance !== "number") continue;
-    checkedCount += 1;
-    if (Math.abs(round2(prev.balance + curr.amount) - round2(curr.balance)) <= 0.01) {
-      passCount += 1;
-    }
-  }
+  const assess = (mode: "ascending" | "descending") => {
+    let checked = 0;
+    let pass = 0;
+    for (let i = 1; i < transactions.length; i += 1) {
+      const prev = transactions[i - 1];
+      const curr = transactions[i];
+      if (typeof prev.balance !== "number" || typeof curr.balance !== "number") continue;
+      checked += 1;
 
-  const continuityRatio = checkedCount > 0 ? passCount / checkedCount : 1;
+      const hit =
+        mode === "ascending"
+          ? Math.abs(round2(prev.balance + curr.amount) - round2(curr.balance)) <= 0.01
+          : Math.abs(round2(curr.balance + prev.amount) - round2(prev.balance)) <= 0.01;
+      if (hit) pass += 1;
+    }
+    return { checked, ratio: checked > 0 ? pass / checked : 1 };
+  };
+
+  const asc = assess("ascending");
+  const desc = assess("descending");
+  const best = asc.ratio >= desc.ratio ? asc : desc;
+  const checkedCount = best.checked;
+  const continuityRatio = best.ratio;
   if (checkedCount >= 5 && continuityRatio < 0.995) {
     warnings.push({
       code: "ANZ_BALANCE_CONTINUITY_LOW",
