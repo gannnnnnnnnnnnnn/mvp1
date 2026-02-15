@@ -140,6 +140,9 @@ export default function Phase3DatasetHomePage() {
   }
 
   useEffect(() => {
+    const openBoundary =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("openBoundary") === "1";
     const parsed = parseScopeFromWindow();
     const normalizedIds =
       parsed.scopeMode === "selected" ? parsed.fileIds.slice(0, 1) : parsed.fileIds;
@@ -159,6 +162,9 @@ export default function Phase3DatasetHomePage() {
       parsed.accountId || ""
     );
     void fetchBoundary();
+    if (openBoundary) {
+      setBoundaryModalOpen(true);
+    }
   }, []);
 
   useEffect(() => {
