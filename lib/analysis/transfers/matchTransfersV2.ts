@@ -24,6 +24,11 @@ const DENY_PATTERNS: Array<{ code: string; re: RegExp }> = [
   },
 ];
 
+const MERCHANT_LIKE_RE =
+  /\bWATER\b|\bELECTRIC\b|\bGAS\b|\bTELSTRA\b|\bOPTUS\b|\bCOUNCIL\b|\bRATES\b|\bRENT\b|\bINSURANCE\b|\bUBER\b|\bWOOLWORTHS\b|\bCOLES\b/i;
+const STRONG_TRANSFER_HINT_RE =
+  /\bTRANSFER\b|\bOSKO\b|\bNPP\b|\bINTERNET BANKING\b|\bBPAY TRANSFER\b/i;
+
 type Candidate = {
   tx: NormalizedTransaction;
   amountCents: number;
@@ -131,6 +136,10 @@ function unique(values: string[]) {
 
 function hasTransferHint(text: string) {
   return HINT_PATTERNS.some((pattern) => pattern.re.test(text));
+}
+
+function isMerchantLikeWithoutStrongTransferHint(text: string) {
+  return MERCHANT_LIKE_RE.test(text) && !STRONG_TRANSFER_HINT_RE.test(text);
 }
 
 function detectHints(text: string) {
@@ -256,6 +265,13 @@ export function matchTransfersV2(
       if (debit.denies.length > 0 || credit.denies.length > 0) {
         penalties.push("MERCHANT_LIKE_PAYROLL");
         score -= 0.25;
+      }
+      if (
+        isMerchantLikeWithoutStrongTransferHint(debitText) ||
+        isMerchantLikeWithoutStrongTransferHint(creditText)
+      ) {
+        penalties.push("MERCHANT_LIKE");
+        score -= 0.45;
       }
       if (sameAccount && hints.length === 0) {
         penalties.push("SAME_ACCOUNT_NO_HINTS");
