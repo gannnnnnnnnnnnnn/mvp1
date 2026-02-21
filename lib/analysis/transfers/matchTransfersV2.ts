@@ -35,6 +35,8 @@ type Candidate = {
   dateMs: number;
   hints: string[];
   denies: string[];
+  refId?: string;
+  counterpartyAccountIdText?: string;
 };
 
 export type TransferInspectorParams = {
@@ -82,6 +84,8 @@ export type TransferInspectorRow = {
     descHints: string[];
     penalties: string[];
     score: number;
+    refId?: string;
+    counterpartyAccountIdText?: string;
   };
 };
 
@@ -150,6 +154,16 @@ function detectDenies(text: string) {
   return DENY_PATTERNS.filter((pattern) => pattern.re.test(text)).map((pattern) => pattern.code);
 }
 
+function extractRefId(text: string) {
+  const match = /#([A-Za-z0-9]+)/i.exec(text);
+  return match?.[1]?.toUpperCase();
+}
+
+function extractCounterpartyAccountIdText(text: string) {
+  const match = /\b\d{6}-\d{6,}\b/.exec(text);
+  return match?.[0];
+}
+
 function isCandidate(tx: NormalizedTransaction) {
   const text = `${tx.descriptionRaw || ""} ${tx.merchantNorm || ""}`;
   const hasHint = hasTransferHint(text);
@@ -179,12 +193,15 @@ export function matchTransfersV2(
     .filter((tx) => isCandidate(tx))
     .map((tx) => {
       const text = `${tx.descriptionRaw || ""} ${tx.merchantNorm || ""}`.toUpperCase();
+      const rawText = `${tx.descriptionRaw || ""}`;
       return {
         tx,
         amountCents: Math.round(Math.abs(tx.amount) * 100),
         dateMs: toDayMs(tx.date),
         hints: detectHints(text),
         denies: detectDenies(text),
+        refId: extractRefId(rawText),
+        counterpartyAccountIdText: extractCounterpartyAccountIdText(rawText),
       };
     });
 
@@ -234,7 +251,10 @@ export function matchTransfersV2(
   };
 
   const debitCandidates = debits.map((debit) => {
-    const pool = creditsByAmount.get(debit.amountCents) || [];
+    const bucketPool = creditsByAmount.get(debit.amountCents) || [];
+    const pool = debit.refId
+      ? bucketPool.filter((credit) => credit.refId === debit.refId)
+      : bucketPool;
     const scored: Scored[] = [];
 
     for (const credit of pool) {
@@ -396,6 +416,9 @@ export function matchTransfersV2(
         descHints,
         penalties,
         score: best.score,
+        refId: item.debit.refId || best.credit.refId,
+        counterpartyAccountIdText:
+          item.debit.counterpartyAccountIdText || best.credit.counterpartyAccountIdText,
       },
     });
   }
