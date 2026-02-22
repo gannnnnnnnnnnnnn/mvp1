@@ -5,6 +5,10 @@ import { readIndex } from "@/lib/fileStore";
 type KnownAccountRow = {
   bankId: string;
   accountId: string;
+  accountName?: string;
+  accountKey?: string;
+  bsb?: string;
+  accountNumber?: string;
   fileCount: number;
   dateRange?: { from: string; to: string };
 };
@@ -22,7 +26,17 @@ function errorJson(status: number, code: string, message: string) {
 function buildKnownAccounts(indexRows: Awaited<ReturnType<typeof readIndex>>): KnownAccountRow[] {
   const byKey = new Map<
     string,
-    { bankId: string; accountId: string; fileCount: number; minUploadedAt: string; maxUploadedAt: string }
+    {
+      bankId: string;
+      accountId: string;
+      accountName?: string;
+      accountKey?: string;
+      bsb?: string;
+      accountNumber?: string;
+      fileCount: number;
+      minUploadedAt: string;
+      maxUploadedAt: string;
+    }
   >();
 
   for (const row of indexRows) {
@@ -36,6 +50,10 @@ function buildKnownAccounts(indexRows: Awaited<ReturnType<typeof readIndex>>): K
       byKey.set(key, {
         bankId,
         accountId,
+        accountName: row.accountMeta?.accountName,
+        accountKey: row.accountMeta?.accountKey,
+        bsb: row.accountMeta?.bsb,
+        accountNumber: row.accountMeta?.accountNumber,
         fileCount: 1,
         minUploadedAt: uploadedAt,
         maxUploadedAt: uploadedAt,
@@ -44,6 +62,10 @@ function buildKnownAccounts(indexRows: Awaited<ReturnType<typeof readIndex>>): K
     }
 
     existing.fileCount += 1;
+    existing.accountName = existing.accountName || row.accountMeta?.accountName;
+    existing.accountKey = existing.accountKey || row.accountMeta?.accountKey;
+    existing.bsb = existing.bsb || row.accountMeta?.bsb;
+    existing.accountNumber = existing.accountNumber || row.accountMeta?.accountNumber;
     if (uploadedAt && (!existing.minUploadedAt || uploadedAt < existing.minUploadedAt)) {
       existing.minUploadedAt = uploadedAt;
     }
@@ -56,6 +78,10 @@ function buildKnownAccounts(indexRows: Awaited<ReturnType<typeof readIndex>>): K
     .map((item) => ({
       bankId: item.bankId,
       accountId: item.accountId,
+      accountName: item.accountName,
+      accountKey: item.accountKey,
+      bsb: item.bsb,
+      accountNumber: item.accountNumber,
       fileCount: item.fileCount,
       dateRange:
         item.minUploadedAt && item.maxUploadedAt
