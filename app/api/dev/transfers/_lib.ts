@@ -71,7 +71,7 @@ export async function runTransferInspector(searchParams: URLSearchParams) {
   const loaded = await loadCategorizedTransactionsForScope({
     scope: "all",
     bankId,
-    accountId,
+    accountId: undefined,
     dateFrom,
     dateTo,
     showTransfers: "all",
@@ -87,7 +87,7 @@ export async function runTransferInspector(searchParams: URLSearchParams) {
     options: params,
   });
 
-  const rows: DecoratedInspectorRow[] = result.rows.map((row) => {
+  const decoratedRows: DecoratedInspectorRow[] = result.rows.map((row) => {
     const effect = decideTransferEffect(row, config.boundaryAccountIds);
     return {
       ...row,
@@ -98,13 +98,51 @@ export async function runTransferInspector(searchParams: URLSearchParams) {
     };
   });
 
+  const rows = accountId
+    ? decoratedRows.filter(
+        (row) => row.a.accountId === accountId || row.b.accountId === accountId
+      )
+    : decoratedRows;
+
+  const rowTxIds = new Set<string>();
+  for (const row of rows) {
+    rowTxIds.add(row.a.transactionId);
+    rowTxIds.add(row.b.transactionId);
+  }
+
+  const collisions = accountId
+    ? result.collisions.filter((bucket) => bucket.txIds.some((id) => rowTxIds.has(id)))
+    : result.collisions;
+
   const internal = rows.filter((row) => row.decision === "INTERNAL_OFFSET");
   const boundaryTransfers = rows.filter((row) => row.decision === "BOUNDARY_FLOW");
   const uncertain = rows.filter((row) => row.decision === "UNCERTAIN_NO_OFFSET");
 
+  const penaltyCounter = new Map<string, number>();
+  const hintCounter = new Map<string, number>();
+  for (const row of rows) {
+    for (const penalty of row.explain.penalties || []) {
+      penaltyCounter.set(penalty, (penaltyCounter.get(penalty) || 0) + 1);
+    }
+    for (const hint of row.explain.descHints || []) {
+      hintCounter.set(hint, (hintCounter.get(hint) || 0) + 1);
+    }
+  }
+
+  const topPenalties = [...penaltyCounter.entries()]
+    .map(([penalty, count]) => ({ penalty, count }))
+    .sort((a, b) => b.count - a.count || a.penalty.localeCompare(b.penalty))
+    .slice(0, 10);
+
+  const topHints = [...hintCounter.entries()]
+    .map(([hint, count]) => ({ hint, count }))
+    .sort((a, b) => b.count - a.count || a.hint.localeCompare(b.hint))
+    .slice(0, 10);
+
   const decoratedResult: DecoratedInspectorResult = {
     ...result,
     rows,
+    collisions,
     stats: {
       ...result.stats,
       matchedPairs: internal.length,
@@ -114,6 +152,9 @@ export async function runTransferInspector(searchParams: URLSearchParams) {
         (sum, row) => sum + Math.abs(row.amountCents / 100) * 2,
         0
       ),
+      topPenalties,
+      topHints,
+      ambiguousBuckets: collisions.length,
     },
     decisionStats: {
       internalOffsetPairs: internal.length,

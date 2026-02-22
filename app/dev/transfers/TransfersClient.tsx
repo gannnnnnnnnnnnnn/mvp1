@@ -218,6 +218,19 @@ function boundaryMembershipLabel(accountId: string, boundaryAccountIds: string[]
   return boundaryAccountIds.includes(accountId) ? "inside" : "outside";
 }
 
+function toPenaltyReason(penalty: string) {
+  if (penalty === "NO_TRANSFER_HINTS") {
+    return "missing transfer-like hints";
+  }
+  if (penalty === "AMBIGUOUS_MULTI_MATCH") {
+    return "multiple close candidates for same amount/date";
+  }
+  if (penalty === "MERCHANT_LIKE") {
+    return "merchant-like bill/payment text";
+  }
+  return penalty.toLowerCase();
+}
+
 export default function TransfersClient() {
   const [bankId, setBankId] = useState("");
   const [accountId, setAccountId] = useState("");
@@ -530,6 +543,12 @@ export default function TransfersClient() {
               </button>
             </div>
           </div>
+          {accountId ? (
+            <p className="mt-2 text-xs text-slate-700">
+              Account filter is pair-aware: rows are shown when either side (A or B) uses this
+              account.
+            </p>
+          ) : null}
           {copyStatus && <p className="mt-2 text-xs text-emerald-700">{copyStatus}</p>}
           {error && (
             <div className="mt-3 rounded border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700">
@@ -620,6 +639,34 @@ export default function TransfersClient() {
                 ))}
               </div>
             </article>
+          </section>
+        )}
+
+        {summary && summary.stats.matchedPairs === 0 && (
+          <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p className="font-medium">No internal offset pairs for current filters.</p>
+            <p className="mt-1 text-xs text-amber-900">
+              candidateCount={summary.stats.candidateCount}, ambiguousBuckets=
+              {summary.stats.ambiguousBuckets}.
+            </p>
+            <div className="mt-2 text-xs">
+              <span className="font-medium">Top reasons: </span>
+              {summary.stats.topPenalties.length === 0 ? (
+                <span>no dominant penalty signal</span>
+              ) : (
+                summary.stats.topPenalties
+                  .slice(0, 3)
+                  .map((item) => `${toPenaltyReason(item.penalty)} (${item.count})`)
+                  .join(" · ")
+              )}
+            </div>
+            <p className="mt-2 text-xs">
+              Check account identity and metadata in{" "}
+              <a href="/dev/accounts" className="underline hover:no-underline">
+                /dev/accounts
+              </a>
+              .
+            </p>
           </section>
         )}
 
