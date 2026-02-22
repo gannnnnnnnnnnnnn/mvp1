@@ -51,6 +51,16 @@ function extractLabeledValue(lines: string[], labelRe: RegExp) {
   return undefined;
 }
 
+function cleanAccountName(value?: string) {
+  const candidate = String(value || "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (!candidate) return undefined;
+  if (/\bBSB\b/i.test(candidate)) return undefined;
+  if (/^Account\b/i.test(candidate)) return undefined;
+  return candidate;
+}
+
 function extractCbaAccountNumberFromAccountNumberLine(text: string, knownBsb?: string) {
   const match = /\bAccount Number\b\s*([0-9][0-9 \-]{7,24})/i.exec(text);
   if (!match?.[1]) return undefined;
@@ -190,24 +200,45 @@ export function extractCbaAccountMeta(params: {
   for (const windowText of windows) {
     const lines = splitLines(windowText);
 
+    // Strong: explicit label rows in account summary table.
     if (!accountName) {
-      const value = extractLabeledValue(lines, /Account name\s*[:\s]*([A-Za-z0-9 '&.-]{2,})/i);
-      if (value) {
-        const candidate = value
-          .replace(/\s{2,}/g, " ")
-          .replace(/\bBSB\b.*$/i, "")
-          .trim();
-        if (candidate && !/\bBSB\b/i.test(candidate)) {
-          accountName = candidate;
-        }
+      const labelMatch =
+        /(?:^|\n)\s*Account name\s+([A-Za-z][A-Za-z0-9 '&.-]{1,})\s*$/im.exec(windowText);
+      accountName = cleanAccountName(labelMatch?.[1]);
+    }
+
+    if (!bsb) {
+      const labelMatch = /(?:^|\n)\s*BSB\s+([0-9][0-9 \-]{4,10})\s*$/im.exec(windowText);
+      const value = labelMatch?.[1];
+      bsb = normalizeBsb(value);
+    }
+
+    if (!accountNumber) {
+      const labelMatch =
+        /(?:^|\n)\s*Account number\s+([0-9][0-9 \-]{5,20})\s*$/im.exec(windowText);
+      const value = labelMatch?.[1];
+      accountNumber = normalizeAccountNumber(value);
+    }
+
+    // Medium: header split "Account Number <bsb> <account>".
+    if (!bsb || !accountNumber) {
+      const splitHeader =
+        /(?:^|\n)\s*Account Number\s+(\d{3}\s?\d{3})\s+(\d{6,12})\b/im.exec(windowText);
+      if (splitHeader) {
+        bsb = bsb || normalizeBsb(splitHeader[1]);
+        accountNumber = accountNumber || normalizeAccountNumber(splitHeader[2]);
       }
     }
 
+    // Weak fallback: generic labeled extraction.
+    if (!accountName) {
+      const value = extractLabeledValue(lines, /Account name\s*[:\s]*([A-Za-z0-9 '&.-]{2,})/i);
+      accountName = cleanAccountName(value);
+    }
     if (!bsb) {
       const value = extractLabeledValue(lines, /\bBSB\b\s*[:\s]*([0-9][0-9 \-]{4,10})/i);
       bsb = normalizeBsb(value);
     }
-
     if (!accountNumber) {
       const value = extractLabeledValue(
         lines,
