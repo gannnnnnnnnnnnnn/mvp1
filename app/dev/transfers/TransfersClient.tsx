@@ -79,6 +79,36 @@ type MatchRow = {
     descHints: string[];
     penalties: string[];
     score: number;
+    refId?: string;
+    accountKeyMatchAtoB?: boolean;
+    accountKeyMatchBtoA?: boolean;
+    nameMatchAtoB?: boolean;
+    nameMatchBtoA?: boolean;
+    payIdMatch?: boolean;
+    evidenceA?: {
+      transferType?: string;
+      refId?: string;
+      counterpartyAccountKey?: string;
+      counterpartyName?: string;
+      payId?: string;
+      hints?: string[];
+    };
+    evidenceB?: {
+      transferType?: string;
+      refId?: string;
+      counterpartyAccountKey?: string;
+      counterpartyName?: string;
+      payId?: string;
+      hints?: string[];
+    };
+    accountMetaA?: {
+      accountName?: string;
+      accountKey?: string;
+    };
+    accountMetaB?: {
+      accountName?: string;
+      accountKey?: string;
+    };
   };
 };
 
@@ -311,7 +341,7 @@ export default function TransfersClient() {
     <main className="min-h-screen bg-slate-100 px-6 py-6 text-slate-900 sm:px-8">
       <div className="mx-auto max-w-[1400px] space-y-4">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h1 className="text-2xl font-semibold text-slate-900">Transfer Offset Inspector (v2)</h1>
+          <h1 className="text-2xl font-semibold text-slate-900">Transfer Offset Inspector (v3)</h1>
           <p className="mt-1 text-sm text-slate-700">
             Dev-only read-only inspector for transfer matching quality and explainability.
           </p>
@@ -838,6 +868,47 @@ export default function TransfersClient() {
                     <pre className="mt-2 whitespace-pre-wrap text-xs text-slate-800">
 {JSON.stringify(selected.explain, null, 2)}
                     </pre>
+                  </article>
+                  <article className="rounded border border-slate-200 bg-white p-3">
+                    <h4 className="font-semibold text-slate-900">Closure evidence</h4>
+                    <div className="mt-2 grid gap-2 text-xs text-slate-700 md:grid-cols-2">
+                      <div>
+                        <span className="font-medium text-slate-900">A account meta:</span>{" "}
+                        {selected.explain.accountMetaA?.accountName || "-"} ·{" "}
+                        {selected.explain.accountMetaA?.accountKey || "-"}
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">B account meta:</span>{" "}
+                        {selected.explain.accountMetaB?.accountName || "-"} ·{" "}
+                        {selected.explain.accountMetaB?.accountKey || "-"}
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">Account key closure:</span>{" "}
+                        A→B={selected.explain.accountKeyMatchAtoB ? "yes" : "no"} · B→A=
+                        {selected.explain.accountKeyMatchBtoA ? "yes" : "no"}
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">Name closure:</span>{" "}
+                        A→B={selected.explain.nameMatchAtoB ? "yes" : "no"} · B→A=
+                        {selected.explain.nameMatchBtoA ? "yes" : "no"}
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">PayID match:</span>{" "}
+                        {selected.explain.payIdMatch ? "yes" : "no"}
+                      </div>
+                      <div>
+                        <span className="font-medium text-slate-900">Ref ID:</span>{" "}
+                        {selected.explain.refId || "-"}
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="font-medium text-slate-900">Evidence A:</span>{" "}
+                        {JSON.stringify(selected.explain.evidenceA || {}, null, 0)}
+                      </div>
+                      <div className="md:col-span-2">
+                        <span className="font-medium text-slate-900">Evidence B:</span>{" "}
+                        {JSON.stringify(selected.explain.evidenceB || {}, null, 0)}
+                      </div>
+                    </div>
                   </article>
                   <article className="rounded border border-slate-200 bg-white p-3">
                     <h4 className="font-semibold text-slate-900">Decision</h4>

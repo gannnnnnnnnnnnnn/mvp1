@@ -1,9 +1,9 @@
 import { loadCategorizedTransactionsForScope } from "@/lib/analysis/analytics";
 import {
-  TransferInspectorParams,
-  matchTransfersV2,
-  TransferInspectorResult,
-} from "@/lib/analysis/transfers/matchTransfersV2";
+  TransferV3Params,
+  TransferV3Result,
+  matchTransfersV3,
+} from "@/lib/analysis/transfers/matchTransfersV3";
 import { decideTransferEffect } from "@/lib/analysis/transfers/decideTransferEffect";
 import { readBoundaryConfig } from "@/lib/boundary/store";
 
@@ -18,7 +18,7 @@ function parseNumber(raw: string | null, fallback: number) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-export function parseInspectorParams(searchParams: URLSearchParams): TransferInspectorParams {
+export function parseInspectorParams(searchParams: URLSearchParams): TransferV3Params {
   return {
     windowDays: Math.trunc(clamp(parseNumber(searchParams.get("windowDays"), 1), 0, 7)),
     minMatched: clamp(parseNumber(searchParams.get("minMatched"), 0.85), 0, 1),
@@ -45,14 +45,14 @@ function parseDecisionFilter(raw: string | null) {
   return "all";
 }
 
-export type DecoratedInspectorRow = TransferInspectorResult["rows"][number] & {
+export type DecoratedInspectorRow = TransferV3Result["rows"][number] & {
   decision: "INTERNAL_OFFSET" | "BOUNDARY_FLOW" | "UNCERTAIN_NO_OFFSET";
   kpiEffect: "EXCLUDED" | "INCLUDED";
   sameFile: boolean;
   whySentence: string;
 };
 
-export type DecoratedInspectorResult = Omit<TransferInspectorResult, "rows"> & {
+export type DecoratedInspectorResult = Omit<TransferV3Result, "rows"> & {
   rows: DecoratedInspectorRow[];
   decisionStats: {
     internalOffsetPairs: number;
@@ -77,9 +77,14 @@ export async function runTransferInspector(searchParams: URLSearchParams) {
     showTransfers: "all",
   });
 
-  const source = loaded.allTransactions.map((tx) => ({ ...tx, transfer: null }));
-  const result = matchTransfersV2(source, params);
   const { config } = await readBoundaryConfig(loaded.accountIds || []);
+  const source = loaded.allTransactions.map((tx) => ({ ...tx, transfer: null }));
+  const result = matchTransfersV3({
+    transactions: source,
+    boundaryAccountIds: config.boundaryAccountIds,
+    statementAccountMeta: loaded.statementAccountMeta || [],
+    options: params,
+  });
 
   const rows: DecoratedInspectorRow[] = result.rows.map((row) => {
     const effect = decideTransferEffect(row, config.boundaryAccountIds);

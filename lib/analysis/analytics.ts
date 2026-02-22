@@ -3,10 +3,11 @@ import { normalizeParsedTransactions } from "@/lib/analysis/normalize";
 import { readCategoryOverrides } from "@/lib/analysis/overridesStore";
 import { Category, NormalizedTransaction } from "@/lib/analysis/types";
 import { loadParsedTransactions } from "@/lib/analysis/loadParsed";
-import { matchTransfersV2 } from "@/lib/analysis/transfers/matchTransfersV2";
+import { matchTransfersV3 } from "@/lib/analysis/transfers/matchTransfersV3";
 import { decideTransferEffect } from "@/lib/analysis/transfers/decideTransferEffect";
 import { readBoundaryConfig } from "@/lib/boundary/store";
 import { findById, readIndex } from "@/lib/fileStore";
+import { normalizeAccountMeta, StatementAccountMeta } from "@/lib/parsing/accountMeta";
 
 export type Granularity = "month" | "week";
 export type CompareGranularity = "month" | "quarter" | "year";
@@ -45,16 +46,16 @@ export type AppliedFilters = {
   balanceScope: "file" | "account" | "none";
 };
 
-const DEFAULT_TRANSFER_V2_PARAMS = {
+const DEFAULT_TRANSFER_V3_PARAMS = {
   windowDays: 1,
-  minMatched: 0.85,
-  minUncertain: 0.6,
+  minMatched: 0.9,
+  minUncertain: 0.65,
 } as const;
 
-type TransferV2Row = ReturnType<typeof matchTransfersV2>["rows"][number];
+type TransferV3Row = ReturnType<typeof matchTransfersV3>["rows"][number];
 
-function transferFromV2Row(
-  row: TransferV2Row,
+function transferFromV3Row(
+  row: TransferV3Row,
   side: "a" | "b",
   boundaryAccountIds: string[]
 ): NonNullable<NormalizedTransaction["transfer"]> {
@@ -80,6 +81,16 @@ function transferFromV2Row(
       descHints: row.explain.descHints,
       penalties: row.explain.penalties,
       score: row.explain.score,
+      refId: row.explain.refId,
+      accountKeyMatchAtoB: row.explain.accountKeyMatchAtoB,
+      accountKeyMatchBtoA: row.explain.accountKeyMatchBtoA,
+      nameMatchAtoB: row.explain.nameMatchAtoB,
+      nameMatchBtoA: row.explain.nameMatchBtoA,
+      payIdMatch: row.explain.payIdMatch,
+      evidenceA: row.explain.evidenceA,
+      evidenceB: row.explain.evidenceB,
+      accountMetaA: row.explain.accountMetaA,
+      accountMetaB: row.explain.accountMetaB,
       decision: effect.decision,
       kpiEffect: effect.kpiEffect,
       whySentence: effect.whySentence,
@@ -130,16 +141,22 @@ function mergeTransferMetadata(
   return candidate.confidence >= normalizedExisting.confidence ? candidate : normalizedExisting;
 }
 
-function annotateTransfersWithV2(
+function annotateTransfersWithV3(
   transactions: NormalizedTransaction[],
-  boundaryAccountIds: string[]
+  boundaryAccountIds: string[],
+  statementAccountMeta: StatementAccountMeta[]
 ) {
-  const v2 = matchTransfersV2(transactions, DEFAULT_TRANSFER_V2_PARAMS);
+  const v3 = matchTransfersV3({
+    transactions,
+    boundaryAccountIds,
+    statementAccountMeta,
+    options: DEFAULT_TRANSFER_V3_PARAMS,
+  });
   const candidates = new Map<string, NonNullable<NormalizedTransaction["transfer"]>>();
 
-  for (const row of v2.rows) {
-    candidates.set(row.a.transactionId, transferFromV2Row(row, "a", boundaryAccountIds));
-    candidates.set(row.b.transactionId, transferFromV2Row(row, "b", boundaryAccountIds));
+  for (const row of v3.rows) {
+    candidates.set(row.a.transactionId, transferFromV3Row(row, "a", boundaryAccountIds));
+    candidates.set(row.b.transactionId, transferFromV3Row(row, "b", boundaryAccountIds));
   }
 
   return transactions.map((tx) => {
@@ -421,6 +438,7 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
 
   const overrides = await readCategoryOverrides();
   const allNormalized: NormalizedTransaction[] = [];
+  const statementAccountMetaByKey = new Map<string, StatementAccountMeta>();
 
   const allWarnings: Array<{ rawLine: string; reason: string; confidence: number }> = [];
   const reviewReasonSet = new Set<string>();
@@ -458,6 +476,16 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
     const resolvedBankId = fileMeta?.bankId || parsed.bankId || "cba";
     const resolvedTemplateId =
       fileMeta?.templateId || parsed.templateId || parsed.templateType || "cba_v1";
+    const resolvedAccountMeta = normalizeAccountMeta({
+      bankId: resolvedBankId,
+      accountId: resolvedAccountId,
+      templateId: resolvedTemplateId,
+      ...(fileMeta?.accountMeta || parsed.accountMeta || {}),
+    });
+    statementAccountMetaByKey.set(
+      `${resolvedAccountMeta.bankId}::${resolvedAccountMeta.accountId}`,
+      resolvedAccountMeta
+    );
 
     const normalized = normalizeParsedTransactions({
       fileId,
@@ -479,9 +507,10 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
   const dedupedTransactions = dedupeTransactions(allNormalized);
   const knownAccountIds = [...new Set(dedupedTransactions.map((tx) => tx.accountId))];
   const boundary = await readBoundaryConfig(knownAccountIds);
-  const annotatedTransactions = annotateTransfersWithV2(
+  const annotatedTransactions = annotateTransfersWithV3(
     dedupedTransactions,
-    boundary.config.boundaryAccountIds
+    boundary.config.boundaryAccountIds,
+    [...statementAccountMetaByKey.values()]
   );
   const dedupedCount = txCountBeforeDedupe - dedupedTransactions.length;
   const datasetCoverage = buildDatasetCoverage(annotatedTransactions);
@@ -529,6 +558,7 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
     needsReview: reviewReasonSet.size > 0,
     transactions: core.transactions,
     allTransactions: annotatedTransactions,
+    statementAccountMeta: [...statementAccountMetaByKey.values()],
     transferStats: core.transferStats,
     appliedFilters: core.appliedFilters,
   };

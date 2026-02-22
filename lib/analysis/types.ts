@@ -82,6 +82,36 @@ export type NormalizedTransaction = {
       descHints: string[];
       penalties: string[];
       score: number;
+      refId?: string;
+      accountKeyMatchAtoB?: boolean;
+      accountKeyMatchBtoA?: boolean;
+      nameMatchAtoB?: boolean;
+      nameMatchBtoA?: boolean;
+      payIdMatch?: boolean;
+      evidenceA?: {
+        transferType?: string;
+        refId?: string;
+        counterpartyAccountKey?: string;
+        counterpartyName?: string;
+        payId?: string;
+        hints?: string[];
+      };
+      evidenceB?: {
+        transferType?: string;
+        refId?: string;
+        counterpartyAccountKey?: string;
+        counterpartyName?: string;
+        payId?: string;
+        hints?: string[];
+      };
+      accountMetaA?: {
+        accountName?: string;
+        accountKey?: string;
+      };
+      accountMetaB?: {
+        accountName?: string;
+        accountKey?: string;
+      };
       decision?: TransferDecision;
       kpiEffect?: TransferKpiEffect;
       whySentence?: string;

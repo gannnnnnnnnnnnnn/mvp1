@@ -2,7 +2,20 @@ import {
   TransferDecision,
   TransferKpiEffect,
 } from "@/lib/analysis/types";
-import { TransferInspectorRow } from "@/lib/analysis/transfers/matchTransfersV2";
+
+type TransferDecisionRow = {
+  state: "matched" | "uncertain";
+  a: {
+    accountId: string;
+    amountSigned: number;
+    source: { fileId?: string; fileHash?: string };
+  };
+  b: {
+    accountId: string;
+    amountSigned: number;
+    source: { fileId?: string; fileHash?: string };
+  };
+};
 
 export type TransferDecisionResult = {
   decision: TransferDecision;
@@ -20,7 +33,7 @@ function resolveSourceKey(source: { fileId?: string; fileHash?: string }) {
 }
 
 export function decideTransferEffect(
-  row: TransferInspectorRow,
+  row: TransferDecisionRow,
   boundaryAccountIds: string[]
 ): TransferDecisionResult {
   const boundarySet = new Set(
