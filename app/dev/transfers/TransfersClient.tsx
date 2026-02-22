@@ -36,6 +36,11 @@ type SummaryResponse = {
     boundaryTransferPairs: number;
     uncertainPairs: number;
   };
+  diagnostics: {
+    scoredMatchedPairs: number;
+    scoredUncertainPairs: number;
+    missingIdentityClosurePairs: number;
+  };
 };
 
 type MatchRow = {
@@ -642,12 +647,19 @@ export default function TransfersClient() {
           </section>
         )}
 
-        {summary && summary.stats.matchedPairs === 0 && (
+        {summary &&
+          summary.stats.matchedPairs === 0 &&
+          summary.stats.candidateCount > 0 && (
           <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
             <p className="font-medium">No internal offset pairs for current filters.</p>
             <p className="mt-1 text-xs text-amber-900">
               candidateCount={summary.stats.candidateCount}, ambiguousBuckets=
               {summary.stats.ambiguousBuckets}.
+            </p>
+            <p className="mt-1 text-xs text-amber-900">
+              scoredMatched={summary.diagnostics.scoredMatchedPairs}, scoredUncertain=
+              {summary.diagnostics.scoredUncertainPairs}, missingIdentityClosure=
+              {summary.diagnostics.missingIdentityClosurePairs}
             </p>
             <div className="mt-2 text-xs">
               <span className="font-medium">Top reasons: </span>

@@ -28,6 +28,7 @@ export async function GET(request: Request) {
       },
       stats: result.stats,
       decisionStats: result.decisionStats,
+      diagnostics: result.diagnostics,
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.message === "NO_FILES_SELECTED") {

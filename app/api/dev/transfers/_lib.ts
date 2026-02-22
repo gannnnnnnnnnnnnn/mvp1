@@ -59,6 +59,11 @@ export type DecoratedInspectorResult = Omit<TransferV3Result, "rows"> & {
     boundaryTransferPairs: number;
     uncertainPairs: number;
   };
+  diagnostics: {
+    scoredMatchedPairs: number;
+    scoredUncertainPairs: number;
+    missingIdentityClosurePairs: number;
+  };
 };
 
 export async function runTransferInspector(searchParams: URLSearchParams) {
@@ -117,6 +122,16 @@ export async function runTransferInspector(searchParams: URLSearchParams) {
   const internal = rows.filter((row) => row.decision === "INTERNAL_OFFSET");
   const boundaryTransfers = rows.filter((row) => row.decision === "BOUNDARY_FLOW");
   const uncertain = rows.filter((row) => row.decision === "UNCERTAIN_NO_OFFSET");
+  const scoredMatchedPairs = rows.filter((row) => row.state === "matched").length;
+  const scoredUncertainPairs = rows.filter((row) => row.state === "uncertain").length;
+  const missingIdentityClosurePairs = rows.filter(
+    (row) =>
+      !row.explain.accountKeyMatchAtoB &&
+      !row.explain.accountKeyMatchBtoA &&
+      !row.explain.nameMatchAtoB &&
+      !row.explain.nameMatchBtoA &&
+      !row.explain.payIdMatch
+  ).length;
 
   const penaltyCounter = new Map<string, number>();
   const hintCounter = new Map<string, number>();
@@ -160,6 +175,11 @@ export async function runTransferInspector(searchParams: URLSearchParams) {
       internalOffsetPairs: internal.length,
       boundaryTransferPairs: boundaryTransfers.length,
       uncertainPairs: uncertain.length,
+    },
+    diagnostics: {
+      scoredMatchedPairs,
+      scoredUncertainPairs,
+      missingIdentityClosurePairs,
     },
   };
 
