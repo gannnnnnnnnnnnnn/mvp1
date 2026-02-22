@@ -10,6 +10,7 @@
     "test": "node scripts/parser_smoke.mjs",
     "test:auto-inference": "node scripts/auto_inference_regression.mjs",
     "smoke:parser": "node scripts/parser_smoke.mjs",
+    "smoke:transfer-v3": "node scripts/transfer_smoke_v3.mjs",
     "snapshot:generate": "node scripts/commbank_snapshot.mjs generate",
     "snapshot:compare": "node scripts/commbank_snapshot.mjs compare"
   },
