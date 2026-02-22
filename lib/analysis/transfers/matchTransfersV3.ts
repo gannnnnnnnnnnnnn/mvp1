@@ -14,6 +14,16 @@ export type TransferV3Params = {
 
 export type TransferV3State = "matched" | "uncertain";
 
+export type TransferV3IgnoredReason =
+  | "SAME_ACCOUNT"
+  | "SAME_FILE"
+  | "DATE_OUT_OF_WINDOW"
+  | "REF_ID_MISMATCH"
+  | "CREDIT_ALREADY_MATCHED"
+  | "LOW_CONFIDENCE"
+  | "SELF_TX"
+  | "MISSING_SOURCE";
+
 export type TransferV3Row = {
   matchId: string;
   state: TransferV3State;
@@ -64,6 +74,20 @@ export type TransferV3Row = {
   };
 };
 
+export type TransferV3IgnoredRow = {
+  ignoredId: string;
+  transferState: "ignored";
+  ignoredReason: TransferV3IgnoredReason;
+  confidence: number;
+  amountCents: number;
+  dateA: string;
+  dateB: string;
+  dateDiffDays: number;
+  a: TransferV3Row["a"];
+  b: TransferV3Row["b"];
+  explain: TransferV3Row["explain"];
+};
+
 export type TransferV3CollisionBucket = {
   amountCents: number;
   dates: string[];
@@ -82,16 +106,19 @@ type TransferV3Stats = {
   candidateCount: number;
   matchedPairs: number;
   uncertainPairs: number;
+  ignoredPairsCount: number;
   excludedFromKpiCount: number;
   excludedFromKpiAmountAbs: number;
   topPenalties: Array<{ penalty: string; count: number }>;
   topHints: Array<{ hint: string; count: number }>;
+  topIgnoredReasons: Array<{ reason: TransferV3IgnoredReason; count: number }>;
   ambiguousBuckets: number;
 };
 
 export type TransferV3Result = {
   params: TransferV3Params;
   rows: TransferV3Row[];
+  ignoredRows: TransferV3IgnoredRow[];
   collisions: TransferV3CollisionBucket[];
   stats: TransferV3Stats;
 };
@@ -197,13 +224,33 @@ function sortRows(rows: TransferV3Row[]) {
   });
 }
 
-function shouldConsiderCandidate(debit: Candidate, credit: Candidate, windowDays: number) {
-  if (credit.tx.id === debit.tx.id) return false;
-  if (debit.tx.accountId === credit.tx.accountId) return false;
-  if (!debit.sourceKey || !credit.sourceKey || debit.sourceKey === credit.sourceKey) return false;
-  const dateDiffDays = dayDiffMs(debit.dateMs, credit.dateMs);
-  if (dateDiffDays > windowDays) return false;
-  return true;
+function mapCandidateSide(candidate: Candidate): TransferV3Row["a"] {
+  return {
+    transactionId: candidate.tx.id,
+    bankId: candidate.tx.bankId,
+    accountId: candidate.tx.accountId,
+    date: candidate.tx.date.slice(0, 10),
+    description: candidate.tx.descriptionRaw,
+    amountSigned: candidate.tx.amount,
+    balance: candidate.tx.balance,
+    source: {
+      fileId: candidate.tx.source.fileId,
+      fileHash: candidate.tx.source.fileHash,
+      lineIndex: candidate.tx.source.lineIndex,
+    },
+    merchantNorm: candidate.tx.merchantNorm,
+  };
+}
+
+function sortIgnoredRows(rows: TransferV3IgnoredRow[]) {
+  return [...rows].sort((a, b) => {
+    if (a.amountCents !== b.amountCents) return a.amountCents - b.amountCents;
+    const dA = a.dateA.localeCompare(b.dateA);
+    if (dA !== 0) return dA;
+    const dB = a.dateB.localeCompare(b.dateB);
+    if (dB !== 0) return dB;
+    return a.ignoredId.localeCompare(b.ignoredId);
+  });
 }
 
 export function matchTransfersV3(params: {
@@ -262,8 +309,11 @@ export function matchTransfersV3(params: {
 
   const penaltyCounter = new Map<string, number>();
   const hintCounter = new Map<string, number>();
+  const ignoredReasonCounter = new Map<TransferV3IgnoredReason, number>();
   const usedCredits = new Set<string>();
   const rows: TransferV3Row[] = [];
+  const ignoredRows: TransferV3IgnoredRow[] = [];
+  const maxIgnoredRows = 200;
   const bucketCollision = new Map<
     number,
     {
@@ -280,14 +330,115 @@ export function matchTransfersV3(params: {
     }
   >();
 
+  function addIgnoredRow(input: {
+    debit: Candidate;
+    credit: Candidate;
+    reason: TransferV3IgnoredReason;
+    confidence?: number;
+    score?: number;
+    hints?: string[];
+    penalties?: string[];
+    dateDiffDays?: number;
+    refId?: string;
+    accountKeyMatchAtoB?: boolean;
+    accountKeyMatchBtoA?: boolean;
+    nameMatchAtoB?: boolean;
+    nameMatchBtoA?: boolean;
+    payIdMatch?: boolean;
+  }) {
+    ignoredReasonCounter.set(input.reason, (ignoredReasonCounter.get(input.reason) || 0) + 1);
+    if (ignoredRows.length >= maxIgnoredRows) return;
+    const dateDiffDays =
+      typeof input.dateDiffDays === "number"
+        ? input.dateDiffDays
+        : dayDiffMs(input.debit.dateMs, input.credit.dateMs);
+    const hints = unique(input.hints || []);
+    const penalties = unique(input.penalties || []);
+    ignoredRows.push({
+      ignoredId: `ignored_${input.debit.tx.id.slice(0, 8)}_${input.credit.tx.id.slice(0, 8)}_${input.reason}`,
+      transferState: "ignored",
+      ignoredReason: input.reason,
+      confidence:
+        typeof input.confidence === "number"
+          ? input.confidence
+          : clamp01(typeof input.score === "number" ? input.score : 0),
+      amountCents: input.debit.amountCents,
+      dateA: input.debit.tx.date.slice(0, 10),
+      dateB: input.credit.tx.date.slice(0, 10),
+      dateDiffDays,
+      a: mapCandidateSide(input.debit),
+      b: mapCandidateSide(input.credit),
+      explain: {
+        amountCents: input.debit.amountCents,
+        dateDiffDays,
+        sameAccount: input.debit.tx.accountId === input.credit.tx.accountId,
+        descHints: hints,
+        penalties,
+        score: typeof input.score === "number" ? clamp01(input.score) : 0,
+        refId: input.refId || input.debit.evidence.refId || input.credit.evidence.refId,
+        accountKeyMatchAtoB: Boolean(input.accountKeyMatchAtoB),
+        accountKeyMatchBtoA: Boolean(input.accountKeyMatchBtoA),
+        nameMatchAtoB: Boolean(input.nameMatchAtoB),
+        nameMatchBtoA: Boolean(input.nameMatchBtoA),
+        payIdMatch: Boolean(input.payIdMatch),
+        evidenceA: input.debit.evidence,
+        evidenceB: input.credit.evidence,
+        accountMetaA: input.debit.accountMeta
+          ? {
+              accountName: input.debit.accountMeta.accountName,
+              accountKey: input.debit.accountMeta.accountKey,
+            }
+          : undefined,
+        accountMetaB: input.credit.accountMeta
+          ? {
+              accountName: input.credit.accountMeta.accountName,
+              accountKey: input.credit.accountMeta.accountKey,
+            }
+          : undefined,
+      },
+    });
+  }
+
   const debitCandidates = debits.map((debit) => {
     const amountBucket = creditsByAmount.get(debit.amountCents) || [];
-    const rawPool = amountBucket.filter((credit) =>
-      shouldConsiderCandidate(debit, credit, matcherParams.windowDays)
-    );
+    const rawPool: Candidate[] = [];
+    for (const credit of amountBucket) {
+      if (credit.tx.id === debit.tx.id) {
+        addIgnoredRow({ debit, credit, reason: "SELF_TX" });
+        continue;
+      }
+      if (debit.tx.accountId === credit.tx.accountId) {
+        addIgnoredRow({ debit, credit, reason: "SAME_ACCOUNT" });
+        continue;
+      }
+      if (!debit.sourceKey || !credit.sourceKey) {
+        addIgnoredRow({ debit, credit, reason: "MISSING_SOURCE" });
+        continue;
+      }
+      if (debit.sourceKey === credit.sourceKey) {
+        addIgnoredRow({ debit, credit, reason: "SAME_FILE" });
+        continue;
+      }
+      const dateDiffDays = dayDiffMs(debit.dateMs, credit.dateMs);
+      if (dateDiffDays > matcherParams.windowDays) {
+        addIgnoredRow({ debit, credit, reason: "DATE_OUT_OF_WINDOW", dateDiffDays });
+        continue;
+      }
+      rawPool.push(credit);
+    }
     const pool = debit.evidence.refId
       ? rawPool.filter((credit) => credit.evidence.refId === debit.evidence.refId)
       : rawPool;
+    if (debit.evidence.refId && rawPool.length > 0 && pool.length === 0) {
+      for (const credit of rawPool) {
+        addIgnoredRow({
+          debit,
+          credit,
+          reason: "REF_ID_MISMATCH",
+          refId: debit.evidence.refId,
+        });
+      }
+    }
     const scored: Scored[] = [];
 
     for (const credit of pool) {
@@ -442,28 +593,46 @@ export function matchTransfersV3(params: {
 
   for (const item of debitCandidates) {
     const available = item.scored.filter((candidate) => !usedCredits.has(candidate.credit.tx.id));
-    if (available.length === 0) continue;
+    if (available.length === 0) {
+      if (item.scored.length > 0) {
+        addIgnoredRow({
+          debit: item.debit,
+          credit: item.scored[0].credit,
+          reason: "CREDIT_ALREADY_MATCHED",
+          score: item.scored[0].score,
+          hints: item.scored[0].hints,
+          penalties: item.scored[0].penalties,
+          dateDiffDays: item.scored[0].dateDiffDays,
+          accountKeyMatchAtoB: item.scored[0].accountKeyMatchAtoB,
+          accountKeyMatchBtoA: item.scored[0].accountKeyMatchBtoA,
+          nameMatchAtoB: item.scored[0].nameMatchAtoB,
+          nameMatchBtoA: item.scored[0].nameMatchBtoA,
+          payIdMatch: item.scored[0].payIdMatch,
+        });
+      }
+      continue;
+    }
 
     const strong = available.filter((candidate) => candidate.strongClosureCount > 0);
     let best: Scored | undefined;
     let forceUncertain = false;
 
-      if (strong.length === 1) {
-        best = strong[0];
-      } else if (strong.length > 1) {
-        best = strong[0];
-        const bestBidirectionalName = best.nameMatchAtoB && best.nameMatchBtoA;
-        const competingBidirectional = strong
-          .slice(1)
-          .some((candidate) => candidate.nameMatchAtoB && candidate.nameMatchBtoA);
-        if (!(bestBidirectionalName && !competingBidirectional)) {
-          forceUncertain = true;
-          best.penalties = unique([...best.penalties, "AMBIGUOUS_MULTI_MATCH"]);
-          best.score = clamp01(best.score - 0.25);
-        }
-      } else {
-        best = available[0];
-        const second = available[1];
+    if (strong.length === 1) {
+      best = strong[0];
+    } else if (strong.length > 1) {
+      best = strong[0];
+      const bestBidirectionalName = best.nameMatchAtoB && best.nameMatchBtoA;
+      const competingBidirectional = strong
+        .slice(1)
+        .some((candidate) => candidate.nameMatchAtoB && candidate.nameMatchBtoA);
+      if (!(bestBidirectionalName && !competingBidirectional)) {
+        forceUncertain = true;
+        best.penalties = unique([...best.penalties, "AMBIGUOUS_MULTI_MATCH"]);
+        best.score = clamp01(best.score - 0.25);
+      }
+    } else {
+      best = available[0];
+      const second = available[1];
       if (second && Math.abs(best.score - second.score) <= 0.05) {
         best.penalties = unique([...best.penalties, "AMBIGUOUS_MULTI_MATCH"]);
         best.score = clamp01(best.score - 0.25);
@@ -497,7 +666,23 @@ export function matchTransfersV3(params: {
           : best.score >= matcherParams.minUncertain
             ? "uncertain"
             : null;
-    if (!state) continue;
+    if (!state) {
+      addIgnoredRow({
+        debit: item.debit,
+        credit: best.credit,
+        reason: "LOW_CONFIDENCE",
+        score: best.score,
+        hints: best.hints,
+        penalties: best.penalties,
+        dateDiffDays: best.dateDiffDays,
+        accountKeyMatchAtoB: best.accountKeyMatchAtoB,
+        accountKeyMatchBtoA: best.accountKeyMatchBtoA,
+        nameMatchAtoB: best.nameMatchAtoB,
+        nameMatchBtoA: best.nameMatchBtoA,
+        payIdMatch: best.payIdMatch,
+      });
+      continue;
+    }
 
     usedCredits.add(best.credit.tx.id);
 
@@ -595,6 +780,11 @@ export function matchTransfersV3(params: {
     .sort((a, b) => b.count - a.count || a.hint.localeCompare(b.hint))
     .slice(0, 10);
 
+  const topIgnoredReasons = [...ignoredReasonCounter.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason))
+    .slice(0, 10);
+
   const collisions: TransferV3CollisionBucket[] = [...bucketCollision.values()]
     .map((bucket) => ({
       amountCents: bucket.amountCents,
@@ -615,16 +805,19 @@ export function matchTransfersV3(params: {
   return {
     params: matcherParams,
     rows: sortedRows,
+    ignoredRows: sortIgnoredRows(ignoredRows),
     collisions,
     stats: {
       txCount: params.transactions.length,
       candidateCount: baseCandidates.length,
       matchedPairs: matchedRows.length,
       uncertainPairs: uncertainRows.length,
+      ignoredPairsCount: ignoredRows.length,
       excludedFromKpiCount,
       excludedFromKpiAmountAbs,
       topPenalties,
       topHints,
+      topIgnoredReasons,
       ambiguousBuckets: collisions.length,
     },
   };
