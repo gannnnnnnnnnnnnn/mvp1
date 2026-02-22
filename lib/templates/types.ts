@@ -1,3 +1,5 @@
+import { StatementAccountMeta } from "@/lib/parsing/accountMeta";
+
 export type DevTemplateMode = "monthly" | "incremental" | "unknown";
 
 export type DevTemplateSeverity = "info" | "warning" | "critical";
@@ -60,6 +62,7 @@ export type DevTemplateParseOutput = {
   templateId: string;
   mode: DevTemplateMode;
   accountId: string;
+  accountMeta?: StatementAccountMeta;
   coverage: DevTemplateCoverage;
   transactions: DevTemplateTransaction[];
   warnings: DevTemplateWarning[];

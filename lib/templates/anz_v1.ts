@@ -6,6 +6,12 @@ import {
   DevTemplateParseOutput,
   DevTemplateWarning,
 } from "@/lib/templates/types";
+import {
+  buildAccountKey,
+  normalizeAccountMeta,
+  normalizeAccountNumber,
+  normalizeBsb,
+} from "@/lib/parsing/accountMeta";
 
 const MONTHLY_RANGE_RE =
   /(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})\s*-\s*(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})/i;
@@ -218,7 +224,15 @@ function extractHeaderMeta(text: string, mode: DevTemplateDetection["mode"]) {
     });
   }
 
-  const accountId = bsb && accountNumber ? `${bsb}-${accountNumber}` : "unknown";
+  const accountNameMatch = /Account Name\s*\n\s*([^\n]+)/i.exec(text);
+  const accountName = accountNameMatch?.[1]?.trim() || undefined;
+
+  const normalizedBsb = normalizeBsb(bsb);
+  const normalizedAccountNumber = normalizeAccountNumber(accountNumber);
+  const accountId =
+    normalizedBsb && normalizedAccountNumber
+      ? `${normalizedBsb}-${normalizedAccountNumber}`
+      : "unknown";
 
   let startDate: string | undefined;
   let endDate: string | undefined;
@@ -250,6 +264,15 @@ function extractHeaderMeta(text: string, mode: DevTemplateDetection["mode"]) {
 
   return {
     accountId,
+    accountMeta: normalizeAccountMeta({
+      bankId: "anz",
+      accountId,
+      templateId: "anz_v1",
+      accountName,
+      bsb: normalizedBsb,
+      accountNumber: normalizedAccountNumber,
+      accountKey: buildAccountKey(normalizedBsb, normalizedAccountNumber),
+    }),
     coverage: {
       startDate,
       endDate,
@@ -713,6 +736,7 @@ function parseAnzV1(input: DevTemplateParseInput): DevTemplateParseOutput {
     templateId: "anz_v1",
     mode: detection.mode,
     accountId: header.accountId,
+    accountMeta: header.accountMeta,
     coverage: header.coverage,
     transactions: table.transactions,
     warnings: [...header.warnings, ...table.warnings],

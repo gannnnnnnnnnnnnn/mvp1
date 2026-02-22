@@ -75,6 +75,7 @@ export async function POST(request: Request) {
       accountId: parsed.accountId,
       templateId: parsed.templateId,
       templateType: parsed.templateType,
+      accountMeta: parsed.accountMeta,
     });
 
     const reviewReasons = parsed.quality.needsReviewReasons;

@@ -8,6 +8,7 @@ import {
 import { parseCommbankStatementDebitCredit } from "@/lib/parseCommbankStatementDebitCredit";
 import { getCommBankTemplateById } from "@/templates/commbank";
 import { detectDevTemplate } from "@/lib/templates/registry";
+import { extractCbaAccountMeta, StatementAccountMeta } from "@/lib/parsing/accountMeta";
 
 export type ParsedTransactionWithMeta = ParsedTransaction & {
   bankId?: string;
@@ -38,6 +39,7 @@ export type MainParseOutput = {
   bankId: string;
   accountId: string;
   templateId: string;
+  accountMeta?: StatementAccountMeta;
   transactions: ParsedTransactionWithMeta[];
   warnings: ParseWarning[];
   needsReview: boolean;
@@ -234,6 +236,7 @@ export function parseMainText(params: {
       bankId: parsed.bankId,
       accountId: parsed.accountId || accountIdHint || "default",
       templateId: parsed.templateId,
+      accountMeta: parsed.accountMeta,
       transactions,
       warnings,
       needsReview: reasons.size > 0,
@@ -346,6 +349,11 @@ export function parseMainText(params: {
 
   const bankId = "cba";
   const accountId = accountIdHint || "default";
+  const accountMeta = extractCbaAccountMeta({
+    text,
+    accountId,
+    templateId: templateType,
+  });
   const normalizedTransactions: ParsedTransactionWithMeta[] = parsed.transactions.map((tx, idx) => ({
     ...tx,
     bankId,
@@ -364,6 +372,7 @@ export function parseMainText(params: {
     bankId,
     accountId,
     templateId: templateType,
+    accountMeta,
     transactions: normalizedTransactions,
     warnings: parsed.warnings,
     needsReview: reasons.length > 0,
