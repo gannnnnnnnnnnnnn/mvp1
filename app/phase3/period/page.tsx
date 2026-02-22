@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import {
+  AccountDisplayOption,
   ApiError,
   FileMeta,
   OverviewResponse,
@@ -38,6 +39,14 @@ const PERCENT = new Intl.NumberFormat("en-AU", {
 });
 
 type PeriodType = "month" | "quarter" | "year";
+
+function formatAccountOptionLabel(option: AccountDisplayOption) {
+  const head = option.accountName
+    ? `${option.bankId.toUpperCase()} · ${option.accountName}`
+    : `${option.bankId.toUpperCase()} · ${option.accountId}`;
+  const tail = option.accountKey || option.accountId;
+  return `${head} (${tail})`;
+}
 
 type DrilldownTx = {
   id: string;
@@ -280,7 +289,15 @@ export default function Phase3PeriodPage() {
     [files, selectedFileIds]
   );
   const bankOptions = useMemo(() => overview?.bankIds || [], [overview?.bankIds]);
-  const accountOptions = useMemo(() => overview?.accountIds || [], [overview?.accountIds]);
+  const accountOptions = useMemo(
+    () =>
+      overview?.accountDisplayOptions ||
+      (overview?.accountIds || []).map((accountId) => ({
+        bankId: selectedBankId || "cba",
+        accountId,
+      })),
+    [overview?.accountDisplayOptions, overview?.accountIds, selectedBankId]
+  );
 
   const availablePeriodKeys = useMemo(
     () => availableKeysByType(overview, periodType),
@@ -912,9 +929,12 @@ export default function Phase3PeriodPage() {
                 className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="">All accounts</option>
-                {accountOptions.map((accountId) => (
-                  <option key={accountId} value={accountId}>
-                    {accountId}
+                {accountOptions.map((option) => (
+                  <option
+                    key={`${option.bankId}:${option.accountId}`}
+                    value={option.accountId}
+                  >
+                    {formatAccountOptionLabel(option)}
                   </option>
                 ))}
               </select>

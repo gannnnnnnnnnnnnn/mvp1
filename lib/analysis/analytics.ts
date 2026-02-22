@@ -279,6 +279,52 @@ function buildDatasetCoverage(transactions: NormalizedTransaction[]) {
   };
 }
 
+function buildAccountDisplayOptions(params: {
+  transactions: NormalizedTransaction[];
+  statementAccountMeta: StatementAccountMeta[];
+}) {
+  const byKey = new Map<
+    string,
+    {
+      bankId: string;
+      accountId: string;
+      accountName?: string;
+      accountKey?: string;
+    }
+  >();
+
+  for (const tx of params.transactions) {
+    const key = `${tx.bankId}|${tx.accountId}`;
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        bankId: tx.bankId,
+        accountId: tx.accountId,
+      });
+    }
+  }
+
+  for (const meta of params.statementAccountMeta) {
+    const key = `${meta.bankId}|${meta.accountId}`;
+    const existing = byKey.get(key) || {
+      bankId: meta.bankId,
+      accountId: meta.accountId,
+    };
+    byKey.set(key, {
+      ...existing,
+      accountName: existing.accountName || meta.accountName,
+      accountKey: existing.accountKey || meta.accountKey,
+    });
+  }
+
+  return [...byKey.values()].sort((a, b) => {
+    const bankDiff = a.bankId.localeCompare(b.bankId);
+    if (bankDiff !== 0) return bankDiff;
+    const keyA = `${a.accountName || ""}|${a.accountId}`;
+    const keyB = `${b.accountName || ""}|${b.accountId}`;
+    return keyA.localeCompare(keyB);
+  });
+}
+
 function dedupeTransactions(transactions: NormalizedTransaction[]) {
   const dedupedByKey = new Map<string, NormalizedTransaction>();
   for (const tx of transactions) {
@@ -514,6 +560,10 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
   );
   const dedupedCount = txCountBeforeDedupe - dedupedTransactions.length;
   const datasetCoverage = buildDatasetCoverage(annotatedTransactions);
+  const accountDisplayOptions = buildAccountDisplayOptions({
+    transactions: annotatedTransactions,
+    statementAccountMeta: [...statementAccountMetaByKey.values()],
+  });
 
   const core = runAnalysisCore({
     transactions: annotatedTransactions,
@@ -559,6 +609,7 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
     transactions: core.transactions,
     allTransactions: annotatedTransactions,
     statementAccountMeta: [...statementAccountMetaByKey.values()],
+    accountDisplayOptions,
     transferStats: core.transferStats,
     appliedFilters: core.appliedFilters,
   };
