@@ -25,10 +25,12 @@ type SummaryResponse = {
     candidateCount: number;
     matchedPairs: number;
     uncertainPairs: number;
+    ignoredPairsCount: number;
     excludedFromKpiCount: number;
     excludedFromKpiAmountAbs: number;
     topPenalties: Array<{ penalty: string; count: number }>;
     topHints: Array<{ hint: string; count: number }>;
+    topIgnoredReasons: Array<{ reason: string; count: number }>;
     ambiguousBuckets: number;
   };
   decisionStats: {
@@ -45,16 +47,18 @@ type SummaryResponse = {
 
 type MatchRow = {
   matchId: string;
-  state: "matched" | "uncertain";
+  transferState: "matched" | "uncertain" | "ignored";
+  state?: "matched" | "uncertain";
   confidence: number;
   amountCents: number;
   dateA: string;
   dateB: string;
   dateDiffDays: number;
-  decision: "INTERNAL_OFFSET" | "BOUNDARY_FLOW" | "UNCERTAIN_NO_OFFSET";
+  decision: "INTERNAL_OFFSET" | "BOUNDARY_FLOW" | "UNCERTAIN_NO_OFFSET" | "IGNORED";
   kpiEffect: "EXCLUDED" | "INCLUDED";
   sameFile: boolean;
   whySentence: string;
+  ignoredReason?: string;
   a: {
     transactionId: string;
     bankId: string;
@@ -157,7 +161,12 @@ function buildParams(state: {
   minMatched: number;
   minUncertain: number;
   matchState: "all" | "matched" | "uncertain";
-  decision: "all" | "INTERNAL_OFFSET" | "BOUNDARY_FLOW" | "UNCERTAIN_NO_OFFSET";
+  decision:
+    | "all"
+    | "INTERNAL_OFFSET"
+    | "BOUNDARY_FLOW"
+    | "UNCERTAIN_NO_OFFSET"
+    | "IGNORED";
   sameFile: "all" | "yes" | "no";
   q: string;
   amountCents: string;
@@ -198,11 +207,15 @@ function toSentence(row: MatchRow) {
 }
 
 function toTransferState(row: MatchRow) {
-  if (row.decision === "UNCERTAIN_NO_OFFSET" || row.state === "uncertain") return "Uncertain";
+  if (row.transferState === "ignored" || row.decision === "IGNORED") return "Ignored";
+  if (row.decision === "UNCERTAIN_NO_OFFSET" || row.transferState === "uncertain") {
+    return "Uncertain";
+  }
   return "Matched";
 }
 
 function toKindLabel(row: MatchRow) {
+  if (row.decision === "IGNORED") return "Ignored candidate";
   if (row.decision === "INTERNAL_OFFSET") return "Internal offset";
   if (row.decision === "BOUNDARY_FLOW") return "Boundary crossing";
   return "Not offset";
@@ -213,6 +226,9 @@ function toEffectLabel(row: MatchRow) {
 }
 
 function toWhyLabel(row: MatchRow) {
+  if (row.decision === "IGNORED") {
+    return `Ignored: ${row.ignoredReason || row.whySentence}`;
+  }
   if (toTransferState(row) === "Uncertain") {
     return `Uncertain: ${row.whySentence}`;
   }
@@ -246,7 +262,7 @@ export default function TransfersClient() {
   const [minUncertain, setMinUncertain] = useState(0.6);
   const [matchState, setMatchState] = useState<"all" | "matched" | "uncertain">("all");
   const [decision, setDecision] = useState<
-    "all" | "INTERNAL_OFFSET" | "BOUNDARY_FLOW" | "UNCERTAIN_NO_OFFSET"
+    "all" | "INTERNAL_OFFSET" | "BOUNDARY_FLOW" | "UNCERTAIN_NO_OFFSET" | "IGNORED"
   >("all");
   const [sameFile, setSameFile] = useState<"all" | "yes" | "no">("all");
   const [q, setQ] = useState("");
@@ -480,6 +496,7 @@ export default function TransfersClient() {
                       | "INTERNAL_OFFSET"
                       | "BOUNDARY_FLOW"
                       | "UNCERTAIN_NO_OFFSET"
+                      | "IGNORED"
                   )
                 }
               >
@@ -487,6 +504,7 @@ export default function TransfersClient() {
                 <option value="INTERNAL_OFFSET">INTERNAL_OFFSET</option>
                 <option value="BOUNDARY_FLOW">BOUNDARY_FLOW</option>
                 <option value="UNCERTAIN_NO_OFFSET">UNCERTAIN_NO_OFFSET</option>
+                <option value="IGNORED">IGNORED</option>
               </select>
             </label>
             <label className="text-xs font-medium text-slate-700">
@@ -613,6 +631,12 @@ export default function TransfersClient() {
               </p>
             </article>
             <article className="rounded-xl border border-slate-200 bg-white p-3">
+              <p className="text-xs text-slate-700">ignoredPairs</p>
+              <p className="text-xl font-semibold text-slate-600">
+                {summary.stats.ignoredPairsCount}
+              </p>
+            </article>
+            <article className="rounded-xl border border-slate-200 bg-white p-3">
               <p className="text-xs text-slate-700">excludedFromKpiAmountAbs (internal)</p>
               <p className="text-xl font-semibold text-slate-900">
                 {CURRENCY.format(summary.stats.excludedFromKpiAmountAbs)}
@@ -640,6 +664,17 @@ export default function TransfersClient() {
                 {summary.stats.topHints.map((item) => (
                   <span key={item.hint} className="rounded bg-emerald-100 px-2 py-1 text-emerald-800">
                     {item.hint}: {item.count}
+                  </span>
+                ))}
+              </div>
+            </article>
+            <article className="rounded-xl border border-slate-200 bg-white p-3 md:col-span-3 xl:col-span-3">
+              <p className="text-xs text-slate-700">topIgnoredReasons</p>
+              <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-900">
+                {summary.stats.topIgnoredReasons.length === 0 && <span>-</span>}
+                {summary.stats.topIgnoredReasons.map((item) => (
+                  <span key={item.reason} className="rounded bg-slate-200 px-2 py-1 text-slate-800">
+                    {item.reason}: {item.count}
                   </span>
                 ))}
               </div>
@@ -741,6 +776,7 @@ export default function TransfersClient() {
                     <th className="px-2 py-2 text-left">Transfer state</th>
                     <th className="px-2 py-2 text-left">Kind</th>
                     <th className="px-2 py-2 text-left">KPI effect</th>
+                    <th className="px-2 py-2 text-left">Ignored reason</th>
                     <th className="px-2 py-2 text-left">sameFile</th>
                     <th className="px-2 py-2 text-left">Conf</th>
                     <th className="px-2 py-2 text-left">Amount</th>
@@ -759,6 +795,8 @@ export default function TransfersClient() {
                           className={`rounded px-2 py-0.5 text-xs font-medium ${
                             toTransferState(row) === "Matched"
                               ? "bg-emerald-100 text-emerald-800"
+                              : toTransferState(row) === "Ignored"
+                                ? "bg-slate-200 text-slate-700"
                               : "bg-amber-100 text-amber-800"
                           }`}
                         >
@@ -775,11 +813,16 @@ export default function TransfersClient() {
                           className={`rounded px-2 py-0.5 text-xs font-medium ${
                             row.kpiEffect === "EXCLUDED"
                               ? "bg-emerald-100 text-emerald-800"
+                              : row.decision === "IGNORED"
+                                ? "bg-slate-200 text-slate-700"
                               : "bg-slate-100 text-slate-800"
                           }`}
                         >
                           {toEffectLabel(row)}
                         </span>
+                      </td>
+                      <td className="px-2 py-2 text-xs text-slate-700">
+                        {row.decision === "IGNORED" ? row.ignoredReason || "-" : "-"}
                       </td>
                       <td className="px-2 py-2">{row.sameFile ? "yes" : "no"}</td>
                       <td className="px-2 py-2">{row.confidence.toFixed(2)}</td>
@@ -836,7 +879,7 @@ export default function TransfersClient() {
                   ))}
                   {matches.length === 0 && (
                     <tr>
-                      <td className="px-2 py-4 text-sm text-slate-700" colSpan={11}>
+                      <td className="px-2 py-4 text-sm text-slate-700" colSpan={12}>
                         No rows for current filters.
                       </td>
                     </tr>
