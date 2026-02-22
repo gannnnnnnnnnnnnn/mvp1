@@ -117,6 +117,33 @@ export function normalizeAccountMeta(
   };
 }
 
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 48);
+}
+
+export function resolveAccountIdFromMeta(params: {
+  bankId: string;
+  existingAccountId?: string;
+  accountMeta?: Partial<StatementAccountMeta>;
+}) {
+  const existing = String(params.existingAccountId || "").trim();
+  const accountKey = params.accountMeta?.accountKey?.trim();
+  if (accountKey) return accountKey;
+
+  const accountName = String(params.accountMeta?.accountName || "").trim();
+  if (params.bankId === "cba" && accountName) {
+    const slug = slugify(accountName);
+    if (slug) return `cba-${slug}`;
+  }
+
+  if (existing && existing !== "default") return existing;
+  return "default";
+}
+
 export function extractCbaAccountMeta(params: {
   text: string;
   accountId: string;
