@@ -6,6 +6,7 @@ export type StatementAccountMeta = {
   bsb?: string;
   accountNumber?: string;
   accountKey?: string;
+  metaWarnings?: string[];
 };
 
 function digitsOnly(value: string) {
@@ -87,6 +88,25 @@ export function normalizeAccountNumber(value?: string) {
   return digits;
 }
 
+export function sanitizeAccountNumber(bsb?: string, accountNumberRaw?: string) {
+  const warnings: string[] = [];
+  const normalizedBsb = normalizeBsb(bsb);
+  const normalizedRaw = normalizeAccountNumber(accountNumberRaw);
+  if (!normalizedRaw) {
+    return { accountNumber: undefined, warnings };
+  }
+  if (!normalizedBsb || !normalizedRaw.startsWith(normalizedBsb)) {
+    return { accountNumber: normalizedRaw, warnings };
+  }
+
+  const remainder = normalizedRaw.slice(6);
+  if (remainder.length >= 6 && remainder.length <= 12) {
+    warnings.push("ACCOUNT_NUMBER_HAS_BSB_PREFIX_STRIPPED");
+    return { accountNumber: remainder, warnings };
+  }
+  return { accountNumber: normalizedRaw, warnings };
+}
+
 export function buildAccountKey(bsb?: string, accountNumber?: string) {
   const normalizedBsb = normalizeBsb(bsb);
   const normalizedAccount = normalizeAccountNumber(accountNumber);
@@ -101,10 +121,18 @@ export function normalizeAccountMeta(
     templateId: string;
   }
 ): StatementAccountMeta {
-  const accountName = (meta.accountName || "").trim() || undefined;
+  const rawAccountName = (meta.accountName || "").trim();
+  const accountName =
+    rawAccountName && !/\bBSB\b/i.test(rawAccountName) ? rawAccountName : undefined;
   const bsb = normalizeBsb(meta.bsb);
-  const accountNumber = normalizeAccountNumber(meta.accountNumber);
+  const sanitized = sanitizeAccountNumber(bsb, meta.accountNumber);
+  const accountNumber = sanitized.accountNumber;
   const accountKey = buildAccountKey(bsb, accountNumber);
+  const metaWarnings = [
+    ...(Array.isArray(meta.metaWarnings) ? meta.metaWarnings : []),
+    ...sanitized.warnings,
+  ];
+  const uniqueWarnings = [...new Set(metaWarnings.map((item) => String(item).trim()).filter(Boolean))];
 
   return {
     bankId: meta.bankId,
@@ -114,6 +142,7 @@ export function normalizeAccountMeta(
     bsb,
     accountNumber,
     accountKey,
+    metaWarnings: uniqueWarnings.length > 0 ? uniqueWarnings : undefined,
   };
 }
 
@@ -164,10 +193,13 @@ export function extractCbaAccountMeta(params: {
     if (!accountName) {
       const value = extractLabeledValue(lines, /Account name\s*[:\s]*([A-Za-z0-9 '&.-]{2,})/i);
       if (value) {
-        accountName = value
+        const candidate = value
           .replace(/\s{2,}/g, " ")
           .replace(/\bBSB\b.*$/i, "")
           .trim();
+        if (candidate && !/\bBSB\b/i.test(candidate)) {
+          accountName = candidate;
+        }
       }
     }
 
