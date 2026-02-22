@@ -210,6 +210,7 @@ export function matchTransfersV3(params: {
   transactions: NormalizedTransaction[];
   boundaryAccountIds: string[];
   statementAccountMeta: StatementAccountMeta[];
+  accountAliases?: Record<string, string>;
   options?: Partial<TransferV3Params>;
 }): TransferV3Result {
   const matcherParams: TransferV3Params = {
@@ -311,11 +312,19 @@ export function matchTransfersV3(params: {
       const nameMatchAtoB = namesMatch(
         debit.evidence.counterpartyName,
         credit.accountMeta?.accountName
-      );
+      ) ||
+        namesMatch(
+          debit.evidence.counterpartyName,
+          params.accountAliases?.[credit.tx.accountId]
+        );
       const nameMatchBtoA = namesMatch(
         credit.evidence.counterpartyName,
         debit.accountMeta?.accountName
-      );
+      ) ||
+        namesMatch(
+          credit.evidence.counterpartyName,
+          params.accountAliases?.[debit.tx.accountId]
+        );
       const bidirectionalNameClosure = nameMatchAtoB && nameMatchBtoA;
 
       let strongClosureCount = 0;

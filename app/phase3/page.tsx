@@ -34,6 +34,7 @@ type BoundaryConfig = {
   version: 1;
   mode: "customAccounts";
   boundaryAccountIds: string[];
+  accountAliases: Record<string, string>;
   lastUpdatedAt: string;
 };
 
@@ -75,6 +76,7 @@ export default function Phase3DatasetHomePage() {
   const [boundary, setBoundary] = useState<BoundaryResponse | null>(null);
   const [boundaryModalOpen, setBoundaryModalOpen] = useState(false);
   const [boundaryDraft, setBoundaryDraft] = useState<string[]>([]);
+  const [boundaryAliasDraft, setBoundaryAliasDraft] = useState<Record<string, string>>({});
   const [boundarySaving, setBoundarySaving] = useState(false);
   const [boundaryStatus, setBoundaryStatus] = useState("");
 
@@ -120,6 +122,7 @@ export default function Phase3DatasetHomePage() {
       }
       setBoundary(data);
       setBoundaryDraft(data.config.boundaryAccountIds);
+      setBoundaryAliasDraft(data.config.accountAliases || {});
     } catch {
       setError({ code: "BOUNDARY_FAILED", message: "Failed to load boundary config." });
     }
@@ -231,7 +234,10 @@ export default function Phase3DatasetHomePage() {
       const res = await fetch("/api/analysis/boundary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ boundaryAccountIds: boundaryDraft }),
+        body: JSON.stringify({
+          boundaryAccountIds: boundaryDraft,
+          accountAliases: boundaryAliasDraft,
+        }),
       });
       const data = (await res.json()) as BoundaryResponse | { ok: false; error: ApiError };
       if (!data.ok) {
@@ -240,6 +246,7 @@ export default function Phase3DatasetHomePage() {
       }
       setBoundary(data);
       setBoundaryDraft(data.config.boundaryAccountIds);
+      setBoundaryAliasDraft(data.config.accountAliases || {});
       setBoundaryStatus("Saved.");
       setBoundaryModalOpen(false);
     } catch {
@@ -626,6 +633,21 @@ export default function Phase3DatasetHomePage() {
                           {account.dateRange
                             ? ` · ${account.dateRange.from} → ${account.dateRange.to}`
                             : ""}
+                        </span>
+                        <span className="mt-1 block">
+                          <input
+                            type="text"
+                            value={boundaryAliasDraft[account.accountId] || ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) =>
+                              setBoundaryAliasDraft((prev) => ({
+                                ...prev,
+                                [account.accountId]: e.target.value,
+                              }))
+                            }
+                            placeholder="Alias (optional, used for transfer name matching)"
+                            className="mt-1 h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                          />
                         </span>
                       </span>
                     </label>

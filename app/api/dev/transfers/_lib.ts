@@ -83,6 +83,7 @@ export async function runTransferInspector(searchParams: URLSearchParams) {
     transactions: source,
     boundaryAccountIds: config.boundaryAccountIds,
     statementAccountMeta: loaded.statementAccountMeta || [],
+    accountAliases: config.accountAliases || {},
     options: params,
   });
 

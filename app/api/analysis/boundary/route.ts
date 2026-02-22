@@ -126,7 +126,10 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as { boundaryAccountIds?: unknown };
+    const body = (await request.json()) as {
+      boundaryAccountIds?: unknown;
+      accountAliases?: unknown;
+    };
     if (!Array.isArray(body?.boundaryAccountIds)) {
       return errorJson(400, "BAD_REQUEST", "boundaryAccountIds must be an array.");
     }
@@ -134,9 +137,21 @@ export async function POST(request: Request) {
     const boundaryAccountIds = body.boundaryAccountIds
       .map((id) => String(id || "").trim())
       .filter(Boolean);
+    const accountAliases =
+      typeof body.accountAliases === "object" &&
+      body.accountAliases !== null &&
+      !Array.isArray(body.accountAliases)
+        ? Object.fromEntries(
+            Object.entries(body.accountAliases).map(([key, value]) => [
+              String(key || "").trim(),
+              String(value || "").trim(),
+            ])
+          )
+        : {};
 
     const nextConfig = await writeBoundaryConfig({
       boundaryAccountIds,
+      accountAliases,
     });
 
     const indexRows = await readIndex();

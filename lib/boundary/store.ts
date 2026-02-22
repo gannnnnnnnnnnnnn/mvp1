@@ -7,6 +7,7 @@ export type BoundaryConfig = {
   version: 1;
   mode: BoundaryMode;
   boundaryAccountIds: string[];
+  accountAliases: Record<string, string>;
   lastUpdatedAt: string;
 };
 
@@ -22,8 +23,22 @@ function defaultBoundaryConfig(knownAccountIds: string[]): BoundaryConfig {
     version: 1,
     mode: "customAccounts",
     boundaryAccountIds: normalizeAccountIds(knownAccountIds),
+    accountAliases: {},
     lastUpdatedAt: new Date().toISOString(),
   };
+}
+
+function normalizeAliases(input: Record<string, unknown> | undefined) {
+  if (!input || typeof input !== "object") return {};
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input)) {
+    const id = String(key || "").trim();
+    if (!id) continue;
+    const alias = String(value || "").trim();
+    if (!alias) continue;
+    out[id] = alias;
+  }
+  return out;
 }
 
 async function writeBoundarySafe(config: BoundaryConfig) {
@@ -62,6 +77,9 @@ export async function readBoundaryConfig(
         parsed.boundaryAccountIds && Array.isArray(parsed.boundaryAccountIds)
           ? normalizeAccountIds(parsed.boundaryAccountIds)
           : normalizeAccountIds(knownAccountIds),
+      accountAliases: normalizeAliases(
+        parsed.accountAliases as Record<string, unknown> | undefined
+      ),
       lastUpdatedAt:
         typeof parsed.lastUpdatedAt === "string"
           ? parsed.lastUpdatedAt
@@ -83,11 +101,13 @@ export async function readBoundaryConfig(
 
 export async function writeBoundaryConfig(next: {
   boundaryAccountIds: string[];
+  accountAliases?: Record<string, string>;
 }): Promise<BoundaryConfig> {
   const config: BoundaryConfig = {
     version: 1,
     mode: "customAccounts",
     boundaryAccountIds: normalizeAccountIds(next.boundaryAccountIds),
+    accountAliases: normalizeAliases(next.accountAliases),
     lastUpdatedAt: new Date().toISOString(),
   };
 

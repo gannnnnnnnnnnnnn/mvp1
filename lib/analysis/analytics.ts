@@ -144,12 +144,14 @@ function mergeTransferMetadata(
 function annotateTransfersWithV3(
   transactions: NormalizedTransaction[],
   boundaryAccountIds: string[],
-  statementAccountMeta: StatementAccountMeta[]
+  statementAccountMeta: StatementAccountMeta[],
+  accountAliases: Record<string, string>
 ) {
   const v3 = matchTransfersV3({
     transactions,
     boundaryAccountIds,
     statementAccountMeta,
+    accountAliases,
     options: DEFAULT_TRANSFER_V3_PARAMS,
   });
   const candidates = new Map<string, NonNullable<NormalizedTransaction["transfer"]>>();
@@ -556,7 +558,8 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
   const annotatedTransactions = annotateTransfersWithV3(
     dedupedTransactions,
     boundary.config.boundaryAccountIds,
-    [...statementAccountMetaByKey.values()]
+    [...statementAccountMetaByKey.values()],
+    boundary.config.accountAliases || {}
   );
   const dedupedCount = txCountBeforeDedupe - dedupedTransactions.length;
   const datasetCoverage = buildDatasetCoverage(annotatedTransactions);
