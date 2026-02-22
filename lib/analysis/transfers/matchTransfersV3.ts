@@ -160,8 +160,17 @@ function namesMatch(a?: string, b?: string) {
 }
 
 function hasTransferHints(evidence: TransferEvidence) {
+  if (!evidence) return false;
+  if (
+    evidence.transferType === "TRANSFER_TO" ||
+    evidence.transferType === "TRANSFER_FROM" ||
+    evidence.transferType === "PAYMENT_TO" ||
+    evidence.transferType === "PAYMENT_FROM"
+  ) {
+    return true;
+  }
   return evidence.hints.some((hint) =>
-    ["TRANSFER", "OSKO", "NPP", "PAYID", "TO", "FROM"].includes(hint)
+    ["TRANSFER", "OSKO", "NPP", "PAYID"].includes(hint)
   );
 }
 
@@ -229,11 +238,7 @@ export function matchTransfersV3(params: {
       accountMeta: metaMap.get(keyForAccountMeta(tx.bankId, tx.accountId)),
     }))
     .filter((candidate) => boundarySet.size === 0 || boundarySet.has(candidate.tx.accountId))
-    .filter((candidate) => {
-      const hasHints = hasTransferHints(candidate.evidence);
-      const hasFlag = Boolean(candidate.tx.flags?.transferCandidate);
-      return hasHints || hasFlag;
-    });
+    .filter((candidate) => hasTransferHints(candidate.evidence));
 
   const debits = baseCandidates
     .filter((item) => item.tx.amount < 0)
@@ -311,6 +316,7 @@ export function matchTransfersV3(params: {
         credit.evidence.counterpartyName,
         debit.accountMeta?.accountName
       );
+      const bidirectionalNameClosure = nameMatchAtoB && nameMatchBtoA;
 
       let strongClosureCount = 0;
       if (accountKeyMatchAtoB) {
@@ -326,8 +332,11 @@ export function matchTransfersV3(params: {
         strongClosureCount += 1;
       }
 
-      if (nameMatchAtoB) score += 0.2;
-      if (nameMatchBtoA) score += 0.2;
+      if (nameMatchAtoB) score += 0.3;
+      if (nameMatchBtoA) score += 0.3;
+      if (bidirectionalNameClosure) {
+        strongClosureCount += 1;
+      }
 
       const complement = toComplementaryDirection(debit.evidence.transferType);
       if (complement && credit.evidence.transferType === complement) {
@@ -430,16 +439,22 @@ export function matchTransfersV3(params: {
     let best: Scored | undefined;
     let forceUncertain = false;
 
-    if (strong.length === 1) {
-      best = strong[0];
-    } else if (strong.length > 1) {
-      best = strong[0];
-      forceUncertain = true;
-      best.penalties = unique([...best.penalties, "AMBIGUOUS_MULTI_MATCH"]);
-      best.score = clamp01(best.score - 0.25);
-    } else {
-      best = available[0];
-      const second = available[1];
+      if (strong.length === 1) {
+        best = strong[0];
+      } else if (strong.length > 1) {
+        best = strong[0];
+        const bestBidirectionalName = best.nameMatchAtoB && best.nameMatchBtoA;
+        const competingBidirectional = strong
+          .slice(1)
+          .some((candidate) => candidate.nameMatchAtoB && candidate.nameMatchBtoA);
+        if (!(bestBidirectionalName && !competingBidirectional)) {
+          forceUncertain = true;
+          best.penalties = unique([...best.penalties, "AMBIGUOUS_MULTI_MATCH"]);
+          best.score = clamp01(best.score - 0.25);
+        }
+      } else {
+        best = available[0];
+        const second = available[1];
       if (second && Math.abs(best.score - second.score) <= 0.05) {
         best.penalties = unique([...best.penalties, "AMBIGUOUS_MULTI_MATCH"]);
         best.score = clamp01(best.score - 0.25);
@@ -449,12 +464,25 @@ export function matchTransfersV3(params: {
     if (!best) continue;
 
     const hasStrongClosure = best.strongClosureCount > 0;
+    const hasBidirectionalNameClosure = best.nameMatchAtoB && best.nameMatchBtoA;
+    const hasOneDirectionNameClosure =
+      (best.nameMatchAtoB || best.nameMatchBtoA) && !hasBidirectionalNameClosure;
+    const hasStrongHints =
+      hasTransferHints(item.debit.evidence) && hasTransferHints(best.credit.evidence);
+    const second = available[1];
+    const uniqueEnough = !second || Math.abs(best.score - second.score) > 0.05;
     const state: TransferV3State | null = forceUncertain
       ? best.score >= matcherParams.minUncertain
         ? "uncertain"
         : null
-      : hasStrongClosure
+      : hasStrongClosure || hasBidirectionalNameClosure
         ? "matched"
+        : hasOneDirectionNameClosure
+          ? best.score >= matcherParams.minMatched && uniqueEnough && hasStrongHints
+            ? "matched"
+            : best.score >= matcherParams.minUncertain
+              ? "uncertain"
+              : null
         : best.score >= matcherParams.minMatched
           ? "matched"
           : best.score >= matcherParams.minUncertain
