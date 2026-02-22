@@ -26,6 +26,18 @@ type AccountsResponse = {
   accounts: AccountRow[];
 };
 
+type RebuildResponse =
+  | {
+      ok: true;
+      updatedCount: number;
+      failureCount: number;
+      failures: Array<{ fileId: string; fileName: string; reason: string }>;
+    }
+  | {
+      ok: false;
+      error: ApiError;
+    };
+
 type SortKey =
   | "uploadedAt"
   | "fileName"
@@ -62,6 +74,8 @@ export default function AccountsClient() {
   const [sortKey, setSortKey] = useState<SortKey>("uploadedAt");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [copyStatus, setCopyStatus] = useState("");
+  const [rebuildStatus, setRebuildStatus] = useState("");
+  const [rebuildLoading, setRebuildLoading] = useState(false);
 
   async function fetchRows() {
     setLoading(true);
@@ -86,6 +100,29 @@ export default function AccountsClient() {
     await navigator.clipboard.writeText(JSON.stringify(rows, null, 2));
     setCopyStatus("Copied.");
     window.setTimeout(() => setCopyStatus(""), 1200);
+  }
+
+  async function rebuildAccountIdentity() {
+    setRebuildLoading(true);
+    setRebuildStatus("");
+    try {
+      const res = await fetch("/api/dev/accounts/rebuild", {
+        method: "POST",
+      });
+      const data = (await res.json()) as RebuildResponse;
+      if (!data.ok) {
+        setRebuildStatus(`Rebuild failed: ${data.error.code} ${data.error.message}`);
+        return;
+      }
+      setRebuildStatus(
+        `Rebuild complete. updated=${data.updatedCount}, failures=${data.failureCount}`
+      );
+      await fetchRows();
+    } catch {
+      setRebuildStatus("Rebuild failed: request error.");
+    } finally {
+      setRebuildLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -132,7 +169,20 @@ export default function AccountsClient() {
             >
               Copy JSON
             </button>
+            <button
+              type="button"
+              onClick={() => void rebuildAccountIdentity()}
+              className="rounded border border-slate-300 bg-white px-2 py-1 text-slate-900 hover:bg-slate-50"
+              disabled={rebuildLoading}
+            >
+              {rebuildLoading
+                ? "Rebuilding..."
+                : "Rebuild account identity for existing files"}
+            </button>
             {copyStatus ? <span className="text-emerald-700">{copyStatus}</span> : null}
+            {rebuildStatus ? (
+              <span className="text-indigo-700">{rebuildStatus}</span>
+            ) : null}
           </div>
 
           <div className="mt-3 grid gap-2 sm:grid-cols-3">
