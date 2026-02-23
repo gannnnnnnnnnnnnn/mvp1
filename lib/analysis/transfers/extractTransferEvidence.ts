@@ -25,6 +25,12 @@ const REF_ID_RE = /#([A-Za-z0-9]+)/;
 const INLINE_ACCOUNT_KEY_RE = /\b(\d{6})-(\d{6,12})\b/;
 const BSB_RE = /\b(\d{3})[- ]?(\d{3})\b/;
 const ACCOUNT_RE = /\b(\d{6,12})\b/;
+const ANZ_PAYMENT_FROM_RE =
+  /\bPAYMENT\s+FROM\s+([A-Z\s]+?)(?:\s+ANZ\b|\s+PLUS\b|\s+EVERYDAY\b|$)/i;
+const ANZ_PAYMENT_TO_RE =
+  /\bPAYMENT\s+TO\s+([A-Z\s]+?)(?:\s+ANZ\b|\s+PLUS\b|\s+EVERYDAY\b|$)/i;
+const COUNTERPARTY_STOPWORDS_RE =
+  /\b(?:ANZ|PLUS|EVERYDAY|ACCOUNT|STATEMENT|PAGE|OF)\b/gi;
 
 function unique(values: string[]) {
   return [...new Set(values)];
@@ -36,9 +42,12 @@ function normalizeName(value?: string) {
     .replace(/\(PAYID\)/gi, " ")
     .replace(REF_ID_RE, " ")
     .replace(INLINE_ACCOUNT_KEY_RE, " ")
+    .replace(COUNTERPARTY_STOPWORDS_RE, " ")
+    .replace(/[^A-Za-z\s.'&-]/g, " ")
     .replace(/\s+/g, " ")
-    .trim();
-  return cleaned || undefined;
+    .trim()
+    .toUpperCase();
+  return cleaned.length >= 2 ? cleaned : undefined;
 }
 
 function extractTransferType(textUpper: string): TransferEvidence["transferType"] {
@@ -70,6 +79,18 @@ function extractCounterpartyAccountKey(text: string) {
 }
 
 function extractCounterpartyName(text: string) {
+  const anzFrom = ANZ_PAYMENT_FROM_RE.exec(text);
+  if (anzFrom) {
+    const name = normalizeName(anzFrom[1]);
+    if (name) return name;
+  }
+
+  const anzTo = ANZ_PAYMENT_TO_RE.exec(text);
+  if (anzTo) {
+    const name = normalizeName(anzTo[1]);
+    if (name) return name;
+  }
+
   const paymentOrTransfer = /\b(?:PAYMENT|TRANSFER)\s+(?:TO|FROM)\s+(.+)$/i.exec(text);
   if (paymentOrTransfer) {
     const name = normalizeName(paymentOrTransfer[1]);
