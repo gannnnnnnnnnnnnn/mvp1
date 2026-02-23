@@ -1,6 +1,7 @@
 import { StatementAccountMeta } from "@/lib/parsing/accountMeta";
 import { NormalizedTransaction } from "@/lib/analysis/types";
 import { extractTransferEvidence, TransferEvidence } from "@/lib/analysis/transfers/extractTransferEvidence";
+import { nameMatchStrong } from "@/lib/analysis/transfers/nameFingerprint";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const EXTERNAL_MERCHANT_RE =
@@ -167,23 +168,6 @@ function unique(values: string[]) {
 
 function keyForAccountMeta(bankId: string, accountId: string) {
   return `${bankId}::${accountId}`;
-}
-
-function normalizeName(value?: string) {
-  return String(value || "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9 ]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function namesMatch(a?: string, b?: string) {
-  const left = normalizeName(a);
-  const right = normalizeName(b);
-  if (!left || !right) return false;
-  if (left === right) return true;
-  if (left.length < 4 || right.length < 4) return false;
-  return left.includes(right) || right.includes(left);
 }
 
 function hasTransferHints(evidence: TransferEvidence) {
@@ -450,19 +434,19 @@ export function matchTransfersV3(params: {
         Boolean(debit.evidence.payId) &&
         Boolean(credit.evidence.payId) &&
         debit.evidence.payId === credit.evidence.payId;
-      const nameMatchAtoB = namesMatch(
+      const nameMatchAtoB = nameMatchStrong(
         debit.evidence.counterpartyName,
         credit.accountMeta?.accountName
       ) ||
-        namesMatch(
+        nameMatchStrong(
           debit.evidence.counterpartyName,
           params.accountAliases?.[credit.tx.accountId]
         );
-      const nameMatchBtoA = namesMatch(
+      const nameMatchBtoA = nameMatchStrong(
         credit.evidence.counterpartyName,
         debit.accountMeta?.accountName
       ) ||
-        namesMatch(
+        nameMatchStrong(
           credit.evidence.counterpartyName,
           params.accountAliases?.[debit.tx.accountId]
         );
@@ -657,16 +641,23 @@ export function matchTransfersV3(params: {
       (best.nameMatchAtoB || best.nameMatchBtoA) && !hasBidirectionalNameClosure;
     const hasStrongHints =
       hasTransferHints(item.debit.evidence) && hasTransferHints(best.credit.evidence);
+    const hasMerchantLikePenalty = best.penalties.includes("MERCHANT_LIKE");
     const second = available[1];
     const uniqueEnough = !second || Math.abs(best.score - second.score) > 0.05;
     const state: TransferV3State | null = forceUncertain
       ? best.score >= matcherParams.minUncertain
         ? "uncertain"
         : null
-      : hasStrongClosure || hasBidirectionalNameClosure
+      : hasStrongClosure
         ? "matched"
+        : hasBidirectionalNameClosure
+          ? best.score >= matcherParams.minMatched && uniqueEnough && hasStrongHints && !hasMerchantLikePenalty
+            ? "matched"
+            : best.score >= matcherParams.minUncertain
+              ? "uncertain"
+              : null
         : hasOneDirectionNameClosure
-          ? best.score >= matcherParams.minMatched && uniqueEnough && hasStrongHints
+          ? best.score >= matcherParams.minMatched && uniqueEnough && hasStrongHints && !hasMerchantLikePenalty
             ? "matched"
             : best.score >= matcherParams.minUncertain
               ? "uncertain"
