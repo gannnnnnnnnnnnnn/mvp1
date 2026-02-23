@@ -426,19 +426,9 @@ export function matchTransfersV3(params: {
       }
       rawPool.push(credit);
     }
-    const pool = debit.evidence.refId
-      ? rawPool.filter((credit) => credit.evidence.refId === debit.evidence.refId)
-      : rawPool;
-    if (debit.evidence.refId && rawPool.length > 0 && pool.length === 0) {
-      for (const credit of rawPool) {
-        addIgnoredRow({
-          debit,
-          credit,
-          reason: "REF_ID_MISMATCH",
-          refId: debit.evidence.refId,
-        });
-      }
-    }
+    // REF_ID is a strong join key only when both sides expose a ref id.
+    // Missing counterpart ref id must not hard-reject cross-bank candidates.
+    const pool = rawPool;
     const scored: Scored[] = [];
 
     for (const credit of pool) {
@@ -477,6 +467,12 @@ export function matchTransfersV3(params: {
           params.accountAliases?.[debit.tx.accountId]
         );
       const bidirectionalNameClosure = nameMatchAtoB && nameMatchBtoA;
+      const debitRefId = debit.evidence.refId;
+      const creditRefId = credit.evidence.refId;
+      const bothHaveRefId = Boolean(debitRefId && creditRefId);
+      const sameBankTemplate =
+        debit.tx.bankId === credit.tx.bankId &&
+        String(debit.tx.templateId || "") === String(credit.tx.templateId || "");
 
       let strongClosureCount = 0;
       if (accountKeyMatchAtoB) {
@@ -490,6 +486,20 @@ export function matchTransfersV3(params: {
       if (payIdMatch) {
         score += 0.4;
         strongClosureCount += 1;
+      }
+      if (bothHaveRefId && debitRefId === creditRefId) {
+        hints.push("REF_ID_MATCH");
+        score += 0.25;
+        strongClosureCount += 1;
+      } else if (bothHaveRefId && debitRefId !== creditRefId) {
+        penalties.push("REF_ID_MISMATCH");
+        score -= sameBankTemplate ? 0.4 : 0.1;
+      } else if (debitRefId && !creditRefId) {
+        penalties.push("REF_ID_COUNTERPARTY_MISSING");
+        // Keep this as a debug note; never a hard reject.
+        if (sameBankTemplate) {
+          score -= 0.04;
+        }
       }
 
       if (nameMatchAtoB) score += 0.3;
