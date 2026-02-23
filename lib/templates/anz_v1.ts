@@ -375,6 +375,19 @@ function isStopMarkerLine(line: string) {
   return TABLE_STOP_MARKERS.some((regex) => regex.test(line));
 }
 
+function isAnzPageNoise(line: string) {
+  const raw = (line || "").trim();
+  if (!raw) return false;
+  return (
+    /^ANZ\s+Plus\b/i.test(raw) ||
+    /^Account\s+Statement\b/i.test(raw) ||
+    /^\d{1,2}\s+\w+\s+\d{4}\s+-\s+\d{1,2}\s+\w+\s+\d{4}$/.test(raw) ||
+    /^AFSL\b/i.test(raw) ||
+    /^Australia and New Zealand Banking Group/i.test(raw) ||
+    /^Page\s+\d+\s+of\s+\d+/i.test(raw)
+  );
+}
+
 function extractOpeningBalance(line: string) {
   const tokens = extractMoneyTokens(line);
   if (tokens.length === 0) return undefined;
@@ -449,6 +462,15 @@ function parseAnzTransactions(params: {
 
     if (TABLE_HEADER_RE.test(raw)) {
       // Repeated header from another page.
+      continue;
+    }
+
+    if (isAnzPageNoise(raw)) {
+      // Header/footer noise between pages must not pollute transaction description.
+      if (current) {
+        blocks.push(current);
+        current = null;
+      }
       continue;
     }
 
