@@ -79,6 +79,7 @@ export default function Phase3DatasetHomePage() {
   const [boundaryAliasDraft, setBoundaryAliasDraft] = useState<Record<string, string>>({});
   const [boundarySaving, setBoundarySaving] = useState(false);
   const [boundaryStatus, setBoundaryStatus] = useState("");
+  const [inboxCount, setInboxCount] = useState(0);
 
   const selectedFileNames = useMemo(
     () =>
@@ -148,12 +149,34 @@ export default function Phase3DatasetHomePage() {
       if (!data.ok) {
         setOverview(null);
         setError(data.error);
+        setInboxCount(0);
         return;
       }
       setOverview(data);
+      const inboxParams = buildScopeParams(nextScopeMode, nextSelectedFileIds, {
+        bankId: nextBankId || undefined,
+        accountId: nextAccountId || undefined,
+      });
+      void fetch(`/api/analysis/inbox?${inboxParams.toString()}`, {
+        cache: "no-store",
+      })
+        .then(async (res) => {
+          const inboxData = (await res.json()) as
+            | { ok: true; totals?: { unresolved?: number } }
+            | { ok: false; error: ApiError };
+          if (!inboxData.ok) {
+            setInboxCount(0);
+            return;
+          }
+          setInboxCount(Number(inboxData.totals?.unresolved || 0));
+        })
+        .catch(() => {
+          setInboxCount(0);
+        });
     } catch {
       setOverview(null);
       setError({ code: "FETCH_FAILED", message: "Failed to load dataset home data." });
+      setInboxCount(0);
     } finally {
       setIsLoading(false);
     }
@@ -494,6 +517,18 @@ export default function Phase3DatasetHomePage() {
                 className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
               >
                 Workspace
+              </a>
+              <a
+                href={`/inbox?${buildScopeParams(scopeMode, selectedFileIds, {
+                  bankId: selectedBankId || undefined,
+                  accountId: selectedAccountId || undefined,
+                }).toString()}`}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Inbox
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-600">
+                  {inboxCount}
+                </span>
               </a>
             </div>
           </div>

@@ -151,6 +151,22 @@ This smoke script checks latest ANZ dev-run outputs and validates:
 - continuity is high
 - no standalone `Effective Date` rows as transactions
 
+### Review Inbox (Product workflow)
+
+- Route: `/inbox`
+- Data source: `GET /api/analysis/inbox`
+- Item kinds:
+  - Unknown merchant
+  - Uncertain transfer
+  - Parse issue (`needsReview`)
+- Each item supports 3 actions:
+  - `Confirm` -> resolve item
+  - `Change` -> one-off override for this item only
+  - `Always do this` -> persist a rule for future inbox suppression
+- Local persistence:
+  - `uploads/review_state.json`
+  - `uploads/overrides.json`
+
 ### 2) Optional auth setup
 
 If you want to protect list/download APIs, create `.env.local`:
