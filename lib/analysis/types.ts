@@ -7,6 +7,7 @@ export const CATEGORY_TAXONOMY = [
   "Bills&Utilities",
   "Rent/Mortgage",
   "Health",
+  "Insurance",
   "Pet",
   "Entertainment",
   "Travel",
@@ -19,6 +20,12 @@ export const CATEGORY_TAXONOMY = [
 export type Category = (typeof CATEGORY_TAXONOMY)[number];
 
 export type CategorySource = "rule" | "manual" | "default";
+export type TransferState = "matched" | "uncertain";
+export type TransferDecision =
+  | "INTERNAL_OFFSET"
+  | "BOUNDARY_FLOW"
+  | "UNCERTAIN_NO_OFFSET";
+export type TransferKpiEffect = "EXCLUDED" | "INCLUDED";
 
 export type NormalizedTransaction = {
   id: string;
@@ -59,10 +66,57 @@ export type NormalizedTransaction = {
   };
   transfer?: {
     matchId: string;
+    state?: TransferState;
     role: "out" | "in";
     counterpartyTransactionId: string;
-    method: "amount_time_window_v1";
+    method: "amount_time_window_v1" | "amount_time_window_v2";
     confidence: number;
+    decision?: TransferDecision;
+    kpiEffect?: TransferKpiEffect;
+    whySentence?: string;
+    sameFile?: boolean;
+    explain?: {
+      amountCents: number;
+      dateDiffDays: number;
+      sameAccount: boolean;
+      descHints: string[];
+      penalties: string[];
+      score: number;
+      refId?: string;
+      accountKeyMatchAtoB?: boolean;
+      accountKeyMatchBtoA?: boolean;
+      nameMatchAtoB?: boolean;
+      nameMatchBtoA?: boolean;
+      payIdMatch?: boolean;
+      evidenceA?: {
+        transferType?: string;
+        refId?: string;
+        counterpartyAccountKey?: string;
+        counterpartyName?: string;
+        payId?: string;
+        hints?: string[];
+      };
+      evidenceB?: {
+        transferType?: string;
+        refId?: string;
+        counterpartyAccountKey?: string;
+        counterpartyName?: string;
+        payId?: string;
+        hints?: string[];
+      };
+      accountMetaA?: {
+        accountName?: string;
+        accountKey?: string;
+      };
+      accountMetaB?: {
+        accountName?: string;
+        accountKey?: string;
+      };
+      decision?: TransferDecision;
+      kpiEffect?: TransferKpiEffect;
+      whySentence?: string;
+      sameFile?: boolean;
+    };
   } | null;
 };
 

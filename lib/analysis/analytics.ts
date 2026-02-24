@@ -3,8 +3,11 @@ import { normalizeParsedTransactions } from "@/lib/analysis/normalize";
 import { readCategoryOverrides } from "@/lib/analysis/overridesStore";
 import { Category, NormalizedTransaction } from "@/lib/analysis/types";
 import { loadParsedTransactions } from "@/lib/analysis/loadParsed";
-import { matchTransfers } from "@/lib/analysis/transfers/matchTransfers";
+import { matchTransfersV3 } from "@/lib/analysis/transfers/matchTransfersV3";
+import { decideTransferEffect } from "@/lib/analysis/transfers/decideTransferEffect";
+import { readBoundaryConfig } from "@/lib/boundary/store";
 import { findById, readIndex } from "@/lib/fileStore";
+import { normalizeAccountMeta, StatementAccountMeta } from "@/lib/parsing/accountMeta";
 
 export type Granularity = "month" | "week";
 export type CompareGranularity = "month" | "quarter" | "year";
@@ -42,6 +45,128 @@ export type AppliedFilters = {
   // Balance chart stays scoped (file/account) for now; no mixed-file household balance yet.
   balanceScope: "file" | "account" | "none";
 };
+
+const DEFAULT_TRANSFER_V3_PARAMS = {
+  windowDays: 1,
+  minMatched: 0.9,
+  minUncertain: 0.65,
+} as const;
+
+type TransferV3Row = ReturnType<typeof matchTransfersV3>["rows"][number];
+
+function transferFromV3Row(
+  row: TransferV3Row,
+  side: "a" | "b",
+  boundaryAccountIds: string[]
+): NonNullable<NormalizedTransaction["transfer"]> {
+  const isOut = side === "a";
+  const other = isOut ? row.b : row.a;
+  const effect = decideTransferEffect(row, boundaryAccountIds);
+
+  return {
+    matchId: row.matchId,
+    state: row.state,
+    role: isOut ? "out" : "in",
+    counterpartyTransactionId: other.transactionId,
+    method: "amount_time_window_v2",
+    confidence: row.confidence,
+    decision: effect.decision,
+    kpiEffect: effect.kpiEffect,
+    whySentence: effect.whySentence,
+    sameFile: effect.sameFile,
+    explain: {
+      amountCents: row.explain.amountCents,
+      dateDiffDays: row.explain.dateDiffDays,
+      sameAccount: row.explain.sameAccount,
+      descHints: row.explain.descHints,
+      penalties: row.explain.penalties,
+      score: row.explain.score,
+      refId: row.explain.refId,
+      accountKeyMatchAtoB: row.explain.accountKeyMatchAtoB,
+      accountKeyMatchBtoA: row.explain.accountKeyMatchBtoA,
+      nameMatchAtoB: row.explain.nameMatchAtoB,
+      nameMatchBtoA: row.explain.nameMatchBtoA,
+      payIdMatch: row.explain.payIdMatch,
+      evidenceA: row.explain.evidenceA,
+      evidenceB: row.explain.evidenceB,
+      accountMetaA: row.explain.accountMetaA,
+      accountMetaB: row.explain.accountMetaB,
+      decision: effect.decision,
+      kpiEffect: effect.kpiEffect,
+      whySentence: effect.whySentence,
+      sameFile: effect.sameFile,
+    },
+  };
+}
+
+function normalizeLegacyTransfer(existing: NormalizedTransaction["transfer"] | null | undefined) {
+  if (!existing) return null;
+  const normalized = { ...existing };
+  if (!normalized.state && normalized.matchId) {
+    normalized.state = "matched";
+  }
+  if (!normalized.decision) {
+    normalized.decision = "UNCERTAIN_NO_OFFSET";
+  }
+  if (!normalized.kpiEffect) {
+    normalized.kpiEffect = "INCLUDED";
+  }
+  if (!normalized.whySentence) {
+    normalized.whySentence = "Legacy transfer metadata retained; no boundary offset applied.";
+  }
+  return normalized;
+}
+
+function mergeTransferMetadata(
+  existing: NormalizedTransaction["transfer"] | null | undefined,
+  candidate: NormalizedTransaction["transfer"] | null | undefined
+) {
+  const normalizedExisting = normalizeLegacyTransfer(existing);
+  if (!normalizedExisting && !candidate) return null;
+  if (!normalizedExisting) return candidate || null;
+  if (!candidate) return normalizedExisting;
+
+  if (normalizedExisting.method === "amount_time_window_v1") {
+    // Backward-compatible deterministic policy:
+    // keep v1 transfer unless v2 provides an equal/higher-confidence matched state.
+    const shouldUpgrade =
+      candidate.state === "matched" && candidate.confidence >= normalizedExisting.confidence;
+    return shouldUpgrade ? candidate : normalizedExisting;
+  }
+
+  if (candidate.state === "matched" && normalizedExisting.state !== "matched") {
+    return candidate;
+  }
+
+  return candidate.confidence >= normalizedExisting.confidence ? candidate : normalizedExisting;
+}
+
+function annotateTransfersWithV3(
+  transactions: NormalizedTransaction[],
+  boundaryAccountIds: string[],
+  statementAccountMeta: StatementAccountMeta[],
+  accountAliases: Record<string, string>
+) {
+  const v3 = matchTransfersV3({
+    transactions,
+    boundaryAccountIds,
+    statementAccountMeta,
+    accountAliases,
+    options: DEFAULT_TRANSFER_V3_PARAMS,
+  });
+  const candidates = new Map<string, NonNullable<NormalizedTransaction["transfer"]>>();
+
+  for (const row of v3.rows) {
+    candidates.set(row.a.transactionId, transferFromV3Row(row, "a", boundaryAccountIds));
+    candidates.set(row.b.transactionId, transferFromV3Row(row, "b", boundaryAccountIds));
+  }
+
+  return transactions.map((tx) => {
+    const candidate = candidates.get(tx.id) || null;
+    const transfer = mergeTransferMetadata(tx.transfer, candidate);
+    return { ...tx, transfer };
+  });
+}
 
 function startOfMonth(date: Date) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
@@ -156,6 +281,52 @@ function buildDatasetCoverage(transactions: NormalizedTransaction[]) {
   };
 }
 
+function buildAccountDisplayOptions(params: {
+  transactions: NormalizedTransaction[];
+  statementAccountMeta: StatementAccountMeta[];
+}) {
+  const byKey = new Map<
+    string,
+    {
+      bankId: string;
+      accountId: string;
+      accountName?: string;
+      accountKey?: string;
+    }
+  >();
+
+  for (const tx of params.transactions) {
+    const key = `${tx.bankId}|${tx.accountId}`;
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        bankId: tx.bankId,
+        accountId: tx.accountId,
+      });
+    }
+  }
+
+  for (const meta of params.statementAccountMeta) {
+    const key = `${meta.bankId}|${meta.accountId}`;
+    const existing = byKey.get(key) || {
+      bankId: meta.bankId,
+      accountId: meta.accountId,
+    };
+    byKey.set(key, {
+      ...existing,
+      accountName: existing.accountName || meta.accountName,
+      accountKey: existing.accountKey || meta.accountKey,
+    });
+  }
+
+  return [...byKey.values()].sort((a, b) => {
+    const bankDiff = a.bankId.localeCompare(b.bankId);
+    if (bankDiff !== 0) return bankDiff;
+    const keyA = `${a.accountName || ""}|${a.accountId}`;
+    const keyB = `${b.accountName || ""}|${b.accountId}`;
+    return keyA.localeCompare(keyB);
+  });
+}
+
 function dedupeTransactions(transactions: NormalizedTransaction[]) {
   const dedupedByKey = new Map<string, NormalizedTransaction>();
   for (const tx of transactions) {
@@ -222,22 +393,51 @@ export function runAnalysisCore(params: {
     return true;
   });
 
-  const matchedTransfers = filtered.filter(
-    (tx) => tx.transfer?.matchId && tx.transfer.role === "out"
+  const internalOffsetTransfers = filtered.filter(
+    (tx) =>
+      tx.transfer?.state === "matched" &&
+      tx.transfer.role === "out" &&
+      tx.transfer.explain?.kpiEffect === "EXCLUDED"
   );
-  const matchedTransferCount = new Set(
-    matchedTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
+  const boundaryTransfers = filtered.filter(
+    (tx) =>
+      tx.transfer?.state === "matched" &&
+      tx.transfer.role === "out" &&
+      tx.transfer.decision === "BOUNDARY_FLOW"
+  );
+  const uncertainTransfers = filtered.filter(
+    (tx) =>
+      tx.transfer?.role === "out" &&
+      (tx.transfer?.state === "uncertain" ||
+        tx.transfer?.decision === "UNCERTAIN_NO_OFFSET")
+  );
+  const internalOffsetPairsCount = new Set(
+    internalOffsetTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
   ).size;
-  const matchedTransferTotal = matchedTransfers.reduce(
+  const internalOffsetAbs = internalOffsetTransfers.reduce(
+    (sum, tx) => sum + Math.abs(tx.amount),
+    0
+  );
+  const boundaryFlowPairsCount = new Set(
+    boundaryTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
+  ).size;
+  const boundaryFlowAbs = boundaryTransfers.reduce(
+    (sum, tx) => sum + Math.abs(tx.amount),
+    0
+  );
+  const uncertainPairsCount = new Set(
+    uncertainTransfers.map((tx) => tx.transfer?.matchId).filter(Boolean)
+  ).size;
+  const uncertainAbs = uncertainTransfers.reduce(
     (sum, tx) => sum + Math.abs(tx.amount),
     0
   );
 
   const transferFiltered = filtered.filter((tx) => {
     if (showTransfers === "all") return true;
-    const matched = Boolean(tx.transfer?.matchId);
-    if (showTransfers === "onlyMatched") return matched;
-    return !matched;
+    const excluded = tx.transfer?.kpiEffect === "EXCLUDED";
+    if (showTransfers === "onlyMatched") return excluded;
+    return !excluded;
   });
 
   const scope: AnalysisScope =
@@ -267,8 +467,12 @@ export function runAnalysisCore(params: {
   return {
     transactions: transferFiltered,
     transferStats: {
-      matchedTransferCount,
-      matchedTransferTotal,
+      internalOffsetPairsCount,
+      internalOffsetAbs,
+      boundaryFlowPairsCount,
+      boundaryFlowAbs,
+      uncertainPairsCount,
+      uncertainAbs,
     },
     appliedFilters,
   };
@@ -282,6 +486,7 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
 
   const overrides = await readCategoryOverrides();
   const allNormalized: NormalizedTransaction[] = [];
+  const statementAccountMetaByKey = new Map<string, StatementAccountMeta>();
 
   const allWarnings: Array<{ rawLine: string; reason: string; confidence: number }> = [];
   const reviewReasonSet = new Set<string>();
@@ -319,6 +524,16 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
     const resolvedBankId = fileMeta?.bankId || parsed.bankId || "cba";
     const resolvedTemplateId =
       fileMeta?.templateId || parsed.templateId || parsed.templateType || "cba_v1";
+    const resolvedAccountMeta = normalizeAccountMeta({
+      bankId: resolvedBankId,
+      accountId: resolvedAccountId,
+      templateId: resolvedTemplateId,
+      ...(fileMeta?.accountMeta || parsed.accountMeta || {}),
+    });
+    statementAccountMetaByKey.set(
+      `${resolvedAccountMeta.bankId}::${resolvedAccountMeta.accountId}`,
+      resolvedAccountMeta
+    );
 
     const normalized = normalizeParsedTransactions({
       fileId,
@@ -338,10 +553,20 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
 
   const txCountBeforeDedupe = allNormalized.length;
   const dedupedTransactions = dedupeTransactions(allNormalized);
-  const transferMatched = matchTransfers(dedupedTransactions);
-  const annotatedTransactions = transferMatched.annotatedTransactions;
+  const knownAccountIds = [...new Set(dedupedTransactions.map((tx) => tx.accountId))];
+  const boundary = await readBoundaryConfig(knownAccountIds);
+  const annotatedTransactions = annotateTransfersWithV3(
+    dedupedTransactions,
+    boundary.config.boundaryAccountIds,
+    [...statementAccountMetaByKey.values()],
+    boundary.config.accountAliases || {}
+  );
   const dedupedCount = txCountBeforeDedupe - dedupedTransactions.length;
   const datasetCoverage = buildDatasetCoverage(annotatedTransactions);
+  const accountDisplayOptions = buildAccountDisplayOptions({
+    transactions: annotatedTransactions,
+    statementAccountMeta: [...statementAccountMetaByKey.values()],
+  });
 
   const core = runAnalysisCore({
     transactions: annotatedTransactions,
@@ -386,6 +611,8 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
     needsReview: reviewReasonSet.size > 0,
     transactions: core.transactions,
     allTransactions: annotatedTransactions,
+    statementAccountMeta: [...statementAccountMetaByKey.values()],
+    accountDisplayOptions,
     transferStats: core.transferStats,
     appliedFilters: core.appliedFilters,
   };

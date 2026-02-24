@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import {
+  AccountDisplayOption,
   ApiError,
   FileMeta,
   OverviewResponse,
@@ -39,6 +40,14 @@ const PERCENT = new Intl.NumberFormat("en-AU", {
 
 type PeriodType = "month" | "quarter" | "year";
 
+function formatAccountOptionLabel(option: AccountDisplayOption) {
+  const head = option.accountName
+    ? `${option.bankId.toUpperCase()} · ${option.accountName}`
+    : `${option.bankId.toUpperCase()} · ${option.accountId}`;
+  const tail = option.accountKey || option.accountId;
+  return `${head} (${tail})`;
+}
+
 type DrilldownTx = {
   id: string;
   date: string;
@@ -51,10 +60,17 @@ type DrilldownTx = {
   source: { fileId: string };
   transfer?: {
     matchId: string;
+    state?: "matched" | "uncertain" | "ignored";
     role: "out" | "in";
     counterpartyTransactionId: string;
     method: string;
     confidence: number;
+    explain?: {
+      dateDiffDays?: number;
+      descHints?: string[];
+      penalties?: string[];
+      score?: number;
+    };
   } | null;
 };
 
@@ -82,6 +98,7 @@ type CategoryOption =
   | "Bills&Utilities"
   | "Rent/Mortgage"
   | "Health"
+  | "Insurance"
   | "Pet"
   | "Entertainment"
   | "Travel"
@@ -99,6 +116,7 @@ const CATEGORY_OPTIONS: CategoryOption[] = [
   "Bills&Utilities",
   "Rent/Mortgage",
   "Health",
+  "Insurance",
   "Pet",
   "Entertainment",
   "Travel",
@@ -119,7 +137,7 @@ const CATEGORY_GROUPS: Array<{ label: string; options: CategoryOption[] }> = [
     label: "Lifestyle Spend",
     options: ["Dining", "Food Delivery", "Entertainment", "Shopping", "Travel"],
   },
-  { label: "Health & Pet", options: ["Health", "Pet"] },
+  { label: "Health, Insurance & Pet", options: ["Health", "Insurance", "Pet"] },
   { label: "Other / Uncategorized", options: ["Fees/Interest/Bank", "Other"] },
 ];
 
@@ -271,7 +289,15 @@ export default function Phase3PeriodPage() {
     [files, selectedFileIds]
   );
   const bankOptions = useMemo(() => overview?.bankIds || [], [overview?.bankIds]);
-  const accountOptions = useMemo(() => overview?.accountIds || [], [overview?.accountIds]);
+  const accountOptions = useMemo(
+    () =>
+      overview?.accountDisplayOptions ||
+      (overview?.accountIds || []).map((accountId) => ({
+        bankId: selectedBankId || "cba",
+        accountId,
+      })),
+    [overview?.accountDisplayOptions, overview?.accountIds, selectedBankId]
+  );
 
   const availablePeriodKeys = useMemo(
     () => availableKeysByType(overview, periodType),
@@ -903,9 +929,12 @@ export default function Phase3PeriodPage() {
                 className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="">All accounts</option>
-                {accountOptions.map((accountId) => (
-                  <option key={accountId} value={accountId}>
-                    {accountId}
+                {accountOptions.map((option) => (
+                  <option
+                    key={`${option.bankId}:${option.accountId}`}
+                    value={option.accountId}
+                  >
+                    {formatAccountOptionLabel(option)}
                   </option>
                 ))}
               </select>
@@ -1073,10 +1102,14 @@ export default function Phase3PeriodPage() {
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="text-xs uppercase tracking-wide text-slate-500">Transfers</div>
             <div className="mt-3 text-3xl font-semibold text-slate-900">
-              {CURRENCY.format(overview?.transferStats?.matchedTransferTotal || 0)}
+              {CURRENCY.format(overview?.transferStats?.internalOffsetAbs || 0)}
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              matched: {overview?.transferStats?.matchedTransferCount || 0}
+              internal: {overview?.transferStats?.internalOffsetPairsCount || 0}
+              {" · "}
+              boundary: {overview?.transferStats?.boundaryFlowPairsCount || 0}
+              {" · "}
+              uncertain: {overview?.transferStats?.uncertainPairsCount || 0}
             </div>
           </article>
         </section>
@@ -1248,9 +1281,25 @@ export default function Phase3PeriodPage() {
                       </span>
                     )}
                     {tx.transfer?.matchId && (
-                      <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-800">
-                        Transfer matched · {tx.transfer.role} · pair {tx.transfer.counterpartyTransactionId.slice(0, 8)}
-                      </span>
+                      <>
+                        {tx.transfer.state === "uncertain" ? (
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
+                            Transfer uncertain · conf {tx.transfer.confidence.toFixed(2)} · pair{" "}
+                            {tx.transfer.counterpartyTransactionId.slice(0, 8)}
+                          </span>
+                        ) : (
+                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-blue-800">
+                            Transfer matched · {tx.transfer.role} · pair{" "}
+                            {tx.transfer.counterpartyTransactionId.slice(0, 8)}
+                          </span>
+                        )}
+                        {tx.transfer.explain && (
+                          <span className="rounded bg-slate-200 px-1.5 py-0.5 text-slate-700">
+                            score {tx.transfer.explain.score?.toFixed(2) || "-"} · d
+                            {tx.transfer.explain.dateDiffDays ?? "-"}
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                   <div className="mt-2 flex items-center gap-2">

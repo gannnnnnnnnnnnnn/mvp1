@@ -17,6 +17,7 @@ type Category =
   | "Bills&Utilities"
   | "Rent/Mortgage"
   | "Health"
+  | "Insurance"
   | "Entertainment"
   | "Travel"
   | "Income"

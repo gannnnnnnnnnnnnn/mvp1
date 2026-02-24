@@ -96,6 +96,23 @@ type PipelineStatus = {
   txCount?: number;
 };
 
+type BoundarySummary = {
+  ok: true;
+  config: {
+    version: 1;
+    mode: "customAccounts";
+    boundaryAccountIds: string[];
+    lastUpdatedAt: string;
+  };
+  knownAccounts: Array<{
+    bankId: string;
+    accountId: string;
+    fileCount: number;
+    dateRange?: { from: string; to: string };
+  }>;
+  needsSetup: boolean;
+};
+
 function monthRangeFromKey(key: string) {
   const match = /^(\d{4})-(\d{2})$/.exec(key);
   if (!match) return null;
@@ -122,6 +139,7 @@ export default function Home() {
   const [latestAvailableMonth, setLatestAvailableMonth] = useState("");
   const [files, setFiles] = useState<FileMeta[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
+  const [boundarySummary, setBoundarySummary] = useState<BoundarySummary | null>(null);
 
   // Phase 2.1 UI state.
   const [extractingFileId, setExtractingFileId] = useState<string | null>(null);
@@ -229,6 +247,19 @@ export default function Home() {
     } catch {
       setUnknownMerchantCount(0);
       setLatestAvailableMonth("");
+    }
+  }, []);
+
+  const fetchBoundarySummary = useCallback(async () => {
+    try {
+      const res = await fetch("/api/analysis/boundary", { cache: "no-store" });
+      const data = (await res.json()) as BoundarySummary | { ok: false; error: ApiError };
+      if (!data.ok) {
+        return;
+      }
+      setBoundarySummary(data);
+    } catch {
+      // Keep homepage resilient; boundary status is informative only.
     }
   }, []);
 
@@ -642,13 +673,18 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    void fetchBoundarySummary();
+  }, [fetchBoundarySummary]);
+
+  useEffect(() => {
     if (files.length === 0) {
       setUnknownMerchantCount(0);
       setLatestAvailableMonth("");
       return;
     }
     void fetchUnknownMerchantSummary();
-  }, [files.length, fetchUnknownMerchantSummary]);
+    void fetchBoundarySummary();
+  }, [files.length, fetchUnknownMerchantSummary, fetchBoundarySummary]);
 
   useEffect(() => {
     const cookieName = "pc_user_id";
@@ -740,6 +776,41 @@ export default function Home() {
             <p className="mt-1 text-sm text-slate-600">
               You have {files.length} statement{files.length > 1 ? "s" : ""} already parsed.
             </p>
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              {boundarySummary?.needsSetup || (boundarySummary && boundarySummary.config.boundaryAccountIds.length === 0) ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium text-amber-700">Boundary not configured</div>
+                    <div className="text-xs text-slate-600">
+                      Select boundary accounts so internal transfer offset behaves correctly.
+                    </div>
+                  </div>
+                  <a
+                    href="/phase3?openBoundary=1"
+                    className="inline-flex items-center justify-center rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                  >
+                    Configure boundary
+                  </a>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium text-emerald-700">
+                      Boundary accounts: {boundarySummary?.config.boundaryAccountIds.length || 0} selected
+                    </div>
+                    <div className="text-xs text-slate-600">
+                      Last updated {boundarySummary?.config.lastUpdatedAt.slice(0, 10)}
+                    </div>
+                  </div>
+                  <a
+                    href="/phase3?openBoundary=1"
+                    className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                  >
+                    Edit
+                  </a>
+                </div>
+              )}
+            </div>
             <div className="mt-4 flex flex-wrap gap-2">
               <a
                 href="/phase3"

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AccountDisplayOption,
   ApiError,
   CompareResponse,
   FileMeta,
@@ -35,6 +36,14 @@ type CompareMode =
   | "custom_month";
 
 type DateRange = { dateFrom: string; dateTo: string };
+
+function formatAccountOptionLabel(option: AccountDisplayOption) {
+  const head = option.accountName
+    ? `${option.bankId.toUpperCase()} · ${option.accountName}`
+    : `${option.bankId.toUpperCase()} · ${option.accountId}`;
+  const tail = option.accountKey || option.accountId;
+  return `${head} (${tail})`;
+}
 
 function previousAvailable(values: string[], current: string) {
   const sorted = [...values].sort();
@@ -236,7 +245,15 @@ export default function Phase3ComparePage() {
     }
   }, [compareMode, customMonthA, customMonthB]);
   const bankOptions = useMemo(() => overview?.bankIds || [], [overview?.bankIds]);
-  const accountOptions = useMemo(() => overview?.accountIds || [], [overview?.accountIds]);
+  const accountOptions = useMemo(
+    () =>
+      overview?.accountDisplayOptions ||
+      (overview?.accountIds || []).map((accountId) => ({
+        bankId: selectedBankId || "cba",
+        accountId,
+      })),
+    [overview?.accountDisplayOptions, overview?.accountIds, selectedBankId]
+  );
 
   useEffect(() => {
     const parsed = parseScopeFromWindow();
@@ -335,9 +352,12 @@ export default function Phase3ComparePage() {
                 className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="">All accounts</option>
-                {accountOptions.map((accountId) => (
-                  <option key={accountId} value={accountId}>
-                    {accountId}
+                {accountOptions.map((option) => (
+                  <option
+                    key={`${option.bankId}:${option.accountId}`}
+                    value={option.accountId}
+                  >
+                    {formatAccountOptionLabel(option)}
                   </option>
                 ))}
               </select>

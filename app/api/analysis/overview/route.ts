@@ -85,6 +85,7 @@ export async function GET(request: Request) {
       bankId: result.bankId,
       accountIds: result.accountIds,
       accountId: result.accountId,
+      accountDisplayOptions: result.accountDisplayOptions,
       granularity,
       templateType: result.templateType,
       needsReview: result.needsReview,

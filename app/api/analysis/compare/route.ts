@@ -100,6 +100,7 @@ export async function GET(request: Request) {
       bankId: result.bankId,
       accountIds: result.accountIds,
       accountId: result.accountId,
+      accountDisplayOptions: result.accountDisplayOptions,
       templateType: result.templateType,
       needsReview: result.needsReview,
       quality: result.quality,

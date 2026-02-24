@@ -8,6 +8,12 @@ import {
 import { parseCommbankStatementDebitCredit } from "@/lib/parseCommbankStatementDebitCredit";
 import { getCommBankTemplateById } from "@/templates/commbank";
 import { detectDevTemplate } from "@/lib/templates/registry";
+import {
+  extractCbaAccountMeta,
+  normalizeAccountMeta,
+  resolveAccountIdFromMeta,
+  StatementAccountMeta,
+} from "@/lib/parsing/accountMeta";
 
 export type ParsedTransactionWithMeta = ParsedTransaction & {
   bankId?: string;
@@ -38,6 +44,7 @@ export type MainParseOutput = {
   bankId: string;
   accountId: string;
   templateId: string;
+  accountMeta?: StatementAccountMeta;
   transactions: ParsedTransactionWithMeta[];
   warnings: ParseWarning[];
   needsReview: boolean;
@@ -220,6 +227,23 @@ export function parseMainText(params: {
 
     const transactions = mapAnzTransactions(parsed.transactions);
     const warnings = mapAnzWarnings(parsed.warnings);
+    const normalizedAnzMeta = parsed.accountMeta
+      ? normalizeAccountMeta({
+          ...parsed.accountMeta,
+          bankId: parsed.bankId,
+          accountId: parsed.accountId || accountIdHint || "default",
+          templateId: parsed.templateId,
+        })
+      : undefined;
+    const resolvedAnzAccountId = resolveAccountIdFromMeta({
+      bankId: parsed.bankId,
+      existingAccountId: parsed.accountId || accountIdHint,
+      accountMeta: normalizedAnzMeta,
+    });
+    const normalizedAnzTransactions = transactions.map((tx) => ({
+      ...tx,
+      accountId: resolvedAnzAccountId,
+    }));
 
     const reasons = new Set<string>();
     if (parsed.debug.checkedCount >= 5 && parsed.debug.continuityRatio < 0.995) {
@@ -232,9 +256,12 @@ export function parseMainText(params: {
     return {
       templateType: parsed.templateId,
       bankId: parsed.bankId,
-      accountId: parsed.accountId || accountIdHint || "default",
+      accountId: resolvedAnzAccountId,
       templateId: parsed.templateId,
-      transactions,
+      accountMeta: normalizedAnzMeta
+        ? { ...normalizedAnzMeta, accountId: resolvedAnzAccountId }
+        : undefined,
+      transactions: normalizedAnzTransactions,
       warnings,
       needsReview: reasons.size > 0,
       quality: {
@@ -345,7 +372,20 @@ export function parseMainText(params: {
   }
 
   const bankId = "cba";
-  const accountId = accountIdHint || "default";
+  const rawAccountMeta = extractCbaAccountMeta({
+    text,
+    accountId: accountIdHint || "default",
+    templateId: templateType,
+  });
+  const accountId = resolveAccountIdFromMeta({
+    bankId,
+    existingAccountId: accountIdHint,
+    accountMeta: rawAccountMeta,
+  });
+  const accountMeta = {
+    ...rawAccountMeta,
+    accountId,
+  };
   const normalizedTransactions: ParsedTransactionWithMeta[] = parsed.transactions.map((tx, idx) => ({
     ...tx,
     bankId,
@@ -364,6 +404,7 @@ export function parseMainText(params: {
     bankId,
     accountId,
     templateId: templateType,
+    accountMeta,
     transactions: normalizedTransactions,
     warnings: parsed.warnings,
     needsReview: reasons.length > 0,

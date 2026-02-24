@@ -7,6 +7,7 @@
  */
 import { promises as fs } from "fs";
 import path from "path";
+import { StatementAccountMeta } from "@/lib/parsing/accountMeta";
 
 /**
  * Shape of the metadata that lives inside uploads/index.json.
@@ -19,6 +20,8 @@ export type FileMeta = {
   accountId?: string;
   // Canonical parser template id when available.
   templateId?: string;
+  // Optional statement-level account metadata extracted from statement header.
+  accountMeta?: StatementAccountMeta;
   // SHA-256 hash of the file content for duplicate prevention.
   contentHash?: string;
   // Optional parser template tag populated after parsing.
@@ -199,7 +202,12 @@ export async function removeById(id: string): Promise<FileMeta | undefined> {
  */
 export async function patchMetadataById(
   id: string,
-  patch: Partial<Pick<FileMeta, "bankId" | "accountId" | "templateId" | "templateType">>
+  patch: Partial<
+    Pick<
+      FileMeta,
+      "bankId" | "accountId" | "templateId" | "templateType" | "accountMeta"
+    >
+  >
 ): Promise<FileMeta | undefined> {
   return withIndexWriteLock(async () => {
     const current = await readIndex();

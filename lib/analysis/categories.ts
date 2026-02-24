@@ -80,6 +80,25 @@ const RULES: CategoryRule[] = [
     amountSign: "negative",
   },
   {
+    id: "insurance",
+    category: "Insurance",
+    merchantIncludes: [
+      "INSURANCE",
+      "AAMI",
+      "BUPA",
+      "MEDIBANK",
+      "ALLIANZ",
+      "NRMA",
+      "HCF",
+      "NIB",
+      "TAC",
+      "CGU",
+      "QBE",
+    ],
+    descriptionPattern: /\bINSURANCE\b|\bPREMIUM\b|\bPOLICY\b/i,
+    amountSign: "negative",
+  },
+  {
     id: "pet",
     category: "Pet",
     merchantIncludes: [

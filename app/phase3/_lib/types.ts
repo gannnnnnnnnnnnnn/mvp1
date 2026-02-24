@@ -8,6 +8,13 @@ export type FileMeta = {
 
 export type ApiError = { code: string; message: string };
 
+export type AccountDisplayOption = {
+  bankId: string;
+  accountId: string;
+  accountName?: string;
+  accountKey?: string;
+};
+
 export type OverviewResponse = {
   ok: true;
   fileId?: string;
@@ -24,6 +31,7 @@ export type OverviewResponse = {
   bankId?: string;
   accountIds?: string[];
   accountId?: string;
+  accountDisplayOptions?: AccountDisplayOption[];
   granularity: "month" | "week";
   templateType: string;
   needsReview: boolean;
@@ -81,8 +89,12 @@ export type OverviewResponse = {
   balanceSeries: Array<{ date: string; balance: number; transactionId: string }>;
   balanceSeriesDisabledReason?: string;
   transferStats?: {
-    matchedTransferCount: number;
-    matchedTransferTotal: number;
+    internalOffsetPairsCount: number;
+    internalOffsetAbs: number;
+    boundaryFlowPairsCount: number;
+    boundaryFlowAbs: number;
+    uncertainPairsCount?: number;
+    uncertainAbs?: number;
   };
 };
 
@@ -127,4 +139,5 @@ export type CompareResponse = {
   availableMonths?: string[];
   availableQuarters?: string[];
   availableYears?: string[];
+  accountDisplayOptions?: AccountDisplayOption[];
 };
