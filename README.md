@@ -107,6 +107,35 @@ MVP: Personal Cashflow App
 
 ## Quick Start
 
+### Local quickstart
+
+Prerequisites:
+- Node.js 20+
+- npm
+
+Run in one command:
+
+```bash
+./scripts/run_local.sh
+```
+
+What it does:
+- Installs dependencies via `npm ci` if `node_modules` is missing.
+- Starts local dev server (`npm run dev`).
+- Prints direct links:
+  - `/onboarding`
+  - `/phase3`
+  - `/inbox`
+
+Local data:
+- Uploaded files and local state are stored under `uploads/*`.
+- These files are local-only and not tracked by git.
+
+Flow:
+- Start at `/onboarding` for first-time setup.
+- Use `/inbox` to review unknown merchants, uncertain transfers, and parse issues.
+- Use `/phase3` for analysis and export CSV from the `Export` menu.
+
 ### 1) Install and run
 
 ```bash
