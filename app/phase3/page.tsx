@@ -79,6 +79,7 @@ export default function Phase3DatasetHomePage() {
   const [boundaryAliasDraft, setBoundaryAliasDraft] = useState<Record<string, string>>({});
   const [boundarySaving, setBoundarySaving] = useState(false);
   const [boundaryStatus, setBoundaryStatus] = useState("");
+  const [showOnboardingBanner, setShowOnboardingBanner] = useState(false);
 
   const selectedFileNames = useMemo(
     () =>
@@ -163,6 +164,9 @@ export default function Phase3DatasetHomePage() {
     const openBoundary =
       typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("openBoundary") === "1";
+    const fromOnboarding =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("onboarding") === "1";
     const parsed = parseScopeFromWindow();
     const normalizedIds =
       parsed.scopeMode === "selected" ? parsed.fileIds.slice(0, 1) : parsed.fileIds;
@@ -182,6 +186,7 @@ export default function Phase3DatasetHomePage() {
       parsed.accountId || ""
     );
     void fetchBoundary();
+    setShowOnboardingBanner(fromOnboarding);
     if (openBoundary) {
       setBoundaryModalOpen(true);
     }
@@ -399,6 +404,33 @@ export default function Phase3DatasetHomePage() {
             </div>
           )}
         </section>
+
+        {showOnboardingBanner && (
+          <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="font-medium">
+                  Uncertain transfers are never offset automatically. Review them in Inbox.
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href="/inbox"
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                >
+                  Open Inbox
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setShowOnboardingBanner(false)}
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
 
         {boundaryNeedsSetup && (
           <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
