@@ -90,7 +90,19 @@ async function ensureParentDir(filePath: string) {
 async function readJsonSafe<T>(filePath: string): Promise<T | null> {
   try {
     const raw = await fs.readFile(filePath, "utf8");
-    return JSON.parse(raw) as T;
+    if (!raw.trim()) {
+      return null;
+    }
+    try {
+      return JSON.parse(raw) as T;
+    } catch (err: unknown) {
+      if (err instanceof SyntaxError) {
+        // Local JSON state can be manually edited/truncated. Treat invalid JSON
+        // as "missing" and fall back to defaults instead of failing inbox API.
+        return null;
+      }
+      throw err;
+    }
   } catch (err: unknown) {
     if (
       typeof err === "object" &&
@@ -163,4 +175,3 @@ export async function writeReviewState(
   });
   return normalized;
 }
-

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { loadCategorizedTransactionsForScope } from "@/lib/analysis/analytics";
-import { aggregateInboxItems } from "@/lib/analysis/inbox";
+import { aggregateInboxItems, InboxKind } from "@/lib/analysis/inbox";
 import { readInboxOverrides, readReviewState } from "@/lib/analysis/inboxStore";
+import { isInboxItemSuppressedByRule } from "@/lib/analysis/inboxRules";
 import { loadParsedTransactions } from "@/lib/analysis/loadParsed";
 
 function errorJson(status: number, code: string, message: string) {
@@ -66,15 +67,32 @@ export async function GET(request: Request) {
       parsedFiles,
       resolvedIds: reviewState.resolved,
     });
+    const visibleItems = aggregated.items.filter(
+      (item) => !isInboxItemSuppressedByRule(item, overrides)
+    );
+    const suppressedByRule = aggregated.items.length - visibleItems.length;
+    const visibleCounts: Record<InboxKind, number> = {
+      UNKNOWN_MERCHANT: 0,
+      UNCERTAIN_TRANSFER: 0,
+      PARSE_ISSUE: 0,
+    };
+    for (const item of visibleItems) {
+      visibleCounts[item.kind] += 1;
+    }
 
     return NextResponse.json({
       ok: true,
       appliedFilters: loaded.appliedFilters,
       filesIncludedCount: loaded.filesIncludedCount,
       fileIds: loaded.fileIds,
-      counts: aggregated.counts,
-      totals: aggregated.totals,
-      items: aggregated.items,
+      counts: visibleCounts,
+      totals: {
+        all: aggregated.totals.all,
+        unresolved: visibleItems.length,
+        resolved: aggregated.totals.resolved + suppressedByRule,
+      },
+      suppressedByRule,
+      items: visibleItems,
       reviewState: {
         version: reviewState.version,
         resolvedCount: Object.keys(reviewState.resolved).length,
