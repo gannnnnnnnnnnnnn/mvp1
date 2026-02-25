@@ -33,6 +33,21 @@ function formatDate(dateIso: string) {
   return String(dateIso || "").slice(0, 10);
 }
 
+function normalizeSignaturePart(value: string | undefined) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
+}
+
+function buildTransferSignature(tx: NormalizedTransaction, other?: NormalizedTransaction) {
+  const amountCents = Math.round(Math.abs(tx.amount) * 100);
+  const descA = normalizeSignaturePart(tx.descriptionNorm || tx.descriptionRaw);
+  const descB = normalizeSignaturePart(other?.descriptionNorm || other?.descriptionRaw || "");
+  const pairHash = sha1([descA, descB].sort().join("::")).slice(0, 16);
+  return `TXFER:${amountCents}:${pairHash}`;
+}
+
 export function buildUnknownMerchantItems(
   transactions: NormalizedTransaction[]
 ): InboxItem[] {
@@ -56,6 +71,7 @@ export function buildUnknownMerchantItems(
       createdAt: formatDate(tx.date),
       metadata: {
         merchantNorm: tx.merchantNorm,
+        merchantRuleKey: tx.merchantNorm,
         category: tx.category,
         categorySource: tx.categorySource,
         amount: tx.amount,
@@ -89,6 +105,7 @@ export function buildUncertainTransferItems(
     const other = otherId ? byId.get(otherId) : undefined;
     const penalties = transfer.explain?.penalties || [];
     const reason = penalties[0] || "UNCERTAIN_NO_OFFSET";
+    const transferSignature = buildTransferSignature(tx, other);
     const summaryParts = [
       formatDate(tx.date),
       tx.descriptionRaw.slice(0, 80),
@@ -118,6 +135,8 @@ export function buildUncertainTransferItems(
         whySentence: transfer.whySentence,
         penalties,
         hints: transfer.explain?.descHints || [],
+        transferSignature,
+        amountCents: Math.round(Math.abs(tx.amount) * 100),
         counterpartyTransactionId: otherId || undefined,
       },
     });
@@ -156,6 +175,7 @@ export function buildParseIssueItems(parsedFiles: ParsedFileAnalysis[]): InboxIt
       );
       const rawLine = sampleWarning?.rawLine || "";
       const hash = sha1(`${parsed.fileId}:${reason}:${rawLine}`).slice(0, 10);
+      const parseRuleKey = `${reason}::${parsed.templateType || "unknown"}`;
       items.push({
         id: `PARSE_ISSUE:${parsed.fileId}:${reason}:${hash}`,
         kind: "PARSE_ISSUE",
@@ -173,6 +193,7 @@ export function buildParseIssueItems(parsedFiles: ParsedFileAnalysis[]): InboxIt
           warningRawLine: rawLine || undefined,
           warningConfidence: sampleWarning?.confidence,
           warningReason: sampleWarning?.reason,
+          parseRuleKey,
         },
       });
     }
@@ -217,4 +238,3 @@ export function aggregateInboxItems(params: {
     },
   };
 }
-

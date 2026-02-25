@@ -79,6 +79,8 @@ export default function Phase3DatasetHomePage() {
   const [boundaryAliasDraft, setBoundaryAliasDraft] = useState<Record<string, string>>({});
   const [boundarySaving, setBoundarySaving] = useState(false);
   const [boundaryStatus, setBoundaryStatus] = useState("");
+  const [showOnboardingBanner, setShowOnboardingBanner] = useState(false);
+  const [inboxCount, setInboxCount] = useState(0);
 
   const selectedFileNames = useMemo(
     () =>
@@ -148,12 +150,34 @@ export default function Phase3DatasetHomePage() {
       if (!data.ok) {
         setOverview(null);
         setError(data.error);
+        setInboxCount(0);
         return;
       }
       setOverview(data);
+      const inboxParams = buildScopeParams(nextScopeMode, nextSelectedFileIds, {
+        bankId: nextBankId || undefined,
+        accountId: nextAccountId || undefined,
+      });
+      void fetch(`/api/analysis/inbox?${inboxParams.toString()}`, {
+        cache: "no-store",
+      })
+        .then(async (res) => {
+          const inboxData = (await res.json()) as
+            | { ok: true; totals?: { unresolved?: number } }
+            | { ok: false; error: ApiError };
+          if (!inboxData.ok) {
+            setInboxCount(0);
+            return;
+          }
+          setInboxCount(Number(inboxData.totals?.unresolved || 0));
+        })
+        .catch(() => {
+          setInboxCount(0);
+        });
     } catch {
       setOverview(null);
       setError({ code: "FETCH_FAILED", message: "Failed to load dataset home data." });
+      setInboxCount(0);
     } finally {
       setIsLoading(false);
     }
@@ -163,6 +187,9 @@ export default function Phase3DatasetHomePage() {
     const openBoundary =
       typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("openBoundary") === "1";
+    const fromOnboarding =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("onboarding") === "1";
     const parsed = parseScopeFromWindow();
     const normalizedIds =
       parsed.scopeMode === "selected" ? parsed.fileIds.slice(0, 1) : parsed.fileIds;
@@ -182,6 +209,7 @@ export default function Phase3DatasetHomePage() {
       parsed.accountId || ""
     );
     void fetchBoundary();
+    setShowOnboardingBanner(fromOnboarding);
     if (openBoundary) {
       setBoundaryModalOpen(true);
     }
@@ -408,6 +436,33 @@ export default function Phase3DatasetHomePage() {
           )}
         </section>
 
+        {showOnboardingBanner && (
+          <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="font-medium">
+                  Uncertain transfers are never offset automatically. Review them in Inbox.
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href="/inbox"
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                >
+                  Open Inbox
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setShowOnboardingBanner(false)}
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
         {boundaryNeedsSetup && (
           <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -541,6 +596,18 @@ export default function Phase3DatasetHomePage() {
                   </a>
                 </div>
               </details>
+              <a
+                href={`/inbox?${buildScopeParams(scopeMode, selectedFileIds, {
+                  bankId: selectedBankId || undefined,
+                  accountId: selectedAccountId || undefined,
+                }).toString()}`}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Inbox
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-600">
+                  {inboxCount}
+                </span>
+              </a>
             </div>
           </div>
         </section>
