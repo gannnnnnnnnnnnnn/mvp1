@@ -203,6 +203,14 @@ export default function Phase3DatasetHomePage() {
     [files]
   );
   const selectedFileId = selectedFileIds[0] || "";
+  const latestYear = useMemo(() => {
+    const years = [...(overview?.availableYears || [])].sort();
+    if (years.length > 0) return years[years.length - 1];
+    const datasetMax = overview?.datasetDateMax || "";
+    const parsedYear = datasetMax.slice(0, 4);
+    if (/^\d{4}$/.test(parsedYear)) return parsedYear;
+    return new Date().getUTCFullYear().toString();
+  }, [overview?.availableYears, overview?.datasetDateMax]);
 
   const bankOptions = useMemo(() => overview?.bankIds || [], [overview?.bankIds]);
   const accountOptions = useMemo(
@@ -495,6 +503,44 @@ export default function Phase3DatasetHomePage() {
               >
                 Workspace
               </a>
+              <details className="relative">
+                <summary className="list-none cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
+                  Export
+                </summary>
+                <div className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-slate-200 bg-white p-2 text-xs shadow-sm">
+                  <a
+                    href={`/api/analysis/export?${(() => {
+                      const params = buildScopeParams(scopeMode, selectedFileIds, {
+                        bankId: selectedBankId || undefined,
+                        accountId: selectedAccountId || undefined,
+                      });
+                      params.set("type", "transactions");
+                      params.set("format", "csv");
+                      params.set("showTransfers", "excludeMatched");
+                      return params.toString();
+                    })()}`}
+                    className="block rounded px-2 py-1.5 text-slate-700 hover:bg-slate-100"
+                  >
+                    Transactions CSV
+                  </a>
+                  <a
+                    href={`/api/analysis/export?${(() => {
+                      const params = buildScopeParams(scopeMode, selectedFileIds, {
+                        bankId: selectedBankId || undefined,
+                        accountId: selectedAccountId || undefined,
+                      });
+                      params.set("type", "annual");
+                      params.set("format", "csv");
+                      params.set("year", latestYear);
+                      params.set("showTransfers", "excludeMatched");
+                      return params.toString();
+                    })()}`}
+                    className="block rounded px-2 py-1.5 text-slate-700 hover:bg-slate-100"
+                  >
+                    Annual summary CSV ({latestYear})
+                  </a>
+                </div>
+              </details>
             </div>
           </div>
         </section>
