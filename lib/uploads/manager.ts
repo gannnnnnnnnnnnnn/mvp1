@@ -4,6 +4,7 @@ import {
   FileMeta,
   readIndex,
   removeById,
+  replaceIndex,
   uploadsDirAbsolute,
 } from "@/lib/fileStore";
 import {
@@ -15,6 +16,13 @@ import {
   readBoundaryConfig,
   type BoundaryConfig,
 } from "@/lib/boundary/store";
+import {
+  readUploadManifest,
+  removeManifestByHash,
+  replaceUploadManifest,
+  type UploadManifest,
+  type UploadManifestFile,
+} from "@/lib/uploads/manifestStore";
 
 export type UploadParseStage = "uploaded" | "extracted" | "segmented" | "parsed";
 
@@ -54,6 +62,10 @@ type ManagerOptions = {
   uploadsRoot?: string;
   readIndexFn?: () => Promise<FileMeta[]>;
   removeByIdFn?: (id: string) => Promise<FileMeta | undefined>;
+  replaceIndexFn?: (entries: FileMeta[]) => Promise<void>;
+  readManifestFn?: () => Promise<UploadManifest>;
+  removeManifestByHashFn?: (fileHash: string) => Promise<UploadManifestFile | undefined>;
+  replaceManifestFn?: (files: UploadManifestFile[]) => Promise<UploadManifest>;
   readReviewStateFn?: () => Promise<InboxReviewState>;
   writeReviewStateFn?: (
     next: Omit<InboxReviewState, "version">
@@ -65,24 +77,14 @@ type ManagerOptions = {
 
 const TRANSFER_CACHE_DIR = "transfer-cache";
 const ANALYSIS_CACHE_DIR = "analysis-cache";
-
-function fileHashForMeta(meta: FileMeta) {
-  return meta.contentHash || `id:${meta.id}`;
-}
-
-function fileToListItem(meta: FileMeta, stage: UploadListItem["parseStatus"]) {
-  return {
-    fileHash: fileHashForMeta(meta),
-    fileId: meta.id,
-    originalName: meta.originalName,
-    size: meta.size,
-    uploadedAt: meta.uploadedAt,
-    bankId: meta.bankId,
-    accountIds: meta.accountId ? [meta.accountId] : [],
-    templateId: meta.templateId || meta.templateType,
-    parseStatus: stage,
-  } satisfies UploadListItem;
-}
+const DERIVED_DIRS = [
+  "text-cache",
+  "segment-cache",
+  "parsed-cache",
+  "dev-runs",
+  ANALYSIS_CACHE_DIR,
+  TRANSFER_CACHE_DIR,
+];
 
 function hasErrnoCode(err: unknown, code: string) {
   return (
@@ -143,7 +145,16 @@ function cachePaths(uploadsRoot: string, fileId: string) {
   };
 }
 
-async function parseStageForFile(uploadsRoot: string, fileId: string) {
+async function parseStageForFile(uploadsRoot: string, fileId?: string, fallback?: UploadManifestFile) {
+  if (!fileId) {
+    return {
+      stage: fallback?.parseStatus || "uploaded",
+      warnings: typeof fallback?.warnings === "number" ? fallback.warnings : 0,
+      txCount: undefined,
+      needsReview: false,
+    };
+  }
+
   const paths = cachePaths(uploadsRoot, fileId);
   const parsedExists = await fileExists(paths.parsed);
   if (parsedExists) {
@@ -161,9 +172,7 @@ async function parseStageForFile(uploadsRoot: string, fileId: string) {
         needsReview: parsed.needsReview === true,
       };
     } catch {
-      return {
-        stage: "parsed" as const,
-      };
+      return { stage: "parsed" as const };
     }
   }
 
@@ -175,13 +184,17 @@ async function parseStageForFile(uploadsRoot: string, fileId: string) {
     return { stage: "extracted" as const };
   }
 
-  return { stage: "uploaded" as const };
+  return {
+    stage: fallback?.parseStatus || "uploaded",
+    warnings: typeof fallback?.warnings === "number" ? fallback.warnings : 0,
+  };
 }
 
 async function readTransactionIdsFromParsedCache(
   uploadsRoot: string,
-  fileId: string
+  fileId?: string
 ) {
+  if (!fileId) return [];
   const parsedPath = cachePaths(uploadsRoot, fileId).parsed;
   try {
     const raw = await fs.readFile(parsedPath, "utf8");
@@ -195,15 +208,51 @@ async function readTransactionIdsFromParsedCache(
   }
 }
 
+function resolveIndexRow(manifestRow: UploadManifestFile, indexRows: FileMeta[]) {
+  if (manifestRow.fileId) {
+    const byId = indexRows.find((row) => row.id === manifestRow.fileId);
+    if (byId) return byId;
+  }
+  const byHash = indexRows.find((row) => row.contentHash === manifestRow.fileHash);
+  if (byHash) return byHash;
+  if (manifestRow.storedName) {
+    return indexRows.find((row) => row.storedName === manifestRow.storedName);
+  }
+  return undefined;
+}
+
+function toListItem(
+  manifestRow: UploadManifestFile,
+  stage: UploadListItem["parseStatus"],
+  indexRow?: FileMeta
+): UploadListItem {
+  return {
+    fileHash: manifestRow.fileHash,
+    fileId: manifestRow.fileId || indexRow?.id || "",
+    originalName: manifestRow.originalName,
+    size: manifestRow.size,
+    uploadedAt: manifestRow.uploadedAt,
+    bankId: manifestRow.bankId || indexRow?.bankId,
+    accountIds:
+      (manifestRow.accountIds && manifestRow.accountIds.length > 0
+        ? manifestRow.accountIds
+        : indexRow?.accountId
+          ? [indexRow.accountId]
+          : []) || [],
+    templateId: manifestRow.templateId || indexRow?.templateId || indexRow?.templateType,
+    parseStatus: stage,
+  };
+}
+
 function shouldPruneResolvedKey(
   key: string,
-  meta: FileMeta,
+  fileHash: string,
+  fileId: string | undefined,
   txIds: Set<string>
 ) {
   if (!key) return false;
-  if (key.includes(`:${meta.id}:`)) return true;
-  if (meta.contentHash && key.includes(meta.contentHash)) return true;
-  if (key.startsWith("PARSE_ISSUE:") && key.includes(meta.id)) return true;
+  if (key.includes(fileHash)) return true;
+  if (fileId && key.includes(`:${fileId}:`)) return true;
 
   if (key.startsWith("UNKNOWN_MERCHANT:")) {
     const txId = key.slice("UNKNOWN_MERCHANT:".length);
@@ -221,7 +270,8 @@ function shouldPruneResolvedKey(
 }
 
 async function pruneReviewStateForDeletedFile(
-  meta: FileMeta,
+  fileHash: string,
+  fileId: string | undefined,
   txIds: string[],
   options: ManagerOptions
 ) {
@@ -233,7 +283,7 @@ async function pruneReviewStateForDeletedFile(
   const nextResolved: InboxReviewState["resolved"] = {};
 
   for (const [key, value] of Object.entries(reviewState.resolved || {})) {
-    if (shouldPruneResolvedKey(key, meta, txSet)) {
+    if (shouldPruneResolvedKey(key, fileHash, fileId, txSet)) {
       changed = true;
       continue;
     }
@@ -248,20 +298,45 @@ async function pruneReviewStateForDeletedFile(
   return Object.keys(reviewState.resolved || {}).length - Object.keys(nextResolved).length;
 }
 
+async function cleanupCachesForFile(uploadsRoot: string, fileHash: string, fileId?: string) {
+  if (fileId) {
+    const paths = cachePaths(uploadsRoot, fileId);
+    await unlinkIfExists(paths.textTxt);
+    await unlinkIfExists(paths.textJson);
+    await unlinkIfExists(paths.segment);
+    await unlinkIfExists(paths.parsed);
+
+    await unlinkIfExists(path.join(uploadsRoot, TRANSFER_CACHE_DIR, `${fileId}.json`));
+    await unlinkIfExists(path.join(uploadsRoot, ANALYSIS_CACHE_DIR, `${fileId}.json`));
+
+    const legacyHashDir = sanitizeDirSegment(`id:${fileId}`);
+    await rmDirIfExists(path.join(uploadsRoot, "dev-runs", legacyHashDir));
+  }
+
+  await unlinkIfExists(path.join(uploadsRoot, TRANSFER_CACHE_DIR, `${fileHash}.json`));
+  await unlinkIfExists(path.join(uploadsRoot, ANALYSIS_CACHE_DIR, `${fileHash}.json`));
+  const hashDir = sanitizeDirSegment(fileHash);
+  await rmDirIfExists(path.join(uploadsRoot, "dev-runs", hashDir));
+}
+
 export async function listUploads(options: ManagerOptions = {}) {
   const uploadsRoot = options.uploadsRoot || uploadsDirAbsolute;
+  const readManifestFn = options.readManifestFn || readUploadManifest;
   const readIndexFn = options.readIndexFn || readIndex;
-  const index = await readIndexFn();
-  const sorted = [...index].sort(
-    (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
-  );
+
+  const [manifest, indexRows] = await Promise.all([readManifestFn(), readIndexFn()]);
   const rows = await Promise.all(
-    sorted.map(async (meta) => {
-      const stage = await parseStageForFile(uploadsRoot, meta.id);
-      return fileToListItem(meta, stage);
+    (manifest.files || []).map(async (manifestRow) => {
+      const indexRow = resolveIndexRow(manifestRow, indexRows);
+      const fileId = manifestRow.fileId || indexRow?.id;
+      const stage = await parseStageForFile(uploadsRoot, fileId, manifestRow);
+      return toListItem(manifestRow, stage, indexRow);
     })
   );
-  return rows;
+
+  return rows.sort(
+    (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+  );
 }
 
 export async function deleteUploadByHash(
@@ -277,66 +352,51 @@ export async function deleteUploadByHash(
   }
 
   const uploadsRoot = options.uploadsRoot || uploadsDirAbsolute;
+  const readManifestFn = options.readManifestFn || readUploadManifest;
   const readIndexFn = options.readIndexFn || readIndex;
   const removeByIdFn = options.removeByIdFn || removeById;
+  const removeManifestByHashFn = options.removeManifestByHashFn || removeManifestByHash;
   const readBoundaryConfigFn = options.readBoundaryConfigFn || readBoundaryConfig;
 
-  const index = await readIndexFn();
-  const target = index.find(
-    (row) => row.contentHash === normalizedHash || `id:${row.id}` === normalizedHash
+  const [manifest, indexRows] = await Promise.all([readManifestFn(), readIndexFn()]);
+  const manifestRow = manifest.files.find((row) => row.fileHash === normalizedHash);
+  if (!manifestRow) {
+    return {
+      ok: false,
+      error: { code: "NOT_FOUND", message: "Upload not found in manifest." },
+    };
+  }
+
+  const indexRow = resolveIndexRow(manifestRow, indexRows);
+  const fileId = manifestRow.fileId || indexRow?.id;
+  const storedName = manifestRow.storedName || indexRow?.storedName;
+  const deletedStage = await parseStageForFile(uploadsRoot, fileId, manifestRow);
+  const txIds = await readTransactionIdsFromParsedCache(uploadsRoot, fileId);
+
+  if (storedName) {
+    const storedPath = resolveSafeUploadPath(uploadsRoot, storedName);
+    if (!storedPath) {
+      return {
+        ok: false,
+        error: { code: "IO_FAIL", message: "Invalid stored file path." },
+      };
+    }
+    await unlinkIfExists(storedPath);
+  }
+
+  await cleanupCachesForFile(uploadsRoot, normalizedHash, fileId);
+
+  if (indexRow?.id) {
+    await removeByIdFn(indexRow.id);
+  }
+  await removeManifestByHashFn(normalizedHash);
+
+  const prunedCount = await pruneReviewStateForDeletedFile(
+    normalizedHash,
+    fileId,
+    txIds,
+    options
   );
-  if (!target) {
-    return {
-      ok: false,
-      error: { code: "NOT_FOUND", message: "Upload not found." },
-    };
-  }
-
-  const txIds = await readTransactionIdsFromParsedCache(uploadsRoot, target.id);
-  const storedPath = resolveSafeUploadPath(uploadsRoot, target.storedName);
-  if (!storedPath) {
-    return {
-      ok: false,
-      error: { code: "IO_FAIL", message: "Invalid stored file path." },
-    };
-  }
-
-  const paths = cachePaths(uploadsRoot, target.id);
-  const deletedStage = await parseStageForFile(uploadsRoot, target.id);
-  const legacyHashDir = sanitizeDirSegment(`id:${target.id}`);
-  const hashDir = sanitizeDirSegment(fileHashForMeta(target));
-
-  await unlinkIfExists(storedPath);
-  await unlinkIfExists(paths.textTxt);
-  await unlinkIfExists(paths.textJson);
-  await unlinkIfExists(paths.segment);
-  await unlinkIfExists(paths.parsed);
-
-  await rmDirIfExists(path.join(uploadsRoot, "dev-runs", hashDir));
-  if (hashDir !== legacyHashDir) {
-    await rmDirIfExists(path.join(uploadsRoot, "dev-runs", legacyHashDir));
-  }
-
-  await unlinkIfExists(path.join(uploadsRoot, TRANSFER_CACHE_DIR, `${target.id}.json`));
-  await unlinkIfExists(path.join(uploadsRoot, ANALYSIS_CACHE_DIR, `${target.id}.json`));
-  if (target.contentHash) {
-    await unlinkIfExists(
-      path.join(uploadsRoot, TRANSFER_CACHE_DIR, `${target.contentHash}.json`)
-    );
-    await unlinkIfExists(
-      path.join(uploadsRoot, ANALYSIS_CACHE_DIR, `${target.contentHash}.json`)
-    );
-  }
-
-  const removed = await removeByIdFn(target.id);
-  if (!removed) {
-    return {
-      ok: false,
-      error: { code: "NOT_FOUND", message: "Upload already removed." },
-    };
-  }
-
-  const prunedCount = await pruneReviewStateForDeletedFile(removed, txIds, options);
   const remaining = await readIndexFn();
   const knownAccountIds = [
     ...new Set(remaining.map((row) => String(row.accountId || "").trim()).filter(Boolean)),
@@ -349,7 +409,7 @@ export async function deleteUploadByHash(
 
   return {
     ok: true,
-    deleted: fileToListItem(removed, deletedStage),
+    deleted: toListItem(manifestRow, deletedStage, indexRow),
     reviewStatePrunedCount: prunedCount,
     boundaryWarning:
       missingBoundaryAccountIds.length > 0
@@ -359,5 +419,62 @@ export async function deleteUploadByHash(
               "Some boundary accounts are missing after delete; review boundary settings.",
           }
         : null,
+  };
+}
+
+export async function deleteAllUploads(options: ManagerOptions = {}) {
+  const uploadsRoot = options.uploadsRoot || uploadsDirAbsolute;
+  const readManifestFn = options.readManifestFn || readUploadManifest;
+  const readIndexFn = options.readIndexFn || readIndex;
+  const replaceManifestFn = options.replaceManifestFn || replaceUploadManifest;
+  const replaceIndexFn = options.replaceIndexFn || replaceIndex;
+
+  const manifest = await readManifestFn();
+  const files = [...(manifest.files || [])];
+
+  for (const file of files) {
+    const storedName = file.storedName;
+    if (storedName) {
+      const storedPath = resolveSafeUploadPath(uploadsRoot, storedName);
+      if (storedPath) {
+        await unlinkIfExists(storedPath);
+      }
+    }
+  }
+
+  // Also remove any direct PDF/CSV files left in uploads root.
+  try {
+    const rootEntries = await fs.readdir(uploadsRoot, { withFileTypes: true });
+    for (const entry of rootEntries) {
+      if (!entry.isFile()) continue;
+      if (!/\.(pdf|csv)$/i.test(entry.name)) continue;
+      await unlinkIfExists(path.join(uploadsRoot, entry.name));
+    }
+  } catch (err: unknown) {
+    if (!hasErrnoCode(err, "ENOENT")) throw err;
+  }
+
+  for (const dirName of DERIVED_DIRS) {
+    await rmDirIfExists(path.join(uploadsRoot, dirName));
+  }
+
+  await replaceManifestFn([]);
+  await replaceIndexFn([]);
+
+  // Remove review state entries only if they refer to now non-existing tx/file keys.
+  const readReview = options.readReviewStateFn || readReviewState;
+  const writeReview = options.writeReviewStateFn || writeReviewState;
+  const currentReview = await readReview();
+  if (Object.keys(currentReview.resolved || {}).length > 0) {
+    await writeReview({ resolved: {} });
+  }
+
+  // Boundary warning is not needed for all-delete path.
+  const remainingIndex = await readIndexFn();
+  return {
+    ok: true as const,
+    total: files.length,
+    deletedCount: files.length,
+    remainingIndexCount: remainingIndex.length,
   };
 }

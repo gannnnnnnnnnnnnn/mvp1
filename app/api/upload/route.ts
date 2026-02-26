@@ -19,6 +19,10 @@ import {
   replaceIndex,
   uploadsDirAbsolute,
 } from "@/lib/fileStore";
+import {
+  appendUploadManifestEntry,
+  findManifestByHash,
+} from "@/lib/uploads/manifestStore";
 
 // Hard limits to protect the server.
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
@@ -128,6 +132,21 @@ export async function POST(request: Request) {
     const contentHash = createHash("sha256").update(buffer).digest("hex");
     let existing = await findByContentHash(contentHash);
     if (!existing) {
+      const manifestMatch = await findManifestByHash(contentHash);
+      if (manifestMatch) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: {
+              code: "DUPLICATE_FILE",
+              message: "File already uploaded.",
+            },
+          },
+          { status: 409 }
+        );
+      }
+    }
+    if (!existing) {
       // Backward compatibility: old index rows may not have contentHash.
       // We lazily compute and backfill missing hashes to keep dedupe reliable.
       const current = await readIndex();
@@ -182,6 +201,36 @@ export async function POST(request: Request) {
       const dedupResult = await appendMetadataDedupByHash(metadata);
       if (dedupResult.duplicate) {
         await fs.unlink(absolutePath).catch(() => undefined);
+        return NextResponse.json(
+          {
+            ok: false,
+            error: {
+              code: "DUPLICATE_FILE",
+              message: "File already uploaded.",
+            },
+          },
+          { status: 409 }
+        );
+      }
+
+      const manifestResult = await appendUploadManifestEntry({
+        fileHash: contentHash,
+        originalName: metadata.originalName,
+        size: metadata.size,
+        uploadedAt: metadata.uploadedAt,
+        bankId: metadata.bankId,
+        accountIds: metadata.accountId ? [metadata.accountId] : [],
+        templateId: metadata.templateId || metadata.templateType,
+        parseStatus: "uploaded",
+        warnings: 0,
+        fileId: metadata.id,
+        storedName: metadata.storedName,
+      });
+      if (manifestResult.duplicate) {
+        await fs.unlink(absolutePath).catch(() => undefined);
+        // Roll back index row when manifest dedupe catches an existing hash.
+        const current = await readIndex();
+        await replaceIndex(current.filter((row) => row.id !== metadata.id));
         return NextResponse.json(
           {
             ok: false,

@@ -10,6 +10,7 @@ import {
 } from "@/lib/uploads/manager";
 import type { InboxReviewState } from "@/lib/analysis/inboxStore";
 import type { BoundaryConfig } from "@/lib/boundary/store";
+import type { UploadManifest } from "@/lib/uploads/manifestStore";
 
 function buildMeta(overrides: Partial<FileMeta> = {}): FileMeta {
   return {
@@ -31,9 +32,11 @@ function buildMeta(overrides: Partial<FileMeta> = {}): FileMeta {
 test("listUploads returns empty when index is empty", async () => {
   const tmpRoot = await mkdtemp(path.join(os.tmpdir(), "uploads-manager-"));
   try {
+    const manifest: UploadManifest = { version: 1, files: [] };
     const result = await listUploads({
       uploadsRoot: tmpRoot,
       readIndexFn: async () => [],
+      readManifestFn: async () => manifest,
     });
     assert.equal(result.length, 0);
   } finally {
@@ -45,6 +48,21 @@ test("deleteUploadByHash removes file and index entry", async () => {
   const tmpRoot = await mkdtemp(path.join(os.tmpdir(), "uploads-manager-"));
   const meta = buildMeta();
   const indexRows: FileMeta[] = [meta];
+  const manifest: UploadManifest = {
+    version: 1,
+    files: [
+      {
+        fileHash: "hash-1",
+        fileId: "file-1",
+        storedName: "file-1.pdf",
+        originalName: "sample.pdf",
+        size: 1234,
+        uploadedAt: "2026-02-26T10:00:00.000Z",
+        bankId: "cba",
+        accountIds: ["acc-1"],
+      },
+    ],
+  };
   let reviewState: InboxReviewState = {
     version: 1,
     resolved: {
@@ -77,10 +95,17 @@ test("deleteUploadByHash removes file and index entry", async () => {
     const result = await deleteUploadByHash("hash-1", {
       uploadsRoot: tmpRoot,
       readIndexFn: async () => indexRows,
+      readManifestFn: async () => manifest,
       removeByIdFn: async (id) => {
         const idx = indexRows.findIndex((row) => row.id === id);
         if (idx < 0) return undefined;
         const [removed] = indexRows.splice(idx, 1);
+        return removed;
+      },
+      removeManifestByHashFn: async (fileHash) => {
+        const idx = manifest.files.findIndex((row) => row.fileHash === fileHash);
+        if (idx < 0) return undefined;
+        const [removed] = manifest.files.splice(idx, 1);
         return removed;
       },
       readReviewStateFn: async () => reviewState,
@@ -96,6 +121,7 @@ test("deleteUploadByHash removes file and index entry", async () => {
 
     assert.equal(result.ok, true);
     assert.equal(indexRows.length, 0);
+    assert.equal(manifest.files.length, 0);
     assert.equal(
       await fileExists(path.join(tmpRoot, "file-1.pdf")),
       false
