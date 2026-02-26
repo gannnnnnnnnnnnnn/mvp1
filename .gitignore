@@ -8,8 +8,8 @@ yarn-error.log*
 package-lock.json
 
 # Local uploads should not be versioned
-uploads/
-uploads/text-cache/
+/uploads/
+/uploads/text-cache/
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
@@ -55,10 +55,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-uploads/
+/uploads/
 node_modules/
 .env*
-uploads/
+/uploads/
 node_modules/
 .env*
 !.env.example
