@@ -101,6 +101,7 @@ export default function Phase3DatasetHomePage() {
       })),
     [datasetSeries]
   );
+  const hasDatasetData = (overview?.availableMonths?.length || 0) > 0;
 
   async function fetchFiles() {
     const res = await fetch("/api/files");
@@ -673,10 +674,37 @@ export default function Phase3DatasetHomePage() {
                 </ResponsiveContainer>
               </div>
             ) : (
-              <p className="text-sm text-slate-500">Upload and parse PDFs to see trends here.</p>
+              <div className="space-y-2">
+                <p className="text-sm text-slate-500">Upload PDFs first to see trend data here.</p>
+                <a
+                  href="/onboarding"
+                  className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  Go to Onboarding
+                </a>
+              </div>
             )}
           </div>
         </section>
+
+        {!hasDatasetData && (
+          <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="font-medium">No report data yet</div>
+                <div className="text-xs text-blue-800">
+                  Upload PDFs first, then return to Report for analysis.
+                </div>
+              </div>
+              <a
+                href="/onboarding"
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+              >
+                Start Onboarding
+              </a>
+            </div>
+          </section>
+        )}
 
         {overview && (
           <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
@@ -687,16 +715,6 @@ export default function Phase3DatasetHomePage() {
               continuity: {(overview.quality?.balanceContinuityPassRate || 0).toFixed(3)} · checked: {overview.quality?.balanceContinuityChecked || 0}
             </div>
             <div>dedupedCount: {overview.dedupedCount || 0}</div>
-            {process.env.NODE_ENV !== "production" ? (
-              <div className="mt-1 flex flex-col gap-1">
-                <a href="/dev/playground" className="font-medium text-blue-700 hover:text-blue-800">
-                  Open Dev Playground
-                </a>
-                <a href="/dev/transfers" className="font-medium text-blue-700 hover:text-blue-800">
-                  Open Transfer Inspector
-                </a>
-              </div>
-            ) : null}
           </section>
         )}
 
