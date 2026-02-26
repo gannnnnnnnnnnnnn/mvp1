@@ -288,6 +288,11 @@ export default function InboxPage() {
               ) : null}
             </div>
           ) : null}
+          {data?.ok && data.totals.unresolved === 0 ? (
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+              Nothing to review right now. Your inbox is clear.
+            </div>
+          ) : null}
 
           {!loading && data && !data.ok && (
             <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -315,7 +320,7 @@ export default function InboxPage() {
               </div>
 
               {grouped[kind].length === 0 ? (
-                <p className="text-sm text-slate-500">No items.</p>
+                <p className="text-sm text-slate-500">Nothing to review in this group.</p>
               ) : (
                 <div className="space-y-3">
                   {grouped[kind].map((item) => (

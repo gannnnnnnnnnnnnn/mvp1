@@ -35,31 +35,24 @@ export default function RootLayout({
                 Personal Cashflow MVP
               </div>
               <nav className="flex items-center gap-5 text-sm text-slate-600">
-                <Link href="/" className="font-medium text-slate-900 hover:text-blue-700">
-                  Home
+                <Link href="/onboarding" className="font-medium text-slate-900 hover:text-blue-700">
+                  Onboarding
                 </Link>
                 <Link href="/phase3" className="font-medium text-slate-900 hover:text-blue-700">
-                  Dataset
+                  Report
                 </Link>
-                <Link href="/phase3/compare" className="font-medium text-slate-900 hover:text-blue-700">
-                  Compare
+                <Link href="/inbox" className="font-medium text-slate-900 hover:text-blue-700">
+                  Inbox
                 </Link>
-                <Link href="/transactions" className="hover:text-slate-900">
-                  Workspace
+                <Link href="/files" className="font-medium text-slate-900 hover:text-blue-700">
+                  Files
                 </Link>
-                <details className="group relative">
-                  <summary className="list-none cursor-pointer text-xs text-slate-400 hover:text-slate-600">
-                    Legacy
-                  </summary>
-                  <div className="absolute right-0 z-20 mt-2 w-40 rounded-lg border border-slate-200 bg-white p-2 text-xs shadow-sm">
-                    <Link href="/dashboard" className="block rounded px-2 py-1 text-slate-600 hover:bg-slate-100">
-                      Dashboard
-                    </Link>
-                    <Link href="/phase3/month" className="block rounded px-2 py-1 text-slate-600 hover:bg-slate-100">
-                      Month (legacy)
-                    </Link>
-                  </div>
-                </details>
+                <a
+                  href="/api/analysis/export?type=transactions&format=csv&scope=all&showTransfers=excludeMatched"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  Export
+                </a>
               </nav>
             </div>
           </header>
