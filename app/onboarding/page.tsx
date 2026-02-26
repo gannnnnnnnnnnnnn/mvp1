@@ -71,6 +71,7 @@ export default function OnboardingPage() {
   const [boundary, setBoundary] = useState<BoundaryResponse | null>(null);
   const [boundaryDraft, setBoundaryDraft] = useState<string[]>([]);
   const [isSavingBoundary, setIsSavingBoundary] = useState(false);
+  const [existingUploads, setExistingUploads] = useState(0);
 
   const selectedSummary = useMemo(() => {
     if (selectedFiles.length === 0) return "No files selected";
@@ -116,6 +117,19 @@ export default function OnboardingPage() {
         ok: false,
         error: { code: "BOUNDARY_FAILED", message: "Failed to load detected accounts." },
       });
+    }
+  }
+
+  async function fetchExistingUploadsCount() {
+    try {
+      const res = await fetch("/api/uploads", { cache: "no-store" });
+      const data = (await res.json()) as
+        | { ok: true; files: unknown[] }
+        | { ok: false; error: ApiError };
+      if (!data.ok) return;
+      setExistingUploads(Array.isArray(data.files) ? data.files.length : 0);
+    } catch {
+      // Keep onboarding resilient; missing count is non-blocking.
     }
   }
 
@@ -206,6 +220,7 @@ export default function OnboardingPage() {
           : "No new files uploaded. Continue to boundary setup."
       );
       await fetchBoundarySummary();
+      await fetchExistingUploadsCount();
       setStep(2);
     } catch {
       setError({ code: "UPLOAD_FAILED", message: "Upload failed. Please try again." });
@@ -250,6 +265,7 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     void fetchBoundarySummary();
+    void fetchExistingUploadsCount();
   }, []);
 
   return (
@@ -270,6 +286,12 @@ export default function OnboardingPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Step 1: Upload PDF</h2>
           <p className="mt-1 text-sm text-slate-600">Drop PDFs here. We will upload and auto-parse.</p>
+          <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Existing uploads: {existingUploads} ·{" "}
+            <a href="/files" className="font-medium text-blue-700 hover:underline">
+              Open Files manager
+            </a>
+          </div>
 
           <div className="mt-4">
             <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-sm text-slate-700 hover:border-blue-500 hover:bg-blue-50">
@@ -409,4 +431,3 @@ export default function OnboardingPage() {
     </main>
   );
 }
-
