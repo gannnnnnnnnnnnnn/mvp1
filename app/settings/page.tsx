@@ -39,6 +39,7 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [deleteAllBusy, setDeleteAllBusy] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
 
   async function loadUploads() {
     setLoadingUploads(true);
@@ -127,6 +128,43 @@ export default function SettingsPage() {
       setError("Failed to reset analysis state.");
     } finally {
       setResetBusy(false);
+    }
+  }
+
+  async function handleImportOverrides(file: File | null) {
+    if (!file) return;
+    setImportBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      const text = await file.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        setError("Invalid JSON file. Please select a valid overrides backup.");
+        return;
+      }
+
+      const res = await fetch("/api/settings/overrides/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      const data = (await res.json()) as
+        | { ok: true; counts: Record<string, number> }
+        | { ok: false; error: ApiError };
+      if (!data.ok) {
+        setError(`${data.error.code}: ${data.error.message}`);
+        return;
+      }
+      setStatus(
+        `Overrides imported. merchant=${data.counts.merchantRules}, transfer=${data.counts.transferRules}, parse=${data.counts.parseRules}.`
+      );
+    } catch {
+      setError("Failed to import overrides.");
+    } finally {
+      setImportBusy(false);
     }
   }
 
@@ -223,10 +261,32 @@ export default function SettingsPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Overrides</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Backup/import controls are available in this section.
+            Backup and import merchant/transfer/parse rules.
           </p>
-          <p className="mt-3 text-xs text-slate-500">
-            Import/export will be enabled after override validation endpoints are added.
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <a
+              href="/api/settings/overrides/export"
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Backup overrides.json
+            </a>
+            <label className="inline-flex cursor-pointer items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
+              {importBusy ? "Importing..." : "Import overrides.json"}
+              <input
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                disabled={importBusy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0] || null;
+                  void handleImportOverrides(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Invalid JSON is rejected safely; existing overrides stay unchanged.
           </p>
         </section>
 

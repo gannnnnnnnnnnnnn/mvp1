@@ -97,8 +97,15 @@ async function readJsonSafe<T>(filePath: string): Promise<T | null> {
       return JSON.parse(raw) as T;
     } catch (err: unknown) {
       if (err instanceof SyntaxError) {
-        // Local JSON state can be manually edited/truncated. Treat invalid JSON
-        // as "missing" and fall back to defaults instead of failing inbox API.
+        // Corrupted local JSON should not crash runtime.
+        // Keep a backup for debugging and restore defaults.
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const corruptPath = `${filePath}.corrupt-${stamp}.json`;
+        try {
+          await fs.rename(filePath, corruptPath);
+        } catch {
+          // Best effort only.
+        }
         return null;
       }
       throw err;
