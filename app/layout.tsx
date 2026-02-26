@@ -47,6 +47,9 @@ export default function RootLayout({
                 <Link href="/transactions" className="hover:text-slate-900">
                   Workspace
                 </Link>
+                <Link href="/settings" className="hover:text-slate-900">
+                  Settings
+                </Link>
                 <details className="group relative">
                   <summary className="list-none cursor-pointer text-xs text-slate-400 hover:text-slate-600">
                     Legacy
