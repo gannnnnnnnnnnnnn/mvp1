@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readBoundaryConfig, writeBoundaryConfig } from "@/lib/boundary/store";
+import { isUnknownAccountIdentity } from "@/lib/boundary/accountLabels";
 import { readIndex } from "@/lib/fileStore";
 
 type KnownAccountRow = {
@@ -9,6 +10,7 @@ type KnownAccountRow = {
   accountKey?: string;
   bsb?: string;
   accountNumber?: string;
+  sampleFileName?: string;
   fileCount: number;
   dateRange?: { from: string; to: string };
 };
@@ -33,6 +35,7 @@ function buildKnownAccounts(indexRows: Awaited<ReturnType<typeof readIndex>>): K
       accountKey?: string;
       bsb?: string;
       accountNumber?: string;
+      sampleFileName?: string;
       fileCount: number;
       minUploadedAt: string;
       maxUploadedAt: string;
@@ -54,6 +57,7 @@ function buildKnownAccounts(indexRows: Awaited<ReturnType<typeof readIndex>>): K
         accountKey: row.accountMeta?.accountKey,
         bsb: row.accountMeta?.bsb,
         accountNumber: row.accountMeta?.accountNumber,
+        sampleFileName: row.originalName,
         fileCount: 1,
         minUploadedAt: uploadedAt,
         maxUploadedAt: uploadedAt,
@@ -66,6 +70,7 @@ function buildKnownAccounts(indexRows: Awaited<ReturnType<typeof readIndex>>): K
     existing.accountKey = existing.accountKey || row.accountMeta?.accountKey;
     existing.bsb = existing.bsb || row.accountMeta?.bsb;
     existing.accountNumber = existing.accountNumber || row.accountMeta?.accountNumber;
+    existing.sampleFileName = existing.sampleFileName || row.originalName;
     if (uploadedAt && (!existing.minUploadedAt || uploadedAt < existing.minUploadedAt)) {
       existing.minUploadedAt = uploadedAt;
     }
@@ -82,6 +87,7 @@ function buildKnownAccounts(indexRows: Awaited<ReturnType<typeof readIndex>>): K
       accountKey: item.accountKey,
       bsb: item.bsb,
       accountNumber: item.accountNumber,
+      sampleFileName: item.sampleFileName,
       fileCount: item.fileCount,
       dateRange:
         item.minUploadedAt && item.maxUploadedAt
@@ -103,9 +109,15 @@ async function loadBoundaryPayload() {
   const knownAccounts = buildKnownAccounts(indexRows);
   const knownAccountIds = [...new Set(knownAccounts.map((item) => item.accountId))];
   const { config, exists } = await readBoundaryConfig(knownAccountIds);
+  const defaultBoundaryAccountIds = knownAccounts
+    .filter((item) => !isUnknownAccountIdentity(item))
+    .map((item) => item.accountId);
   const persistedConfig = exists
     ? config
-    : await writeBoundaryConfig({ boundaryAccountIds: config.boundaryAccountIds });
+    : await writeBoundaryConfig({
+        boundaryAccountIds: defaultBoundaryAccountIds,
+        accountAliases: config.accountAliases,
+      });
 
   return {
     config: persistedConfig,

@@ -25,6 +25,11 @@ import {
 } from "@/lib/uploads/manifestStore";
 
 export type UploadParseStage = "uploaded" | "extracted" | "segmented" | "parsed";
+export type UploadWarning = {
+  code: string;
+  message?: string;
+  meta?: Record<string, unknown>;
+};
 
 export type UploadListItem = {
   fileHash: string;
@@ -35,6 +40,7 @@ export type UploadListItem = {
   bankId?: string;
   accountIds: string[];
   templateId?: string;
+  warnings: UploadWarning[];
   parseStatus: {
     stage: UploadParseStage;
     txCount?: number;
@@ -145,6 +151,37 @@ function cachePaths(uploadsRoot: string, fileId: string) {
   };
 }
 
+async function readWarningItemsFromParsedCache(uploadsRoot: string, fileId?: string) {
+  if (!fileId) return [] as UploadWarning[];
+  const parsedPath = cachePaths(uploadsRoot, fileId).parsed;
+  try {
+    const raw = await fs.readFile(parsedPath, "utf8");
+    const parsed = JSON.parse(raw) as {
+      warnings?: Array<{ reason?: unknown; rawLine?: unknown; confidence?: unknown }>;
+    };
+    if (!Array.isArray(parsed.warnings)) return [];
+    return parsed.warnings
+      .map((warning) => {
+        const code = String(warning?.reason || "").trim();
+        if (!code) return null;
+        return {
+          code,
+          message:
+            typeof warning?.rawLine === "string" && warning.rawLine.trim()
+              ? warning.rawLine.trim().slice(0, 180)
+              : undefined,
+          meta:
+            typeof warning?.confidence === "number"
+              ? { confidence: warning.confidence }
+              : undefined,
+        } satisfies UploadWarning;
+      })
+      .filter(Boolean) as UploadWarning[];
+  } catch {
+    return [];
+  }
+}
+
 async function parseStageForFile(uploadsRoot: string, fileId?: string, fallback?: UploadManifestFile) {
   if (!fileId) {
     return {
@@ -224,6 +261,7 @@ function resolveIndexRow(manifestRow: UploadManifestFile, indexRows: FileMeta[])
 function toListItem(
   manifestRow: UploadManifestFile,
   stage: UploadListItem["parseStatus"],
+  warnings: UploadWarning[],
   indexRow?: FileMeta
 ): UploadListItem {
   return {
@@ -240,6 +278,7 @@ function toListItem(
           ? [indexRow.accountId]
           : []) || [],
     templateId: manifestRow.templateId || indexRow?.templateId || indexRow?.templateType,
+    warnings,
     parseStatus: stage,
   };
 }
@@ -330,7 +369,8 @@ export async function listUploads(options: ManagerOptions = {}) {
       const indexRow = resolveIndexRow(manifestRow, indexRows);
       const fileId = manifestRow.fileId || indexRow?.id;
       const stage = await parseStageForFile(uploadsRoot, fileId, manifestRow);
-      return toListItem(manifestRow, stage, indexRow);
+      const warnings = await readWarningItemsFromParsedCache(uploadsRoot, fileId);
+      return toListItem(manifestRow, stage, warnings, indexRow);
     })
   );
 
@@ -409,7 +449,7 @@ export async function deleteUploadByHash(
 
   return {
     ok: true,
-    deleted: toListItem(manifestRow, deletedStage, indexRow),
+    deleted: toListItem(manifestRow, deletedStage, [], indexRow),
     reviewStatePrunedCount: prunedCount,
     boundaryWarning:
       missingBoundaryAccountIds.length > 0

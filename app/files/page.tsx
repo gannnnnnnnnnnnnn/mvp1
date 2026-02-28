@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { getWarningCatalogEntry } from "@/lib/warnings/catalog";
 
 type ApiError = { code: string; message: string };
 
@@ -13,6 +14,11 @@ type UploadItem = {
   bankId?: string;
   accountIds: string[];
   templateId?: string;
+  warnings: Array<{
+    code: string;
+    message?: string;
+    meta?: Record<string, unknown>;
+  }>;
   parseStatus: {
     stage: "uploaded" | "extracted" | "segmented" | "parsed";
     txCount?: number;
@@ -62,6 +68,7 @@ export default function FilesManagerPage() {
   const [status, setStatus] = useState<string>("");
   const [boundaryWarning, setBoundaryWarning] = useState<string>("");
   const [confirmFile, setConfirmFile] = useState<UploadItem | null>(null);
+  const [warningFile, setWarningFile] = useState<UploadItem | null>(null);
   const [deletingHash, setDeletingHash] = useState("");
   const [deletingAll, setDeletingAll] = useState(false);
 
@@ -244,7 +251,18 @@ export default function FilesManagerPage() {
                       </td>
                       <td className="px-3 py-2 text-xs">{row.uploadedAt.slice(0, 10)}</td>
                       <td className="px-3 py-2 text-xs">{formatSize(row.size)}</td>
-                      <td className="px-3 py-2 text-xs">{formatStage(row.parseStatus)}</td>
+                      <td className="px-3 py-2 text-xs">
+                        <div>{formatStage(row.parseStatus)}</div>
+                        {row.warnings.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => setWarningFile(row)}
+                            className="mt-1 text-xs font-medium text-amber-700 underline decoration-amber-300 underline-offset-2"
+                          >
+                            {row.warnings.length} warnings
+                          </button>
+                        ) : null}
+                      </td>
                       <td className="px-3 py-2">
                         <button
                           type="button"
@@ -295,6 +313,73 @@ export default function FilesManagerPage() {
                 className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
               >
                 {deletingHash === confirmFile.fileHash ? "Deleting..." : "Confirm delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {warningFile ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 px-4">
+          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900">Warnings for this file</h2>
+                <p className="mt-1 text-sm text-slate-600">{warningFile.originalName}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWarningFile(null)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+              {warningFile.warnings.map((warning, idx) => {
+                const catalog = getWarningCatalogEntry(warning.code);
+                return (
+                  <div key={`${warning.code}-${idx}`} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">{catalog.title}</div>
+                        <div className="mt-1 font-mono text-xs text-slate-500">{warning.code}</div>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-700">{catalog.explain}</p>
+                    <p className="mt-1 text-xs text-slate-600">
+                      Suggested action: {catalog.suggestion}
+                    </p>
+                    {warning.message ? (
+                      <p className="mt-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                        Raw detail: {warning.message}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {warningFile.warnings.length === 0 ? (
+                <p className="text-sm text-slate-500">No warnings stored for this file.</p>
+              ) : null}
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+              <a
+                href="/onboarding"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Review boundary setup
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  setWarningFile(null);
+                  setConfirmFile(warningFile);
+                }}
+                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"
+              >
+                Delete this PDF
               </button>
             </div>
           </div>
