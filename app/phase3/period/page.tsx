@@ -251,6 +251,7 @@ export default function Phase3PeriodPage() {
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
   const [selectedBankId, setSelectedBankId] = useState("");
   const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [periodType, setPeriodType] = useState<PeriodType>("month");
   const [periodKey, setPeriodKey] = useState("");
@@ -867,80 +868,40 @@ export default function Phase3PeriodPage() {
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto max-w-[1280px] space-y-6">
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold text-slate-900">Specific Period View</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Focused analysis for one selected period. Category drilldown and labeling stay embedded.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-xs font-medium">
+                <a
+                  href={`/phase3?${buildScopeParams(scopeMode, selectedFileIds, {
+                    bankId: selectedBankId || undefined,
+                    accountId: selectedAccountId || undefined,
+                  }).toString()}`}
+                  className="rounded-full px-4 py-2 text-slate-600 transition hover:text-slate-900"
+                >
+                  Overview
+                </a>
+                <a
+                  href={`/phase3/period?${(() => {
+                    const params = buildScopeParams(scopeMode, selectedFileIds, {
+                      bankId: selectedBankId || undefined,
+                      accountId: selectedAccountId || undefined,
+                    });
+                    params.set("type", periodType);
+                    if (periodKey) params.set("key", periodKey);
+                    return params.toString();
+                  })()}`}
+                  className="rounded-full bg-slate-900 px-4 py-2 text-white"
+                >
+                  Period
+                </a>
+              </div>
+              <h1 className="mt-4 text-2xl font-semibold text-slate-900">Period View</h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Focus on one period with transfer offset, category drilldown, and review actions in one place.
+              </p>
+            </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-12">
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Scope
-              <select
-                value={scopeMode}
-                onChange={(e) => setScopeMode(e.target.value as ScopeMode)}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
-              >
-                <option value="all">All files</option>
-                <option value="selected">Selected files</option>
-              </select>
-            </label>
-
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Files
-              <select
-                multiple
-                value={selectedFileIds}
-                disabled={scopeMode !== "selected"}
-                onChange={(e) => {
-                  const values = Array.from(e.currentTarget.selectedOptions).map((opt) => opt.value);
-                  setSelectedFileIds(values);
-                }}
-                className="h-[92px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100"
-              >
-                {files.map((file) => (
-                  <option key={file.id} value={file.id}>
-                    {file.originalName}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Bank
-              <select
-                value={selectedBankId}
-                onChange={(e) => setSelectedBankId(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
-              >
-                <option value="">All banks</option>
-                {bankOptions.map((bankId) => (
-                  <option key={bankId} value={bankId}>
-                    {bankId}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Account
-              <select
-                value={selectedAccountId}
-                onChange={(e) => setSelectedAccountId(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
-              >
-                <option value="">All accounts</option>
-                {accountOptions.map((option) => (
-                  <option
-                    key={`${option.bankId}:${option.accountId}`}
-                    value={option.accountId}
-                  >
-                    {formatAccountOptionLabel(option)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="flex items-end lg:col-span-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() =>
@@ -959,35 +920,22 @@ export default function Phase3PeriodPage() {
                   (scopeMode === "selected" && selectedFileIds.length === 0) ||
                   !periodKey
                 }
-                className="h-10 w-full rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 {isLoading ? "Loading..." : "Refresh"}
               </button>
             </div>
-
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 lg:col-span-2 lg:justify-end">
-              <input
-                type="checkbox"
-                checked={excludeMatchedTransfers}
-                onChange={(e) => setExcludeMatchedTransfers(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600"
-              />
-              Exclude matched transfers
-            </label>
           </div>
 
-          <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                Timeline
-              </div>
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center gap-3">
               <button
                 type="button"
                 onClick={() => switchPeriodType("month")}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                   periodType === "month"
-                    ? "bg-blue-600 text-white"
-                    : "border border-slate-300 bg-white text-slate-700 hover:border-blue-300"
+                    ? "bg-slate-900 text-white"
+                    : "border border-slate-300 bg-white text-slate-700 hover:border-slate-400"
                 }`}
               >
                 Month
@@ -995,10 +943,10 @@ export default function Phase3PeriodPage() {
               <button
                 type="button"
                 onClick={() => switchPeriodType("quarter")}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                   periodType === "quarter"
-                    ? "bg-blue-600 text-white"
-                    : "border border-slate-300 bg-white text-slate-700 hover:border-blue-300"
+                    ? "bg-slate-900 text-white"
+                    : "border border-slate-300 bg-white text-slate-700 hover:border-slate-400"
                 }`}
               >
                 Quarter
@@ -1006,21 +954,45 @@ export default function Phase3PeriodPage() {
               <button
                 type="button"
                 onClick={() => switchPeriodType("year")}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                   periodType === "year"
-                    ? "bg-blue-600 text-white"
-                    : "border border-slate-300 bg-white text-slate-700 hover:border-blue-300"
+                    ? "bg-slate-900 text-white"
+                    : "border border-slate-300 bg-white text-slate-700 hover:border-slate-400"
                 }`}
               >
                 Year
               </button>
-              <div className="ml-auto text-xs text-slate-600">
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(true)}
+                className="ml-auto rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+              >
+                Filters
+              </button>
+              <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600">
                 Selected: <span className="font-semibold text-slate-900">{periodKey || "-"}</span>
               </div>
             </div>
 
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600">
+              <span className="rounded-full bg-white px-3 py-1.5">
+                Scope: {scopeMode === "selected" ? "Specific files" : "All files"}
+              </span>
+              <span className="rounded-full bg-white px-3 py-1.5">
+                Bank: {selectedBankId || "All"}
+              </span>
+              <span className="rounded-full bg-white px-3 py-1.5">
+                Account: {selectedAccountId || "All"}
+              </span>
+              {scopeMode === "selected" && (
+                <span className="rounded-full bg-white px-3 py-1.5">
+                  {selectedFileIds.length} file{selectedFileIds.length === 1 ? "" : "s"} selected
+                </span>
+              )}
+            </div>
+
             <div
-              className="mt-3 rounded-lg border border-slate-200 bg-white p-3"
+              className="mt-4 rounded-2xl border border-slate-200 bg-white p-4"
               role="group"
               aria-label={timelineAriaLabel}
               tabIndex={0}
@@ -1041,7 +1013,7 @@ export default function Phase3PeriodPage() {
                 max={Math.max(availablePeriodKeys.length - 1, 0)}
                 value={effectivePeriodIndex}
                 onChange={(event) => setTimelineIndex(Number(event.target.value))}
-                className="w-full accent-blue-600"
+                className="w-full accent-slate-900"
                 disabled={availablePeriodKeys.length === 0}
               />
               <div className="mt-3 flex flex-wrap gap-2">
@@ -1052,8 +1024,8 @@ export default function Phase3PeriodPage() {
                     onClick={() => setTimelineIndex(item.idx)}
                     className={`rounded-md border px-2 py-1 text-xs transition ${
                       periodKey === item.key
-                        ? "border-blue-300 bg-blue-50 text-blue-700"
-                        : "border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50"
                     }`}
                   >
                     {item.key}
@@ -1071,6 +1043,101 @@ export default function Phase3PeriodPage() {
               {error.code}: {error.message}
             </div>
           )}
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+                Offset Mode
+              </div>
+              <h2 className="mt-2 text-xl font-semibold text-slate-900">
+                Make transfer offset the default view for this period.
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Conservative mode hides only matched internal transfers, so spending and income
+                stay closer to what actually left or entered your world. Uncertain transfers are
+                never hidden automatically.
+              </p>
+            </div>
+
+            <a
+              href="/inbox"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-slate-300 px-4 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+            >
+              Review in Inbox
+            </a>
+          </div>
+
+          <div className="mt-5 grid gap-3 lg:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setExcludeMatchedTransfers(true)}
+              className={`rounded-2xl border p-4 text-left transition ${
+                excludeMatchedTransfers
+                  ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+                  : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white"
+              }`}
+            >
+              <div className="text-sm font-semibold">Conservative (Recommended)</div>
+              <div
+                className={`mt-1 text-sm ${
+                  excludeMatchedTransfers ? "text-slate-200" : "text-slate-600"
+                }`}
+              >
+                Exclude matched internal transfers. Uncertain items stay visible.
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setExcludeMatchedTransfers(false)}
+              className={`rounded-2xl border p-4 text-left transition ${
+                !excludeMatchedTransfers
+                  ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+                  : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white"
+              }`}
+            >
+              <div className="text-sm font-semibold">Show all (Raw)</div>
+              <div
+                className={`mt-1 text-sm ${
+                  !excludeMatchedTransfers ? "text-slate-200" : "text-slate-600"
+                }`}
+              >
+                Keep every transfer in view, including matched internal movement.
+              </div>
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Matched excluded</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">
+                {overview?.transferStats?.internalOffsetPairsCount || 0}
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                {CURRENCY.format(overview?.transferStats?.internalOffsetAbs || 0)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Uncertain</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">
+                {overview?.transferStats?.uncertainPairsCount || 0}
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                Still counted until you review them.
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Boundary flow</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">
+                {overview?.transferStats?.boundaryFlowPairsCount || 0}
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                Cross-boundary movement remains in totals.
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -1446,6 +1513,121 @@ export default function Phase3PeriodPage() {
           </section>
         )}
       </div>
+
+      {filtersOpen && (
+        <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/30">
+          <div
+            className="absolute inset-0"
+            aria-hidden="true"
+            onClick={() => setFiltersOpen(false)}
+          />
+          <aside className="relative z-10 h-full w-full max-w-md overflow-y-auto border-l border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Filters</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Narrow this period view by scope, files, bank, or account.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFiltersOpen(false)}
+                className="rounded-full border border-slate-300 px-3 py-1.5 text-sm text-slate-600 transition hover:border-slate-400 hover:text-slate-900"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-5">
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-slate-700">Dataset scope</span>
+                <select
+                  value={scopeMode}
+                  onChange={(event) => {
+                    const nextScope = event.target.value as ScopeMode;
+                    setScopeMode(nextScope);
+                    if (nextScope === "all") {
+                      setSelectedFileIds([]);
+                    }
+                  }}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-slate-400"
+                >
+                  <option value="all">All files</option>
+                  <option value="selected">Specific files</option>
+                </select>
+              </label>
+
+              {scopeMode === "selected" && (
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-slate-700">
+                    Files ({selectedFileIds.length} selected)
+                  </span>
+                  <select
+                    multiple
+                    value={selectedFileIds}
+                    onChange={(event) =>
+                      setSelectedFileIds(Array.from(event.target.selectedOptions, (option) => option.value))
+                    }
+                    className="min-h-36 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-slate-400"
+                  >
+                    {files.map((file) => (
+                      <option key={file.id} value={file.id}>
+                        {file.originalName}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Hold Command or Ctrl to select multiple files.
+                  </p>
+                </label>
+              )}
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-slate-700">Bank</span>
+                <select
+                  value={selectedBankId}
+                  onChange={(event) => {
+                    const nextBank = event.target.value;
+                    setSelectedBankId(nextBank);
+                    setSelectedAccountId("");
+                  }}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-slate-400"
+                >
+                  <option value="">All banks</option>
+                  {bankOptions.map((bankId) => (
+                    <option key={bankId} value={bankId}>
+                      {bankId.toUpperCase()}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-2 block text-sm font-medium text-slate-700">Account</span>
+                <select
+                  value={selectedAccountId}
+                  onChange={(event) => setSelectedAccountId(event.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-slate-400"
+                >
+                  <option value="">All accounts</option>
+                  {accountOptions.map((option) => (
+                    <option key={`${option.bankId}:${option.accountId}`} value={option.accountId}>
+                      {formatAccountOptionLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                <div className="font-medium text-slate-900">Current selection</div>
+                <div className="mt-2">Files: {selectedFileNames.length ? selectedFileNames.join(", ") : "All files"}</div>
+                <div className="mt-1">Bank: {selectedBankId || "All"}</div>
+                <div className="mt-1">Account: {selectedAccountId || "All"}</div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      )}
     </main>
   );
 }
