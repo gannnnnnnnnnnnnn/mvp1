@@ -389,7 +389,6 @@ export default function OnboardingPage() {
                             ? ` · ${account.dateRange.from} → ${account.dateRange.to}`
                             : ""}
                         </span>
-<<<<<<< HEAD
                         {isUnknownAccountIdentity(account) ? (
                           <span className="mt-1 block text-amber-700">
                             Account details incomplete. Please confirm carefully before including this account.
