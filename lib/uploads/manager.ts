@@ -449,7 +449,7 @@ export async function deleteUploadByHash(
 
   return {
     ok: true,
-    deleted: toListItem(manifestRow, deletedStage, indexRow),
+    deleted: toListItem(manifestRow, deletedStage, [], indexRow),
     reviewStatePrunedCount: prunedCount,
     boundaryWarning:
       missingBoundaryAccountIds.length > 0
