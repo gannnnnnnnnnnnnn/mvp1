@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
 import { AppShellNav } from "@/components/app/AppShellNav";
 import "./globals.css";
 
@@ -30,9 +29,6 @@ export default function RootLayout({
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.92),_rgba(246,247,243,1)_52%)]">
           <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/70 backdrop-blur-xl">
             <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
-              <Link href="/phase3" className="text-sm font-semibold tracking-[0.2em] text-slate-900 uppercase">
-                Personal Cashflow
-              </Link>
               <AppShellNav />
             </div>
           </header>

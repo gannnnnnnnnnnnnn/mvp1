@@ -443,6 +443,9 @@ export default function Phase3DatasetHomePage() {
               >
                 Pick a period
               </ButtonLink>
+              <ButtonLink href="/onboarding" variant="secondary" size="sm">
+                Add PDFs
+              </ButtonLink>
             </div>
           </div>
 
@@ -451,6 +454,12 @@ export default function Phase3DatasetHomePage() {
             title="Your cashflow dashboard"
             description="A calm overview across uploaded statements, with clear next actions when something still needs review."
           />
+
+          {files.length > 0 ? (
+            <p className="mt-3 text-sm text-slate-500">
+              Upload more statements to extend coverage.
+            </p>
+          ) : null}
 
           <div className="mt-6 grid gap-4 lg:grid-cols-12">
             <label className="space-y-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400 lg:col-span-3">

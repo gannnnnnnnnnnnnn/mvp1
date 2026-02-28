@@ -180,7 +180,12 @@ export default function SettingsPage() {
           <SectionHeader
             title="Uploads"
             description="Quick view of your local statement library."
-            action={<ButtonLink href="/files" variant="secondary">Manage uploads</ButtonLink>}
+            action={
+              <div className="flex flex-wrap gap-2">
+                <ButtonLink href="/onboarding" variant="secondary">Add PDFs</ButtonLink>
+                <ButtonLink href="/files" variant="secondary">Manage uploads</ButtonLink>
+              </div>
+            }
           />
           <div className="mt-5 grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
