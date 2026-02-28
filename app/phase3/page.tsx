@@ -324,9 +324,9 @@ export default function Phase3DatasetHomePage() {
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto max-w-[1280px] space-y-6">
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="text-3xl font-semibold text-slate-900">Phase3 Dataset Home</h1>
+          <h1 className="text-3xl font-semibold text-slate-900">Report</h1>
           <p className="mt-2 text-sm text-slate-600">
-            Dataset-first navigation for CommBank statements. Default mode uses all files.
+            Your cashflow overview across uploaded statements.
           </p>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-12">
@@ -490,15 +490,15 @@ export default function Phase3DatasetHomePage() {
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="text-xs uppercase tracking-wide text-slate-500">Income</div>
-            <div className="mt-3 text-3xl font-semibold text-emerald-700">
-              {CURRENCY.format(overview?.totals.income || 0)}
+            <div className="text-xs uppercase tracking-wide text-slate-500">Spending</div>
+            <div className="mt-3 text-3xl font-semibold text-rose-700">
+              {CURRENCY.format(overview?.totals.spend || 0)}
             </div>
           </article>
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="text-xs uppercase tracking-wide text-slate-500">Spend</div>
-            <div className="mt-3 text-3xl font-semibold text-rose-700">
-              {CURRENCY.format(overview?.totals.spend || 0)}
+            <div className="text-xs uppercase tracking-wide text-slate-500">Income</div>
+            <div className="mt-3 text-3xl font-semibold text-emerald-700">
+              {CURRENCY.format(overview?.totals.income || 0)}
             </div>
           </article>
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -512,7 +512,7 @@ export default function Phase3DatasetHomePage() {
         </section>
 
         <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Note: Transfers are currently included in totals. Transfer offset matching will be added in the next milestone.
+          Note: Transfers are currently included in totals. This will be improved in a later milestone.
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -548,21 +548,6 @@ export default function Phase3DatasetHomePage() {
                   Explore latest period
                 </a>
               )}
-              <a
-                href={`/phase3/compare?${buildScopeParams(scopeMode, selectedFileIds, {
-                  bankId: selectedBankId || undefined,
-                  accountId: selectedAccountId || undefined,
-                }).toString()}`}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Compare
-              </a>
-              <a
-                href="/transactions"
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Workspace
-              </a>
               <details className="relative">
                 <summary className="list-none cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
                   Export
@@ -614,6 +599,30 @@ export default function Phase3DatasetHomePage() {
                 </span>
               </a>
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Help</h2>
+          <div className="mt-3 grid gap-3 md:grid-cols-3">
+            <article className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-sm font-medium text-slate-900">What is Boundary?</div>
+              <p className="mt-1 text-sm text-slate-600">
+                Boundary defines which accounts are inside your own money world. Transfers within that boundary can offset each other.
+              </p>
+            </article>
+            <article className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-sm font-medium text-slate-900">Why uncertain transfers stay in totals</div>
+              <p className="mt-1 text-sm text-slate-600">
+                If a transfer match is not clear enough, we keep it counted to avoid hiding real spending or income by mistake.
+              </p>
+            </article>
+            <article className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-sm font-medium text-slate-900">Where to review issues</div>
+              <p className="mt-1 text-sm text-slate-600">
+                Open Inbox to review merchants, transfer checks, and parsing issues that still need a decision.
+              </p>
+            </article>
           </div>
         </section>
 
@@ -712,13 +721,19 @@ export default function Phase3DatasetHomePage() {
 
         {overview && (
           <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
-            <div className="mb-1 font-medium uppercase tracking-wide text-slate-500">Debug</div>
-            <div>templateType: {overview.templateType}</div>
-            <div>needsReview: {String(overview.needsReview)}</div>
-            <div>
-              continuity: {(overview.quality?.balanceContinuityPassRate || 0).toFixed(3)} · checked: {overview.quality?.balanceContinuityChecked || 0}
-            </div>
-            <div>dedupedCount: {overview.dedupedCount || 0}</div>
+            <details>
+              <summary className="cursor-pointer list-none font-medium uppercase tracking-wide text-slate-500">
+                Advanced details
+              </summary>
+              <div className="mt-2 space-y-1">
+                <div>Template: {overview.templateType}</div>
+                <div>Needs review: {String(overview.needsReview)}</div>
+                <div>
+                  Continuity: {(overview.quality?.balanceContinuityPassRate || 0).toFixed(3)} · checked: {overview.quality?.balanceContinuityChecked || 0}
+                </div>
+                <div>Duplicates removed: {overview.dedupedCount || 0}</div>
+              </div>
+            </details>
           </section>
         )}
 
@@ -736,7 +751,7 @@ export default function Phase3DatasetHomePage() {
                 </button>
               </div>
               <p className="mt-1 text-sm text-slate-600">
-                Select account IDs inside your reporting boundary.
+                Select the accounts that belong inside your reporting boundary.
               </p>
 
               <div className="mt-3 max-h-72 space-y-2 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-3">
@@ -789,7 +804,7 @@ export default function Phase3DatasetHomePage() {
                                 [account.accountId]: e.target.value,
                               }))
                             }
-                            placeholder="Alias (optional, used for transfer name matching)"
+                            placeholder="Rename account (optional)"
                             className="mt-1 h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
                           />
                         </span>
@@ -798,7 +813,7 @@ export default function Phase3DatasetHomePage() {
                   );
                 })}
                 {boundary && boundary.knownAccounts.length === 0 && (
-                  <p className="text-xs text-slate-500">No known accounts yet. Upload and parse files first.</p>
+                  <p className="text-xs text-slate-500">No account details found yet. Upload and parse files first.</p>
                 )}
               </div>
 

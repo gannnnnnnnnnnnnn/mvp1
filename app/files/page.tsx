@@ -56,7 +56,7 @@ function formatStage(row: UploadItem["parseStatus"]) {
     const warnings = typeof row.warnings === "number" ? row.warnings : 0;
     const txCount = typeof row.txCount === "number" ? row.txCount : 0;
     const review = row.needsReview ? " · needs review" : "";
-    return `parsed · ${txCount} tx · ${warnings} warnings${review}`;
+    return `parsed · ${txCount} tx · ${warnings} checks${review}`;
   }
   return row.stage;
 }
@@ -163,7 +163,7 @@ export default function FilesManagerPage() {
             <div>
               <h1 className="text-2xl font-semibold text-slate-900">Uploaded Files</h1>
               <p className="mt-1 text-sm text-slate-600">
-                Manage local PDFs and derived cache artifacts.
+                Manage local PDFs and review import checks.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -241,10 +241,9 @@ export default function FilesManagerPage() {
                     <tr key={row.fileHash}>
                       <td className="max-w-[280px] px-3 py-2">
                         <div className="truncate font-medium text-slate-900">{row.originalName}</div>
-                        <div className="text-xs text-slate-500">{row.fileHash.slice(0, 16)}...</div>
                       </td>
                       <td className="px-3 py-2 text-xs">
-                        <div>{row.bankId?.toUpperCase() || "unknown"}</div>
+                        <div>{row.bankId?.toUpperCase() || "Account details incomplete"}</div>
                         <div className="text-slate-500">
                           {(row.accountIds || []).join(", ") || "n/a"}
                         </div>

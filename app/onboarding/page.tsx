@@ -391,7 +391,7 @@ export default function OnboardingPage() {
                         </span>
                         {isUnknownAccountIdentity(account) ? (
                           <span className="mt-1 block text-amber-700">
-                            Unknown/default identity. Not auto-selected.
+                            Account details incomplete. Please confirm carefully before including this account.
                           </span>
                         ) : null}
                         <span className="mt-2 block">

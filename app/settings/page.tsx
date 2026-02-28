@@ -174,11 +174,15 @@ export default function SettingsPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Manage local data and safe reset actions.
+            Manage local files, safe reset actions, and the few advanced tools that are
+            not part of the main workflow.
           </p>
         </section>
 
-        <section id="uploads-list" className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section
+          id="uploads-list"
+          className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Uploads</h2>
@@ -231,8 +235,12 @@ export default function SettingsPage() {
                       <td className="px-3 py-2 text-xs text-slate-600">
                         {item.uploadedAt.slice(0, 10)}
                       </td>
-                      <td className="px-3 py-2 text-xs text-slate-600">{formatBytes(item.size)}</td>
-                      <td className="px-3 py-2 text-xs text-slate-600">{item.parseStatus.stage}</td>
+                      <td className="px-3 py-2 text-xs text-slate-600">
+                        {formatBytes(item.size)}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-600">
+                        {item.parseStatus.stage}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -244,7 +252,8 @@ export default function SettingsPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Analysis State</h2>
           <p className="mt-1 text-sm text-slate-600">
-            Reset review state, overrides, and derived analysis caches. PDFs and manifest are kept.
+            Reset review state, overrides, and derived analysis caches. PDFs and
+            manifest are kept.
           </p>
           <div className="mt-3">
             <button
@@ -288,6 +297,36 @@ export default function SettingsPage() {
           <p className="mt-2 text-xs text-slate-500">
             Invalid JSON is rejected safely; existing overrides stay unchanged.
           </p>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <details>
+            <summary className="cursor-pointer list-none text-lg font-semibold text-slate-900">
+              Advanced
+            </summary>
+            <p className="mt-2 text-sm text-slate-600">
+              These views are useful for investigation, but they are not part of the
+              main reporting flow.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href="/phase3/compare"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Compare view
+              </a>
+              <a
+                href="/transactions"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Transactions workspace
+              </a>
+            </div>
+            <p className="mt-3 text-xs text-amber-700">
+              Advanced views may expose extra analysis detail that most users do not
+              need day to day.
+            </p>
+          </details>
         </section>
 
         {status ? (

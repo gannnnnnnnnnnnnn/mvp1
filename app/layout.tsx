@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Personal Cashflow MVP",
-  description: "CommBank PDF parser and category analytics dashboard",
+  description: "Local-first personal cashflow reporting from bank statements",
 };
 
 export default function RootLayout({
@@ -32,7 +32,7 @@ export default function RootLayout({
           <header className="border-b border-slate-200 bg-white">
             <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3 sm:px-8">
               <div className="text-sm font-semibold text-slate-900">
-                Personal Cashflow MVP
+                Personal Cashflow
               </div>
               <nav className="flex items-center gap-5 text-sm text-slate-600">
                 <Link href="/onboarding" className="font-medium text-slate-900 hover:text-blue-700">
@@ -47,12 +47,6 @@ export default function RootLayout({
                 <Link href="/settings" className="font-medium text-slate-900 hover:text-blue-700">
                   Settings
                 </Link>
-                <a
-                  href="/api/analysis/export?type=transactions&format=csv&scope=all&showTransfers=excludeMatched"
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-                >
-                  Export
-                </a>
               </nav>
             </div>
           </header>
