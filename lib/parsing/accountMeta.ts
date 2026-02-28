@@ -58,6 +58,7 @@ function cleanAccountName(value?: string) {
   if (!candidate) return undefined;
   if (/\bBSB\b/i.test(candidate)) return undefined;
   if (/^Account\b/i.test(candidate)) return undefined;
+  if (/^\+?\s*\$/.test(candidate)) return undefined;
   return candidate;
 }
 
@@ -84,6 +85,40 @@ function extractCbaAccountNumberFromAccountNumberLine(text: string, knownBsb?: s
     return normalizeAccountNumber(merged.slice(6));
   }
   return normalizeAccountNumber(merged);
+}
+
+function extractCbaHeaderIdentity(text: string) {
+  const patterns = [
+    /(?:^|\n)\s*Account Number\s+(\d{2}\s?\d{4}\s?\d{6,12})\b/im,
+    /(?:^|\n)\s*Account Number\s+(\d{6}\s?\d{6,12})\b/im,
+    /(?:^|\n)\s*Account Number\s+(\d{12,18})\b/im,
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (!match?.[1]) continue;
+    const digits = digitsOnly(match[1]);
+    if (digits.length < 12) continue;
+    return {
+      bsb: normalizeBsb(digits.slice(0, 6)),
+      accountNumber: normalizeAccountNumber(digits.slice(6)),
+    };
+  }
+
+  const lines = splitLines(text);
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^Account Number\b/i.test(lines[i] || "")) continue;
+    for (let j = i; j <= i + 2 && j < lines.length; j += 1) {
+      const candidate = digitsOnly(lines[j] || "");
+      if (candidate.length < 12) continue;
+      return {
+        bsb: normalizeBsb(candidate.slice(0, 6)),
+        accountNumber: normalizeAccountNumber(candidate.slice(6)),
+      };
+    }
+  }
+
+  return { bsb: undefined, accountNumber: undefined };
 }
 
 export function normalizeBsb(value?: string) {
@@ -196,6 +231,8 @@ export function extractCbaAccountMeta(params: {
   let bsb: string | undefined;
   let accountNumber: string | undefined;
   let accountNumberFromLine: string | undefined;
+  let headerFallbackUsed = false;
+  const metaWarnings: string[] = [];
 
   for (const windowText of windows) {
     const lines = splitLines(windowText);
@@ -205,6 +242,10 @@ export function extractCbaAccountMeta(params: {
       const labelMatch =
         /(?:^|\n)\s*Account name\s+([A-Za-z][A-Za-z0-9 '&.-]{1,})\s*$/im.exec(windowText);
       accountName = cleanAccountName(labelMatch?.[1]);
+    }
+    if (!accountName) {
+      const nameLabel = /(?:^|\n)\s*Name\s*:\s*([A-Za-z][A-Za-z0-9 '&.-]{1,})\s*$/im.exec(windowText);
+      accountName = cleanAccountName(nameLabel?.[1]);
     }
 
     if (!bsb) {
@@ -235,6 +276,10 @@ export function extractCbaAccountMeta(params: {
       const value = extractLabeledValue(lines, /Account name\s*[:\s]*([A-Za-z0-9 '&.-]{2,})/i);
       accountName = cleanAccountName(value);
     }
+    if (!accountName) {
+      const value = extractLabeledValue(lines, /Name\s*:\s*([A-Za-z0-9 '&.-]{2,})/i);
+      accountName = cleanAccountName(value);
+    }
     if (!bsb) {
       const value = extractLabeledValue(lines, /\bBSB\b\s*[:\s]*([0-9][0-9 \-]{4,10})/i);
       bsb = normalizeBsb(value);
@@ -252,6 +297,18 @@ export function extractCbaAccountMeta(params: {
     }
   }
 
+  if (!bsb || !accountNumber) {
+    const headerIdentity = extractCbaHeaderIdentity(pageOneText);
+    if (!bsb && headerIdentity.bsb) {
+      bsb = headerIdentity.bsb;
+      headerFallbackUsed = true;
+    }
+    if (!accountNumber && headerIdentity.accountNumber) {
+      accountNumber = headerIdentity.accountNumber;
+      headerFallbackUsed = true;
+    }
+  }
+
   if (!accountNumber && accountNumberFromLine) {
     accountNumber = accountNumberFromLine;
   }
@@ -262,6 +319,13 @@ export function extractCbaAccountMeta(params: {
     accountNumber = accountNumber || normalizeAccountNumber(idAccount);
   }
 
+  if (headerFallbackUsed && !accountName && accountNumber) {
+    metaWarnings.push("CBA_IDENTITY_HEADER_ONLY");
+  }
+  if (!accountNumber) {
+    metaWarnings.push("ACCOUNT_IDENTITY_MISSING");
+  }
+
   return normalizeAccountMeta({
     bankId: "cba",
     accountId,
@@ -269,5 +333,6 @@ export function extractCbaAccountMeta(params: {
     accountName,
     bsb,
     accountNumber,
+    metaWarnings,
   });
 }
