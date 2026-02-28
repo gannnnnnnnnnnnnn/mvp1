@@ -44,8 +44,8 @@ export default function RootLayout({
                 <Link href="/inbox" className="font-medium text-slate-900 hover:text-blue-700">
                   Inbox
                 </Link>
-                <Link href="/files" className="font-medium text-slate-900 hover:text-blue-700">
-                  Files
+                <Link href="/settings" className="font-medium text-slate-900 hover:text-blue-700">
+                  Settings
                 </Link>
                 <a
                   href="/api/analysis/export?type=transactions&format=csv&scope=all&showTransfers=excludeMatched"

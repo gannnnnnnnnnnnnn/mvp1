@@ -35,6 +35,10 @@ type DeleteResponse =
     }
   | { ok: false; error: ApiError };
 
+type DeleteAllResponse =
+  | { ok: true; total: number; deletedCount: number }
+  | { ok: false; error: ApiError };
+
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -59,6 +63,7 @@ export default function FilesManagerPage() {
   const [boundaryWarning, setBoundaryWarning] = useState<string>("");
   const [confirmFile, setConfirmFile] = useState<UploadItem | null>(null);
   const [deletingHash, setDeletingHash] = useState("");
+  const [deletingAll, setDeletingAll] = useState(false);
 
   async function loadRows() {
     setLoading(true);
@@ -109,6 +114,35 @@ export default function FilesManagerPage() {
     }
   }
 
+  async function handleDeleteAll() {
+    const confirmation = window.prompt(
+      "Type DELETE ALL to remove all uploaded PDFs and derived caches."
+    );
+    if (confirmation !== "DELETE ALL") {
+      setStatus("Delete all uploads cancelled.");
+      return;
+    }
+
+    setDeletingAll(true);
+    setStatus("");
+    setError("");
+    setBoundaryWarning("");
+    try {
+      const res = await fetch("/api/uploads/all", { method: "DELETE" });
+      const data = (await res.json()) as DeleteAllResponse;
+      if (!data.ok) {
+        setError(`${data.error.code}: ${data.error.message}`);
+        return;
+      }
+      setStatus(`Deleted ${data.deletedCount} / ${data.total} uploads.`);
+      await loadRows();
+    } catch {
+      setError("Delete all uploads failed.");
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
   const totalSizeLabel = useMemo(() => {
     const total = rows.reduce((sum, row) => sum + row.size, 0);
     return formatSize(total);
@@ -138,6 +172,14 @@ export default function FilesManagerPage() {
               >
                 Open Report
               </a>
+              <button
+                type="button"
+                onClick={() => void handleDeleteAll()}
+                disabled={deletingAll || rows.length === 0}
+                className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deletingAll ? "Deleting..." : "Delete all"}
+              </button>
             </div>
           </div>
 
