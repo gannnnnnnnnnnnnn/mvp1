@@ -324,9 +324,9 @@ export default function Phase3DatasetHomePage() {
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto max-w-[1280px] space-y-6">
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="text-3xl font-semibold text-slate-900">Phase3 Dataset Home</h1>
+          <h1 className="text-3xl font-semibold text-slate-900">Report</h1>
           <p className="mt-2 text-sm text-slate-600">
-            Dataset-first navigation for CommBank statements. Default mode uses all files.
+            Your cashflow overview across uploaded statements.
           </p>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-12">
@@ -490,15 +490,15 @@ export default function Phase3DatasetHomePage() {
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="text-xs uppercase tracking-wide text-slate-500">Income</div>
-            <div className="mt-3 text-3xl font-semibold text-emerald-700">
-              {CURRENCY.format(overview?.totals.income || 0)}
+            <div className="text-xs uppercase tracking-wide text-slate-500">Spending</div>
+            <div className="mt-3 text-3xl font-semibold text-rose-700">
+              {CURRENCY.format(overview?.totals.spend || 0)}
             </div>
           </article>
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="text-xs uppercase tracking-wide text-slate-500">Spend</div>
-            <div className="mt-3 text-3xl font-semibold text-rose-700">
-              {CURRENCY.format(overview?.totals.spend || 0)}
+            <div className="text-xs uppercase tracking-wide text-slate-500">Income</div>
+            <div className="mt-3 text-3xl font-semibold text-emerald-700">
+              {CURRENCY.format(overview?.totals.income || 0)}
             </div>
           </article>
           <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -751,7 +751,7 @@ export default function Phase3DatasetHomePage() {
                 </button>
               </div>
               <p className="mt-1 text-sm text-slate-600">
-                Select account IDs inside your reporting boundary.
+                Select the accounts that belong inside your reporting boundary.
               </p>
 
               <div className="mt-3 max-h-72 space-y-2 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-3">
@@ -804,7 +804,7 @@ export default function Phase3DatasetHomePage() {
                                 [account.accountId]: e.target.value,
                               }))
                             }
-                            placeholder="Alias (optional, used for transfer name matching)"
+                            placeholder="Rename account (optional)"
                             className="mt-1 h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
                           />
                         </span>
@@ -813,7 +813,7 @@ export default function Phase3DatasetHomePage() {
                   );
                 })}
                 {boundary && boundary.knownAccounts.length === 0 && (
-                  <p className="text-xs text-slate-500">No known accounts yet. Upload and parse files first.</p>
+                  <p className="text-xs text-slate-500">No account details found yet. Upload and parse files first.</p>
                 )}
               </div>
 
