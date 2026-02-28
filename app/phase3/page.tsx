@@ -270,6 +270,21 @@ export default function Phase3DatasetHomePage() {
   const boundaryNeedsSetup = Boolean(
     boundary && (boundary.needsSetup || boundary.config.boundaryAccountIds.length === 0)
   );
+  const uncertainCount = overview?.transferStats?.uncertainPairsCount || 0;
+  const offsetStatus = excludeMatchedTransfers
+    ? uncertainCount > 0
+      ? {
+          tone: "border-amber-200 bg-amber-50 text-amber-900",
+          message: "Some transfers are uncertain and are included for safety. Review them in Inbox.",
+        }
+      : {
+          tone: "border-emerald-200 bg-emerald-50 text-emerald-900",
+          message: "Matched internal transfers are excluded.",
+        }
+    : {
+        tone: "border-slate-200 bg-slate-50 text-slate-800",
+        message: "Showing raw cashflow including internal transfers.",
+      };
 
   function toggleBoundaryAccount(accountId: string) {
     setBoundaryDraft((prev) => {
@@ -640,6 +655,10 @@ export default function Phase3DatasetHomePage() {
             >
               Change...
             </button>
+          </div>
+
+          <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${offsetStatus.tone}`}>
+            {offsetStatus.message}
           </div>
         </section>
 
