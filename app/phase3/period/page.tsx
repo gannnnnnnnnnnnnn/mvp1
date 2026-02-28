@@ -867,80 +867,40 @@ export default function Phase3PeriodPage() {
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto max-w-[1280px] space-y-6">
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold text-slate-900">Specific Period View</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Focused analysis for one selected period. Category drilldown and labeling stay embedded.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-xs font-medium">
+                <a
+                  href={`/phase3?${buildScopeParams(scopeMode, selectedFileIds, {
+                    bankId: selectedBankId || undefined,
+                    accountId: selectedAccountId || undefined,
+                  }).toString()}`}
+                  className="rounded-full px-4 py-2 text-slate-600 transition hover:text-slate-900"
+                >
+                  Overview
+                </a>
+                <a
+                  href={`/phase3/period?${(() => {
+                    const params = buildScopeParams(scopeMode, selectedFileIds, {
+                      bankId: selectedBankId || undefined,
+                      accountId: selectedAccountId || undefined,
+                    });
+                    params.set("type", periodType);
+                    if (periodKey) params.set("key", periodKey);
+                    return params.toString();
+                  })()}`}
+                  className="rounded-full bg-slate-900 px-4 py-2 text-white"
+                >
+                  Period
+                </a>
+              </div>
+              <h1 className="mt-4 text-2xl font-semibold text-slate-900">Period View</h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Focus on one period with transfer offset, category drilldown, and review actions in one place.
+              </p>
+            </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-12">
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Scope
-              <select
-                value={scopeMode}
-                onChange={(e) => setScopeMode(e.target.value as ScopeMode)}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
-              >
-                <option value="all">All files</option>
-                <option value="selected">Selected files</option>
-              </select>
-            </label>
-
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Files
-              <select
-                multiple
-                value={selectedFileIds}
-                disabled={scopeMode !== "selected"}
-                onChange={(e) => {
-                  const values = Array.from(e.currentTarget.selectedOptions).map((opt) => opt.value);
-                  setSelectedFileIds(values);
-                }}
-                className="h-[92px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 disabled:bg-slate-100"
-              >
-                {files.map((file) => (
-                  <option key={file.id} value={file.id}>
-                    {file.originalName}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Bank
-              <select
-                value={selectedBankId}
-                onChange={(e) => setSelectedBankId(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
-              >
-                <option value="">All banks</option>
-                {bankOptions.map((bankId) => (
-                  <option key={bankId} value={bankId}>
-                    {bankId}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
-              Account
-              <select
-                value={selectedAccountId}
-                onChange={(e) => setSelectedAccountId(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
-              >
-                <option value="">All accounts</option>
-                {accountOptions.map((option) => (
-                  <option
-                    key={`${option.bankId}:${option.accountId}`}
-                    value={option.accountId}
-                  >
-                    {formatAccountOptionLabel(option)}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="flex items-end lg:col-span-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() =>
@@ -959,35 +919,22 @@ export default function Phase3PeriodPage() {
                   (scopeMode === "selected" && selectedFileIds.length === 0) ||
                   !periodKey
                 }
-                className="h-10 w-full rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 {isLoading ? "Loading..." : "Refresh"}
               </button>
             </div>
-
-            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 lg:col-span-2 lg:justify-end">
-              <input
-                type="checkbox"
-                checked={excludeMatchedTransfers}
-                onChange={(e) => setExcludeMatchedTransfers(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600"
-              />
-              Exclude matched transfers
-            </label>
           </div>
 
           <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                Timeline
-              </div>
               <button
                 type="button"
                 onClick={() => switchPeriodType("month")}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                   periodType === "month"
-                    ? "bg-blue-600 text-white"
-                    : "border border-slate-300 bg-white text-slate-700 hover:border-blue-300"
+                    ? "bg-slate-900 text-white"
+                    : "border border-slate-300 bg-white text-slate-700 hover:border-slate-400"
                 }`}
               >
                 Month
@@ -997,8 +944,8 @@ export default function Phase3PeriodPage() {
                 onClick={() => switchPeriodType("quarter")}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                   periodType === "quarter"
-                    ? "bg-blue-600 text-white"
-                    : "border border-slate-300 bg-white text-slate-700 hover:border-blue-300"
+                    ? "bg-slate-900 text-white"
+                    : "border border-slate-300 bg-white text-slate-700 hover:border-slate-400"
                 }`}
               >
                 Quarter
@@ -1008,8 +955,8 @@ export default function Phase3PeriodPage() {
                 onClick={() => switchPeriodType("year")}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition ${
                   periodType === "year"
-                    ? "bg-blue-600 text-white"
-                    : "border border-slate-300 bg-white text-slate-700 hover:border-blue-300"
+                    ? "bg-slate-900 text-white"
+                    : "border border-slate-300 bg-white text-slate-700 hover:border-slate-400"
                 }`}
               >
                 Year
@@ -1052,8 +999,8 @@ export default function Phase3PeriodPage() {
                     onClick={() => setTimelineIndex(item.idx)}
                     className={`rounded-md border px-2 py-1 text-xs transition ${
                       periodKey === item.key
-                        ? "border-blue-300 bg-blue-50 text-blue-700"
-                        : "border-slate-300 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50"
                     }`}
                   >
                     {item.key}

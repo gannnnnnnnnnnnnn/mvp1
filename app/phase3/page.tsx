@@ -324,10 +324,71 @@ export default function Phase3DatasetHomePage() {
     <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
       <div className="mx-auto max-w-[1280px] space-y-6">
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="text-3xl font-semibold text-slate-900">Report</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            Your cashflow overview across uploaded statements.
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-xs font-medium">
+                <a
+                  href="/phase3"
+                  className="rounded-full bg-slate-900 px-4 py-2 text-white"
+                >
+                  Overview
+                </a>
+                <a
+                  href={`/phase3/period?${(() => {
+                    const params = buildScopeParams(scopeMode, selectedFileIds, {
+                      bankId: selectedBankId || undefined,
+                      accountId: selectedAccountId || undefined,
+                    });
+                    params.set("type", "month");
+                    params.set("key", latestMonth || "");
+                    return params.toString();
+                  })()}`}
+                  className="rounded-full px-4 py-2 text-slate-600 transition hover:text-slate-900"
+                >
+                  Period
+                </a>
+              </div>
+              <h1 className="mt-4 text-3xl font-semibold text-slate-900">Report Overview</h1>
+              <p className="mt-2 text-sm text-slate-600">
+                Your cashflow overview across uploaded statements.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {latestMonth ? (
+                <a
+                  href={`/phase3/period?${(() => {
+                    const params = buildScopeParams(scopeMode, selectedFileIds, {
+                      bankId: selectedBankId || undefined,
+                      accountId: selectedAccountId || undefined,
+                    });
+                    params.set("type", "month");
+                    params.set("key", latestMonth);
+                    return params.toString();
+                  })()}`}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                >
+                  Open latest month
+                </a>
+              ) : null}
+              <a
+                href={`/phase3/period?${(() => {
+                  const params = buildScopeParams(scopeMode, selectedFileIds, {
+                    bankId: selectedBankId || undefined,
+                    accountId: selectedAccountId || undefined,
+                  });
+                  if (latestMonth) {
+                    params.set("type", "month");
+                    params.set("key", latestMonth);
+                  }
+                  return params.toString();
+                })()}`}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Pick a period
+              </a>
+            </div>
+          </div>
 
           <div className="mt-4 grid gap-4 lg:grid-cols-12">
             <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-3">
@@ -532,22 +593,9 @@ export default function Phase3DatasetHomePage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-              {latestMonth && (
-                <a
-                  href={`/phase3/period?${(() => {
-                    const params = buildScopeParams(scopeMode, selectedFileIds, {
-                      bankId: selectedBankId || undefined,
-                      accountId: selectedAccountId || undefined,
-                    });
-                    params.set("type", "month");
-                    params.set("key", latestMonth);
-                    return params.toString();
-                  })()}`}
-                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                >
-                  Explore latest period
-                </a>
-              )}
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
+                Open a month from the chart below, or switch to Period view.
+              </span>
               <details className="relative">
                 <summary className="list-none cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
                   Export
