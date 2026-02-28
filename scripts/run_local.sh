@@ -14,7 +14,8 @@ echo "[run_local] URLs:"
 echo "  http://localhost:3000/onboarding"
 echo "  http://localhost:3000/phase3"
 echo "  http://localhost:3000/inbox"
+echo "  http://localhost:3000/files"
+echo "  http://localhost:3000/settings"
 echo "[run_local] Local data lives under uploads/* (git-ignored)."
 
 npm run dev
-
