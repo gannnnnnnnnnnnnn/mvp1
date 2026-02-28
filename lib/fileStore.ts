@@ -7,7 +7,11 @@
  */
 import { promises as fs } from "fs";
 import path from "path";
-import { StatementAccountMeta } from "@/lib/parsing/accountMeta";
+import {
+  normalizeAccountMeta,
+  resolveAccountIdFromMeta,
+  StatementAccountMeta,
+} from "@/lib/parsing/accountMeta";
 
 /**
  * Shape of the metadata that lives inside uploads/index.json.
@@ -87,7 +91,32 @@ export async function readIndex(): Promise<FileMeta[]> {
     try {
       const data = JSON.parse(buf);
       if (!Array.isArray(data)) return [];
-      return data as FileMeta[];
+      return (data as FileMeta[]).map((row) => {
+        const bankId = row.bankId || "cba";
+        const templateId =
+          String(row.templateId || row.templateType || "").trim() ||
+          (bankId === "anz" ? "anz_v1" : "commbank_manual_amount_balance");
+        const normalizedMeta = row.accountMeta
+          ? normalizeAccountMeta({
+              ...row.accountMeta,
+              bankId,
+              accountId: row.accountMeta.accountId || row.accountId || "default",
+              templateId,
+            })
+          : undefined;
+        const accountId = resolveAccountIdFromMeta({
+          bankId,
+          existingAccountId: row.accountId,
+          accountMeta: normalizedMeta,
+        });
+        return {
+          ...row,
+          bankId,
+          templateId: row.templateId || templateId,
+          accountMeta: normalizedMeta,
+          accountId,
+        };
+      });
     } catch {
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       const corruptPath = `${indexFileAbsolute}.corrupt-${stamp}`;

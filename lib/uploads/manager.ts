@@ -368,15 +368,28 @@ export async function listUploads(options: ManagerOptions = {}) {
     (manifest.files || []).map(async (manifestRow) => {
       const indexRow = resolveIndexRow(manifestRow, indexRows);
       const fileId = manifestRow.fileId || indexRow?.id;
+      const storedName = manifestRow.storedName || indexRow?.storedName;
+      if (storedName) {
+        const storedPath = resolveSafeUploadPath(uploadsRoot, storedName);
+        if (!storedPath || !(await fileExists(storedPath))) {
+          console.warn("[uploads] skipping manifest entry with missing PDF", {
+            fileHash: manifestRow.fileHash,
+            storedName,
+          });
+          return null;
+        }
+      }
       const stage = await parseStageForFile(uploadsRoot, fileId, manifestRow);
       const warnings = await readWarningItemsFromParsedCache(uploadsRoot, fileId);
       return toListItem(manifestRow, stage, warnings, indexRow);
     })
   );
 
-  return rows.sort(
+  return rows
+    .filter((row): row is UploadListItem => Boolean(row))
+    .sort(
     (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
-  );
+    );
 }
 
 export async function deleteUploadByHash(

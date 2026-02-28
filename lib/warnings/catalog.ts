@@ -35,6 +35,31 @@ const WARNING_CATALOG: Record<string, WarningCatalogEntry> = {
     explain: "Parsed balances do not line up cleanly across rows, which usually means parsing drift.",
     suggestion: "Open the file in dev tooling or remove the PDF if it is malformed.",
   },
+  IDENTITY_HEADER_ONLY: {
+    title: "Header-only account identity",
+    explain: "We found a usable account number from the statement header, but not a reliable account name.",
+    suggestion: "Usually safe. Add an alias in Boundary setup if you want a cleaner label.",
+  },
+  IDENTITY_MISSING: {
+    title: "Account identity missing",
+    explain: "We could not extract a stable account number for this statement.",
+    suggestion: "Check the statement format, or remove the PDF if the account details cannot be trusted.",
+  },
+  AMOUNT_OUTLIER: {
+    title: "Amount outlier",
+    explain: "A parsed amount looked unusual compared with nearby rows.",
+    suggestion: "Usually safe to ignore unless totals look wrong. Check the transaction if needed.",
+  },
+  OUTLIER_GLUE_NUMBER: {
+    title: "Possible glued number",
+    explain: "The PDF text likely merged two numbers together, which can confuse amount parsing.",
+    suggestion: "Check this transaction if the amount looks suspicious.",
+  },
+  ANNOTATION_LINE_SKIPPED: {
+    title: "Annotation line skipped",
+    explain: "A note-only line was ignored because it did not look like a real transaction row.",
+    suggestion: "Usually safe to ignore.",
+  },
 };
 
 export function getWarningCatalogEntry(code: string): WarningCatalogEntry {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { readBoundaryConfig, writeBoundaryConfig } from "@/lib/boundary/store";
 import { isUnknownAccountIdentity } from "@/lib/boundary/accountLabels";
+import { readBoundaryConfig, writeBoundaryConfig } from "@/lib/boundary/store";
 import { readIndex } from "@/lib/fileStore";
 
 type KnownAccountRow = {
