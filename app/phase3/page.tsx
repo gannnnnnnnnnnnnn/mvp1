@@ -21,7 +21,6 @@ import {
   ScopeMode,
   buildScopeParams,
   parseScopeFromWindow,
-  pushScopeIntoUrl,
 } from "@/app/phase3/_lib/timeNav";
 import {
   formatAccountLabel,
@@ -85,6 +84,8 @@ export default function Phase3DatasetHomePage() {
   const [boundaryStatus, setBoundaryStatus] = useState("");
   const [showOnboardingBanner, setShowOnboardingBanner] = useState(false);
   const [inboxCount, setInboxCount] = useState(0);
+  const [excludeMatchedTransfers, setExcludeMatchedTransfers] = useState(true);
+  const [offsetModalOpen, setOffsetModalOpen] = useState(false);
 
   const selectedFileNames = useMemo(
     () =>
@@ -139,7 +140,8 @@ export default function Phase3DatasetHomePage() {
     nextScopeMode: ScopeMode,
     nextSelectedFileIds: string[],
     nextBankId: string,
-    nextAccountId: string
+    nextAccountId: string,
+    nextShowTransfers = excludeMatchedTransfers ? "excludeMatched" : "all"
   ) {
     setIsLoading(true);
     setError(null);
@@ -150,6 +152,7 @@ export default function Phase3DatasetHomePage() {
         accountId: nextAccountId || undefined,
       });
       params.set("granularity", "month");
+      params.set("showTransfers", nextShowTransfers);
       const res = await fetch(`/api/analysis/overview?${params.toString()}`);
       const data = (await res.json()) as OverviewResponse | { ok: false; error: ApiError };
       if (!data.ok) {
@@ -196,12 +199,15 @@ export default function Phase3DatasetHomePage() {
       typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("onboarding") === "1";
     const parsed = parseScopeFromWindow();
+    const search = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const showTransfers = search?.get("showTransfers") === "all" ? "all" : "excludeMatched";
     const normalizedIds =
       parsed.scopeMode === "selected" ? parsed.fileIds.slice(0, 1) : parsed.fileIds;
     setScopeMode(parsed.scopeMode);
     setSelectedFileIds(normalizedIds);
     setSelectedBankId(parsed.bankId || "");
     setSelectedAccountId(parsed.accountId || "");
+    setExcludeMatchedTransfers(showTransfers !== "all");
 
     void fetchFiles().catch(() => {
       setError({ code: "FILES_FAILED", message: "Failed to load files list." });
@@ -211,7 +217,8 @@ export default function Phase3DatasetHomePage() {
       parsed.scopeMode,
       normalizedIds,
       parsed.bankId || "",
-      parsed.accountId || ""
+      parsed.accountId || "",
+      showTransfers
     );
     void fetchBoundary();
     setShowOnboardingBanner(fromOnboarding);
@@ -221,11 +228,16 @@ export default function Phase3DatasetHomePage() {
   }, []);
 
   useEffect(() => {
-    pushScopeIntoUrl(scopeMode, selectedFileIds, {
+    const params = buildScopeParams(scopeMode, selectedFileIds, {
       bankId: selectedBankId || undefined,
       accountId: selectedAccountId || undefined,
     });
-  }, [scopeMode, selectedFileIds, selectedBankId, selectedAccountId]);
+    params.set("showTransfers", excludeMatchedTransfers ? "excludeMatched" : "all");
+    const base = window.location.pathname;
+    const next = params.toString();
+    const url = next ? `${base}?${next}` : base;
+    window.history.replaceState(null, "", url);
+  }, [scopeMode, selectedFileIds, selectedBankId, selectedAccountId, excludeMatchedTransfers]);
 
   const latestMonth = useMemo(
     () => [...(overview?.availableMonths || [])].sort().at(-1) || "",
@@ -307,7 +319,25 @@ export default function Phase3DatasetHomePage() {
     setSelectedFileIds(nextFileIds);
     setSelectedBankId(nextBankId);
     setSelectedAccountId(nextAccountId);
-    void fetchOverview(nextScopeMode, nextFileIds, nextBankId, nextAccountId);
+    void fetchOverview(
+      nextScopeMode,
+      nextFileIds,
+      nextBankId,
+      nextAccountId,
+      excludeMatchedTransfers ? "excludeMatched" : "all"
+    );
+  }
+
+  function applyTransferMode(nextExcludeMatchedTransfers: boolean) {
+    setExcludeMatchedTransfers(nextExcludeMatchedTransfers);
+    setOffsetModalOpen(false);
+    void fetchOverview(
+      scopeMode,
+      selectedFileIds,
+      selectedBankId,
+      selectedAccountId,
+      nextExcludeMatchedTransfers ? "excludeMatched" : "all"
+    );
   }
 
   const navigateToMonth = (month: string) => {
@@ -317,6 +347,7 @@ export default function Phase3DatasetHomePage() {
     });
     params.set("type", "month");
     params.set("key", month);
+    params.set("showTransfers", excludeMatchedTransfers ? "excludeMatched" : "all");
     window.location.href = `/phase3/period?${params.toString()}`;
   };
 
@@ -572,8 +603,44 @@ export default function Phase3DatasetHomePage() {
           </article>
         </section>
 
-        <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Note: Transfers are currently included in totals. This will be improved in a later milestone.
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700">
+                Mode:{" "}
+                <span className="font-semibold text-slate-900">
+                  {excludeMatchedTransfers ? "Conservative (Recommended)" : "Raw (Show all)"}
+                </span>
+              </div>
+              <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700">
+                Matched excluded:{" "}
+                <span className="font-semibold text-slate-900">
+                  {overview?.transferStats?.internalOffsetPairsCount || 0}
+                </span>
+              </div>
+              <a
+                href={`/inbox?${buildScopeParams(scopeMode, selectedFileIds, {
+                  bankId: selectedBankId || undefined,
+                  accountId: selectedAccountId || undefined,
+                }).toString()}`}
+                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+              >
+                Uncertain:{" "}
+                <span className="font-semibold text-slate-900">
+                  {overview?.transferStats?.uncertainPairsCount || 0}
+                </span>{" "}
+                · Open Inbox
+              </a>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setOffsetModalOpen(true)}
+              className="inline-flex h-10 items-center justify-center rounded-full border border-slate-300 px-4 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+            >
+              Change...
+            </button>
+          </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -609,7 +676,10 @@ export default function Phase3DatasetHomePage() {
                       });
                       params.set("type", "transactions");
                       params.set("format", "csv");
-                      params.set("showTransfers", "excludeMatched");
+                      params.set(
+                        "showTransfers",
+                        excludeMatchedTransfers ? "excludeMatched" : "all"
+                      );
                       return params.toString();
                     })()}`}
                     className="block rounded px-2 py-1.5 text-slate-700 hover:bg-slate-100"
@@ -625,7 +695,10 @@ export default function Phase3DatasetHomePage() {
                       params.set("type", "annual");
                       params.set("format", "csv");
                       params.set("year", latestYear);
-                      params.set("showTransfers", "excludeMatched");
+                      params.set(
+                        "showTransfers",
+                        excludeMatchedTransfers ? "excludeMatched" : "all"
+                      );
                       return params.toString();
                     })()}`}
                     className="block rounded px-2 py-1.5 text-slate-700 hover:bg-slate-100"
@@ -783,6 +856,69 @@ export default function Phase3DatasetHomePage() {
               </div>
             </details>
           </section>
+        )}
+
+        {offsetModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
+            <div
+              className="absolute inset-0"
+              aria-hidden="true"
+              onClick={() => setOffsetModalOpen(false)}
+            />
+            <div className="relative z-10 w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">Offset mode</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Choose whether Report hides matched internal transfers or shows raw cashflow.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOffsetModalOpen(false)}
+                  className="rounded-full border border-slate-300 px-3 py-1.5 text-sm text-slate-600 transition hover:border-slate-400 hover:text-slate-900"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-5 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => applyTransferMode(true)}
+                  className={`w-full rounded-2xl border p-4 text-left transition ${
+                    excludeMatchedTransfers
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white"
+                  }`}
+                >
+                  <div className="text-sm font-semibold">Conservative (Recommended)</div>
+                  <div
+                    className={`mt-1 text-sm ${excludeMatchedTransfers ? "text-slate-200" : "text-slate-600"}`}
+                  >
+                    Exclude matched internal transfers. Uncertain transfers stay included for safety.
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => applyTransferMode(false)}
+                  className={`w-full rounded-2xl border p-4 text-left transition ${
+                    !excludeMatchedTransfers
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white"
+                  }`}
+                >
+                  <div className="text-sm font-semibold">Raw (Show all)</div>
+                  <div
+                    className={`mt-1 text-sm ${!excludeMatchedTransfers ? "text-slate-200" : "text-slate-600"}`}
+                  >
+                    Keep matched internal transfers inside the totals so you can inspect the raw movement.
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {boundaryModalOpen && (
