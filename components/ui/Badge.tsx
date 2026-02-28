@@ -8,9 +8,12 @@ const toneClass = {
   red: "border-red-200 bg-red-50 text-red-700",
 } as const;
 
-export function Badge({ className = "", children, ...props }: HTMLAttributes<HTMLSpanElement> & { tone?: keyof typeof toneClass }) {
-  const tone = (props.tone as keyof typeof toneClass) || "neutral";
-  const { tone: _tone, ...rest } = props as HTMLAttributes<HTMLSpanElement> & { tone?: keyof typeof toneClass };
+export function Badge({
+  className = "",
+  children,
+  tone = "neutral",
+  ...rest
+}: HTMLAttributes<HTMLSpanElement> & { tone?: keyof typeof toneClass }) {
   return (
     <span
       className={[
