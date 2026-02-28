@@ -27,6 +27,18 @@ import {
   formatAccountSupportText,
   isUnknownAccountIdentity,
 } from "@/lib/boundary/accountLabels";
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  Card,
+  EmptyState,
+  Modal,
+  MotionCard,
+  SectionHeader,
+  StatTile,
+  Toast,
+} from "@/components/ui";
 
 const CURRENCY = new Intl.NumberFormat("en-AU", {
   style: "currency",
@@ -106,7 +118,6 @@ export default function Phase3DatasetHomePage() {
       })),
     [datasetSeries]
   );
-  const hasDatasetData = (overview?.availableMonths?.length || 0) > 0;
 
   async function fetchFiles() {
     const res = await fetch("/api/files");
@@ -367,16 +378,13 @@ export default function Phase3DatasetHomePage() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
+    <main className="px-5 py-8 sm:px-8 sm:py-10">
       <div className="mx-auto max-w-[1280px] space-y-6">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <MotionCard>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1 text-xs font-medium">
-                <a
-                  href="/phase3"
-                  className="rounded-full bg-slate-900 px-4 py-2 text-white"
-                >
+                <a href="/phase3" className="rounded-full bg-slate-900 px-4 py-2 text-white">
                   Overview
                 </a>
                 <a
@@ -385,8 +393,11 @@ export default function Phase3DatasetHomePage() {
                       bankId: selectedBankId || undefined,
                       accountId: selectedAccountId || undefined,
                     });
-                    params.set("type", "month");
-                    params.set("key", latestMonth || "");
+                    if (latestMonth) {
+                      params.set("type", "month");
+                      params.set("key", latestMonth);
+                    }
+                    params.set("showTransfers", excludeMatchedTransfers ? "excludeMatched" : "all");
                     return params.toString();
                   })()}`}
                   className="rounded-full px-4 py-2 text-slate-600 transition hover:text-slate-900"
@@ -394,15 +405,11 @@ export default function Phase3DatasetHomePage() {
                   Period
                 </a>
               </div>
-              <h1 className="mt-4 text-3xl font-semibold text-slate-900">Report Overview</h1>
-              <p className="mt-2 text-sm text-slate-600">
-                Your cashflow overview across uploaded statements.
-              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
               {latestMonth ? (
-                <a
+                <ButtonLink
                   href={`/phase3/period?${(() => {
                     const params = buildScopeParams(scopeMode, selectedFileIds, {
                       bankId: selectedBankId || undefined,
@@ -410,14 +417,15 @@ export default function Phase3DatasetHomePage() {
                     });
                     params.set("type", "month");
                     params.set("key", latestMonth);
+                    params.set("showTransfers", excludeMatchedTransfers ? "excludeMatched" : "all");
                     return params.toString();
                   })()}`}
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                  size="sm"
                 >
                   Open latest month
-                </a>
+                </ButtonLink>
               ) : null}
-              <a
+              <ButtonLink
                 href={`/phase3/period?${(() => {
                   const params = buildScopeParams(scopeMode, selectedFileIds, {
                     bankId: selectedBankId || undefined,
@@ -427,18 +435,26 @@ export default function Phase3DatasetHomePage() {
                     params.set("type", "month");
                     params.set("key", latestMonth);
                   }
+                  params.set("showTransfers", excludeMatchedTransfers ? "excludeMatched" : "all");
                   return params.toString();
                 })()}`}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                variant="secondary"
+                size="sm"
               >
                 Pick a period
-              </a>
+              </ButtonLink>
             </div>
           </div>
 
-          <div className="mt-4 grid gap-4 lg:grid-cols-12">
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-3">
-              Dataset scope
+          <SectionHeader
+            eyebrow="Report"
+            title="Your cashflow dashboard"
+            description="A calm overview across uploaded statements, with clear next actions when something still needs review."
+          />
+
+          <div className="mt-6 grid gap-4 lg:grid-cols-12">
+            <label className="space-y-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400 lg:col-span-3">
+              Scope
               <select
                 value={scopeMode}
                 onChange={(e) => {
@@ -450,7 +466,7 @@ export default function Phase3DatasetHomePage() {
                   const fallbackId = selectedFileId || sortedFiles[0]?.id || "";
                   applyScopeAndFetch("selected", fallbackId ? [fallbackId] : []);
                 }}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="all">All files</option>
                 <option value="selected">Specific file</option>
@@ -458,7 +474,7 @@ export default function Phase3DatasetHomePage() {
             </label>
 
             {scopeMode === "selected" && (
-              <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-3">
+              <label className="space-y-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400 lg:col-span-3">
                 File
                 <select
                   value={selectedFileId}
@@ -466,7 +482,7 @@ export default function Phase3DatasetHomePage() {
                     const nextId = e.target.value;
                     applyScopeAndFetch("selected", nextId ? [nextId] : []);
                   }}
-                  className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900"
                 >
                   {sortedFiles.length === 0 ? (
                     <option value="">No files available</option>
@@ -481,7 +497,7 @@ export default function Phase3DatasetHomePage() {
               </label>
             )}
 
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
+            <label className="space-y-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400 lg:col-span-2">
               Bank
               <select
                 value={selectedBankId}
@@ -489,7 +505,7 @@ export default function Phase3DatasetHomePage() {
                   const nextBankId = e.target.value;
                   applyScopeAndFetch(scopeMode, selectedFileIds, nextBankId, selectedAccountId);
                 }}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="">All banks</option>
                 {bankOptions.map((bankId) => (
@@ -500,7 +516,7 @@ export default function Phase3DatasetHomePage() {
               </select>
             </label>
 
-            <label className="space-y-1 text-xs font-medium text-slate-600 lg:col-span-2">
+            <label className="space-y-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400 lg:col-span-2">
               Account
               <select
                 value={selectedAccountId}
@@ -508,14 +524,11 @@ export default function Phase3DatasetHomePage() {
                   const nextAccountId = e.target.value;
                   applyScopeAndFetch(scopeMode, selectedFileIds, selectedBankId, nextAccountId);
                 }}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
+                className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900"
               >
                 <option value="">All accounts</option>
                 {accountOptions.map((option) => (
-                  <option
-                    key={`${option.bankId}:${option.accountId}`}
-                    value={option.accountId}
-                  >
+                  <option key={`${option.bankId}:${option.accountId}`} value={option.accountId}>
                     {formatAccountOptionLabel(option)}
                   </option>
                 ))}
@@ -523,8 +536,9 @@ export default function Phase3DatasetHomePage() {
             </label>
 
             <div className="flex items-end lg:col-span-2">
-              <button
+              <Button
                 type="button"
+                className="w-full"
                 onClick={() =>
                   void fetchOverview(
                     scopeMode,
@@ -534,159 +548,29 @@ export default function Phase3DatasetHomePage() {
                   )
                 }
                 disabled={isLoading || (scopeMode === "selected" && !selectedFileId)}
-                className="h-9 w-full rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
               >
-                {isLoading ? "Loading..." : "Refresh Dataset"}
-              </button>
+                {isLoading ? "Loading..." : "Refresh"}
+              </Button>
             </div>
           </div>
 
-          {error && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error.code}: {error.message}
-            </div>
-          )}
-        </section>
-
-        {showOnboardingBanner && (
-          <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-medium">
-                  Uncertain transfers are never offset automatically. Review them in Inbox.
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <a
-                  href="/inbox"
-                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
-                >
-                  Open Inbox
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setShowOnboardingBanner(false)}
-                  className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100"
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {boundaryNeedsSetup && (
-          <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-medium">Select boundary accounts</div>
-                <div className="text-xs text-blue-800">
-                  Used to offset internal transfers. Accounts inside boundary can offset each other.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setBoundaryModalOpen(true)}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-              >
-                Configure
-              </button>
-            </div>
-          </section>
-        )}
-
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="text-xs uppercase tracking-wide text-slate-500">Spending</div>
-            <div className="mt-3 text-3xl font-semibold text-rose-700">
-              {CURRENCY.format(overview?.totals.spend || 0)}
-            </div>
-          </article>
-          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="text-xs uppercase tracking-wide text-slate-500">Income</div>
-            <div className="mt-3 text-3xl font-semibold text-emerald-700">
-              {CURRENCY.format(overview?.totals.income || 0)}
-            </div>
-          </article>
-          <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="text-xs uppercase tracking-wide text-slate-500">Net</div>
-            <div
-              className={`mt-3 text-3xl font-semibold ${(overview?.totals.net || 0) >= 0 ? "text-emerald-700" : "text-rose-700"}`}
-            >
-              {CURRENCY.format(overview?.totals.net || 0)}
-            </div>
-          </article>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700">
-                Mode:{" "}
-                <span className="font-semibold text-slate-900">
-                  {excludeMatchedTransfers ? "Conservative (Recommended)" : "Raw (Show all)"}
-                </span>
-              </div>
-              <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700">
-                Matched excluded:{" "}
-                <span className="font-semibold text-slate-900">
-                  {overview?.transferStats?.internalOffsetPairsCount || 0}
-                </span>
-              </div>
-              <a
-                href={`/inbox?${buildScopeParams(scopeMode, selectedFileIds, {
-                  bankId: selectedBankId || undefined,
-                  accountId: selectedAccountId || undefined,
-                }).toString()}`}
-                className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-              >
-                Uncertain:{" "}
-                <span className="font-semibold text-slate-900">
-                  {overview?.transferStats?.uncertainPairsCount || 0}
-                </span>{" "}
-                · Open Inbox
-              </a>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setOffsetModalOpen(true)}
-              className="inline-flex h-10 items-center justify-center rounded-full border border-slate-300 px-4 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
-            >
-              Change...
-            </button>
-          </div>
-
-          <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${offsetStatus.tone}`}>
-            {offsetStatus.message}
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">Dataset Coverage</h2>
-              <p className="mt-1 text-sm text-slate-600">
-              {overview?.datasetDateMin || "-"} → {overview?.datasetDateMax || "-"} ·{" "}
-              {overview?.availableMonths?.length || 0} months ·{" "}
-              {overview?.filesIncludedCount || 0} files
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              Scope: {scopeMode === "all" ? "All files" : selectedFileNames.join(", ") || "Selected files"}
-              {selectedBankId ? ` · bank ${selectedBankId}` : ""}
-              {selectedAccountId ? ` · account ${selectedAccountId}` : ""}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
-                Open a month from the chart below, or switch to Period view.
-              </span>
+          <div className="mt-6 flex flex-wrap items-center gap-2 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3">
+            <Badge tone="neutral">Uploads {files.length}</Badge>
+            <Badge tone="blue">Inbox {inboxCount}</Badge>
+            <Badge tone="neutral">
+              Mode {excludeMatchedTransfers ? "Conservative" : "Raw"}
+            </Badge>
+            <Badge tone="neutral">
+              {scopeMode === "all" ? "All files" : selectedFileNames.join(", ") || "Selected file"}
+            </Badge>
+            {selectedBankId ? <Badge tone="neutral">Bank {selectedBankId}</Badge> : null}
+            {selectedAccountId ? <Badge tone="neutral">Account {selectedAccountId}</Badge> : null}
+            <div className="ml-auto flex flex-wrap gap-2">
               <details className="relative">
-                <summary className="list-none cursor-pointer rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
-                  Export
+                <summary className="list-none">
+                  <Button variant="secondary" size="sm">Export</Button>
                 </summary>
-                <div className="absolute right-0 z-20 mt-2 w-56 rounded-lg border border-slate-200 bg-white p-2 text-xs shadow-sm">
+                <div className="absolute right-0 z-20 mt-2 w-56 rounded-[20px] border border-slate-200 bg-white p-2 shadow-lg">
                   <a
                     href={`/api/analysis/export?${(() => {
                       const params = buildScopeParams(scopeMode, selectedFileIds, {
@@ -695,13 +579,10 @@ export default function Phase3DatasetHomePage() {
                       });
                       params.set("type", "transactions");
                       params.set("format", "csv");
-                      params.set(
-                        "showTransfers",
-                        excludeMatchedTransfers ? "excludeMatched" : "all"
-                      );
+                      params.set("showTransfers", excludeMatchedTransfers ? "excludeMatched" : "all");
                       return params.toString();
                     })()}`}
-                    className="block rounded px-2 py-1.5 text-slate-700 hover:bg-slate-100"
+                    className="block rounded-2xl px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
                   >
                     Transactions CSV
                   </a>
@@ -714,64 +595,132 @@ export default function Phase3DatasetHomePage() {
                       params.set("type", "annual");
                       params.set("format", "csv");
                       params.set("year", latestYear);
-                      params.set(
-                        "showTransfers",
-                        excludeMatchedTransfers ? "excludeMatched" : "all"
-                      );
+                      params.set("showTransfers", excludeMatchedTransfers ? "excludeMatched" : "all");
                       return params.toString();
                     })()}`}
-                    className="block rounded px-2 py-1.5 text-slate-700 hover:bg-slate-100"
+                    className="block rounded-2xl px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-50"
                   >
                     Annual summary CSV ({latestYear})
                   </a>
                 </div>
               </details>
-              <a
+              <ButtonLink
                 href={`/inbox?${buildScopeParams(scopeMode, selectedFileIds, {
                   bankId: selectedBankId || undefined,
                   accountId: selectedAccountId || undefined,
                 }).toString()}`}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                variant="secondary"
+                size="sm"
               >
-                Inbox
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] text-slate-600">
-                  {inboxCount}
-                </span>
-              </a>
+                Open Inbox
+              </ButtonLink>
             </div>
           </div>
+        </MotionCard>
+
+        <Toast
+          message={error ? `${error.code}: ${error.message}` : boundaryStatus}
+          tone={error ? "error" : boundaryStatus ? "success" : "neutral"}
+        />
+
+        {showOnboardingBanner ? (
+          <Card className="border-amber-200 bg-amber-50">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm text-amber-900">
+                Uncertain transfers are never offset automatically. Review them in Inbox.
+              </div>
+              <div className="flex gap-2">
+                <ButtonLink href="/inbox" variant="secondary" size="sm">
+                  Open Inbox
+                </ButtonLink>
+                <Button variant="ghost" size="sm" onClick={() => setShowOnboardingBanner(false)}>
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ) : null}
+
+        {boundaryNeedsSetup ? (
+          <Card className="border-blue-200 bg-blue-50">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-blue-900">Boundary needs attention</div>
+                <div className="mt-1 text-sm text-blue-800">
+                  Choose which accounts sit inside your world so internal transfers can offset correctly.
+                </div>
+              </div>
+              <Button size="sm" onClick={() => setBoundaryModalOpen(true)}>
+                Configure boundary
+              </Button>
+            </div>
+          </Card>
+        ) : null}
+
+        <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <StatTile label="Spending" value={CURRENCY.format(overview?.totals.spend || 0)} tone="red" />
+          <StatTile label="Income" value={CURRENCY.format(overview?.totals.income || 0)} tone="green" />
+          <StatTile
+            label="Net"
+            value={CURRENCY.format(overview?.totals.net || 0)}
+            tone={(overview?.totals.net || 0) >= 0 ? "green" : "red"}
+          />
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Help</h2>
-          <div className="mt-3 grid gap-3 md:grid-cols-3">
-            <article className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div className="text-sm font-medium text-slate-900">What is Boundary?</div>
-              <p className="mt-1 text-sm text-slate-600">
-                Boundary defines which accounts are inside your own money world. Transfers within that boundary can offset each other.
-              </p>
-            </article>
-            <article className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div className="text-sm font-medium text-slate-900">Why uncertain transfers stay in totals</div>
-              <p className="mt-1 text-sm text-slate-600">
-                If a transfer match is not clear enough, we keep it counted to avoid hiding real spending or income by mistake.
-              </p>
-            </article>
-            <article className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <div className="text-sm font-medium text-slate-900">Where to review issues</div>
-              <p className="mt-1 text-sm text-slate-600">
-                Open Inbox to review merchants, transfer checks, and parsing issues that still need a decision.
-              </p>
-            </article>
+        <Card>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-3">
+              <Badge tone="neutral">
+                Mode {excludeMatchedTransfers ? "Conservative (Recommended)" : "Raw (Show all)"}
+              </Badge>
+              <Badge tone="green">
+                Matched excluded {overview?.transferStats?.internalOffsetPairsCount || 0}
+              </Badge>
+              <ButtonLink
+                href={`/inbox?${buildScopeParams(scopeMode, selectedFileIds, {
+                  bankId: selectedBankId || undefined,
+                  accountId: selectedAccountId || undefined,
+                }).toString()}`}
+                variant="secondary"
+                size="sm"
+              >
+                Uncertain {overview?.transferStats?.uncertainPairsCount || 0}
+              </ButtonLink>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => setOffsetModalOpen(true)}>
+              Change...
+            </Button>
           </div>
-        </section>
+          <div className={`mt-4 rounded-[24px] border px-4 py-3 text-sm ${offsetStatus.tone}`}>
+            {offsetStatus.message}
+          </div>
+        </Card>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Monthly Cashflow Trend</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Tip: Click a month bar to open detailed Period analysis.
-          </p>
-          <div className="mt-4 h-64 w-full rounded-xl border border-slate-100 bg-slate-50/50 p-2">
+        <MotionCard>
+          <SectionHeader
+            eyebrow="Coverage"
+            title="Dataset coverage"
+            description={`${overview?.datasetDateMin || "-"} → ${overview?.datasetDateMax || "-"} · ${overview?.availableMonths?.length || 0} months · ${overview?.filesIncludedCount || 0} files`}
+          />
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <Badge tone="neutral">
+              {scopeMode === "all" ? "All files" : selectedFileNames.join(", ") || "Selected files"}
+            </Badge>
+            {selectedBankId ? <Badge tone="neutral">Bank {selectedBankId}</Badge> : null}
+            {selectedAccountId ? <Badge tone="neutral">Account {selectedAccountId}</Badge> : null}
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
+              Open a month from the chart below, or switch to Period view.
+            </span>
+          </div>
+        </MotionCard>
+
+        <MotionCard>
+          <SectionHeader
+            eyebrow="Trend"
+            title="Monthly cashflow"
+            description="Click any month to open the detailed period view."
+          />
+          <div className="mt-5 h-72 rounded-[28px] border border-slate-200 bg-slate-50 p-3">
             {chartSeries.length > 0 ? (
               <div className="group relative h-full w-full cursor-pointer">
                 <div className="pointer-events-none absolute right-3 top-3 z-10 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
@@ -782,9 +731,7 @@ export default function Phase3DatasetHomePage() {
                     data={chartSeries}
                     onClick={(state) => {
                       const month = (state as { activeLabel?: string })?.activeLabel;
-                      if (month) {
-                        navigateToMonth(month);
-                      }
+                      if (month) navigateToMonth(month);
                     }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -792,22 +739,14 @@ export default function Phase3DatasetHomePage() {
                     <YAxis tick={{ fontSize: 11, fill: "#64748b" }} />
                     <RechartsTooltip
                       contentStyle={{
-                        borderRadius: 10,
+                        borderRadius: 16,
                         borderColor: "#e2e8f0",
-                        boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+                        boxShadow: "0 16px 40px rgba(15, 23, 42, 0.08)",
                       }}
                       formatter={(value, name) => {
-                        if (name === "txCount") {
-                          return [String(value), "Tx count"];
-                        }
-                        const numeric =
-                          typeof value === "number" ? value : Number(value || 0);
-                        const label =
-                          name === "income"
-                            ? "Income"
-                            : name === "spend"
-                              ? "Spend"
-                              : "Net";
+                        if (name === "txCount") return [String(value), "Transactions"];
+                        const numeric = typeof value === "number" ? value : Number(value || 0);
+                        const label = name === "income" ? "Income" : name === "spend" ? "Spending" : "Net";
                         return [CURRENCY.format(numeric), label];
                       }}
                       labelFormatter={(label, payload) => {
@@ -817,234 +756,214 @@ export default function Phase3DatasetHomePage() {
                           typeof payload[0].payload?.txCount === "number"
                             ? payload[0].payload.txCount
                             : 0;
-                        return `${label} · ${txCount} tx`;
+                        return `${label} · ${txCount} transactions`;
                       }}
                     />
-                    <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} barSize={12} />
-                    <Bar dataKey="spend" fill="#f43f5e" radius={[4, 4, 0, 0]} barSize={12} />
+                    <Bar dataKey="income" fill="#10b981" radius={[6, 6, 0, 0]} barSize={12} />
+                    <Bar dataKey="spend" fill="#f43f5e" radius={[6, 6, 0, 0]} barSize={12} />
                     <Line dataKey="net" stroke="#2563eb" strokeWidth={2} dot={false} type="monotone" />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div className="space-y-2">
-                <p className="text-sm text-slate-500">Upload PDFs first to see trend data here.</p>
-                <a
-                  href="/onboarding"
-                  className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-                >
-                  Go to Onboarding
-                </a>
-              </div>
+              <EmptyState
+                title="No report data yet"
+                body="Upload PDFs first, then return here to see your monthly trend and category breakdown."
+                action={<ButtonLink href="/onboarding">Start onboarding</ButtonLink>}
+              />
             )}
           </div>
+        </MotionCard>
+
+        <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <MotionCard>
+            <SectionHeader
+              eyebrow="Categories"
+              title="Spending by category"
+              description="Your biggest categories across the current selection."
+            />
+            <div className="mt-5 space-y-3">
+              {(overview?.spendByCategory || []).slice(0, 8).map((category) => (
+                <div key={category.category} className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-900">{category.category}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {(category.share * 100).toFixed(1)}% of spending
+                      </div>
+                    </div>
+                    <div className="text-sm font-medium text-slate-900">{CURRENCY.format(category.amount)}</div>
+                  </div>
+                </div>
+              ))}
+              {(overview?.spendByCategory || []).length === 0 ? (
+                <div className="text-sm text-slate-500">No category data yet.</div>
+              ) : null}
+            </div>
+          </MotionCard>
+
+          <MotionCard>
+            <SectionHeader
+              eyebrow="Help"
+              title="A few useful reminders"
+              description="Short explanations for the choices that most affect totals."
+            />
+            <div className="mt-5 space-y-3">
+              <Card className="rounded-[24px] bg-slate-50 p-4 shadow-none">
+                <div className="text-sm font-semibold text-slate-900">What is Boundary?</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Boundary defines which accounts are inside your own money world. Transfers within that boundary can offset each other.
+                </p>
+              </Card>
+              <Card className="rounded-[24px] bg-slate-50 p-4 shadow-none">
+                <div className="text-sm font-semibold text-slate-900">Why uncertain transfers stay in totals</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  If a transfer match is not clear enough, it stays counted so the report never hides real spending or income by mistake.
+                </p>
+              </Card>
+              <Card className="rounded-[24px] bg-slate-50 p-4 shadow-none">
+                <div className="text-sm font-semibold text-slate-900">Where to review issues</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Open Inbox to review merchants, transfer notes, and parsing issues that still need a decision.
+                </p>
+              </Card>
+            </div>
+          </MotionCard>
         </section>
 
-        {!hasDatasetData && (
-          <section className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-medium">No report data yet</div>
-                <div className="text-xs text-blue-800">
-                  Upload PDFs first, then return to Report for analysis.
-                </div>
-              </div>
-              <a
-                href="/onboarding"
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-              >
-                Start Onboarding
-              </a>
-            </div>
-          </section>
-        )}
-
-        {overview && (
-          <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+        {overview ? (
+          <Card className="bg-slate-50">
             <details>
-              <summary className="cursor-pointer list-none font-medium uppercase tracking-wide text-slate-500">
-                Advanced details
+              <summary className="cursor-pointer list-none text-sm font-medium text-slate-600">
+                Details
               </summary>
-              <div className="mt-2 space-y-1">
+              <div className="mt-3 grid gap-2 text-sm text-slate-500 sm:grid-cols-2">
                 <div>Template: {overview.templateType}</div>
-                <div>Needs review: {String(overview.needsReview)}</div>
+                <div>Review needed: {String(overview.needsReview)}</div>
                 <div>
-                  Continuity: {(overview.quality?.balanceContinuityPassRate || 0).toFixed(3)} · checked: {overview.quality?.balanceContinuityChecked || 0}
+                  Continuity: {(overview.quality?.balanceContinuityPassRate || 0).toFixed(3)}
                 </div>
+                <div>Checked rows: {overview.quality?.balanceContinuityChecked || 0}</div>
                 <div>Duplicates removed: {overview.dedupedCount || 0}</div>
               </div>
             </details>
-          </section>
-        )}
-
-        {offsetModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-            <div
-              className="absolute inset-0"
-              aria-hidden="true"
-              onClick={() => setOffsetModalOpen(false)}
-            />
-            <div className="relative z-10 w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Offset mode</h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Choose whether Report hides matched internal transfers or shows raw cashflow.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setOffsetModalOpen(false)}
-                  className="rounded-full border border-slate-300 px-3 py-1.5 text-sm text-slate-600 transition hover:border-slate-400 hover:text-slate-900"
-                >
-                  Close
-                </button>
-              </div>
-
-              <div className="mt-5 space-y-3">
-                <button
-                  type="button"
-                  onClick={() => applyTransferMode(true)}
-                  className={`w-full rounded-2xl border p-4 text-left transition ${
-                    excludeMatchedTransfers
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white"
-                  }`}
-                >
-                  <div className="text-sm font-semibold">Conservative (Recommended)</div>
-                  <div
-                    className={`mt-1 text-sm ${excludeMatchedTransfers ? "text-slate-200" : "text-slate-600"}`}
-                  >
-                    Exclude matched internal transfers. Uncertain transfers stay included for safety.
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => applyTransferMode(false)}
-                  className={`w-full rounded-2xl border p-4 text-left transition ${
-                    !excludeMatchedTransfers
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white"
-                  }`}
-                >
-                  <div className="text-sm font-semibold">Raw (Show all)</div>
-                  <div
-                    className={`mt-1 text-sm ${!excludeMatchedTransfers ? "text-slate-200" : "text-slate-600"}`}
-                  >
-                    Keep matched internal transfers inside the totals so you can inspect the raw movement.
-                  </div>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {boundaryModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-            <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-slate-900">Boundary Accounts</h2>
-                <button
-                  type="button"
-                  onClick={() => setBoundaryModalOpen(false)}
-                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-                >
-                  Close
-                </button>
-              </div>
-              <p className="mt-1 text-sm text-slate-600">
-                Select the accounts that belong inside your reporting boundary.
-              </p>
-
-              <div className="mt-3 max-h-72 space-y-2 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-3">
-                {(boundary?.knownAccounts || []).map((account) => {
-                  const checked = boundaryDraft.includes(account.accountId);
-                  return (
-                    <label
-                      key={`${account.bankId}:${account.accountId}`}
-                      className="flex cursor-pointer items-start gap-2 rounded border border-slate-200 bg-white px-3 py-2"
-                    >
-                      <input
-                        type="checkbox"
-                        className="mt-0.5 h-4 w-4 rounded border-slate-300"
-                        checked={checked}
-                        onChange={() => toggleBoundaryAccount(account.accountId)}
-                      />
-                      <span className="text-xs text-slate-700">
-                        <span className="font-medium text-slate-900">
-                          {account.bankId.toUpperCase()} ·{" "}
-                          {formatAccountLabel({
-                            ...account,
-                            alias: boundaryAliasDraft[account.accountId],
-                          })}
-                        </span>
-                        <span className="ml-2 text-slate-500">
-                          {formatAccountSupportText({
-                            ...account,
-                            alias: boundaryAliasDraft[account.accountId],
-                          })}
-                        </span>
-                        <span className="ml-2 text-slate-500">
-                          files: {account.fileCount}
-                          {account.dateRange
-                            ? ` · ${account.dateRange.from} → ${account.dateRange.to}`
-                            : ""}
-                        </span>
-                        {isUnknownAccountIdentity(account) ? (
-                          <span className="mt-1 block text-amber-700">
-                            Unknown/default identity. Add alias before including it in the boundary.
-                          </span>
-                        ) : null}
-                        <span className="mt-1 block">
-                          <input
-                            type="text"
-                            value={boundaryAliasDraft[account.accountId] || ""}
-                            onClick={(e) => e.stopPropagation()}
-                            onChange={(e) =>
-                              setBoundaryAliasDraft((prev) => ({
-                                ...prev,
-                                [account.accountId]: e.target.value,
-                              }))
-                            }
-                            placeholder="Rename account (optional)"
-                            className="mt-1 h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
-                          />
-                        </span>
-                      </span>
-                    </label>
-                  );
-                })}
-                {boundary && boundary.knownAccounts.length === 0 && (
-                  <p className="text-xs text-slate-500">No account details found yet. Upload and parse files first.</p>
-                )}
-              </div>
-
-              {boundaryStatus && (
-                <p className="mt-2 text-xs text-slate-600">{boundaryStatus}</p>
-              )}
-
-              <div className="mt-4 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setBoundaryModalOpen(false)}
-                  className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void saveBoundaryConfig()}
-                  disabled={boundarySaving}
-                  className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-                >
-                  {boundarySaving ? "Saving..." : "Save"}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+          </Card>
+        ) : null}
       </div>
+
+      <Modal
+        open={offsetModalOpen}
+        onClose={() => setOffsetModalOpen(false)}
+        title="Offset mode"
+        subtitle="Choose whether Report hides matched internal transfers or shows raw cashflow."
+      >
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => applyTransferMode(true)}
+            className={`w-full rounded-2xl border p-4 text-left transition ${
+              excludeMatchedTransfers
+                ? "border-slate-900 bg-slate-900 text-white"
+                : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white"
+            }`}
+          >
+            <div className="text-sm font-semibold">Conservative (Recommended)</div>
+            <div className={`mt-1 text-sm ${excludeMatchedTransfers ? "text-slate-200" : "text-slate-600"}`}>
+              Exclude matched internal transfers. Uncertain transfers stay included for safety.
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => applyTransferMode(false)}
+            className={`w-full rounded-2xl border p-4 text-left transition ${
+              !excludeMatchedTransfers
+                ? "border-slate-900 bg-slate-900 text-white"
+                : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white"
+            }`}
+          >
+            <div className="text-sm font-semibold">Raw (Show all)</div>
+            <div className={`mt-1 text-sm ${!excludeMatchedTransfers ? "text-slate-200" : "text-slate-600"}`}>
+              Keep matched internal transfers inside the totals so you can inspect the raw movement.
+            </div>
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={boundaryModalOpen}
+        onClose={() => setBoundaryModalOpen(false)}
+        title="Boundary accounts"
+        subtitle="Select the accounts that belong inside your reporting boundary."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setBoundaryModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void saveBoundaryConfig()} disabled={boundarySaving}>
+              {boundarySaving ? "Saving..." : "Save"}
+            </Button>
+          </>
+        }
+      >
+        <div className="max-h-72 space-y-3 overflow-y-auto">
+          {(boundary?.knownAccounts || []).map((account) => {
+            const checked = boundaryDraft.includes(account.accountId);
+            return (
+              <label
+                key={`${account.bankId}:${account.accountId}`}
+                className="flex cursor-pointer items-start gap-3 rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4"
+              >
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-slate-300"
+                  checked={checked}
+                  onChange={() => toggleBoundaryAccount(account.accountId)}
+                />
+                <div className="min-w-0 flex-1 text-sm text-slate-700">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-slate-900">
+                      {account.bankId.toUpperCase()} ·{" "}
+                      {formatAccountLabel({
+                        ...account,
+                        alias: boundaryAliasDraft[account.accountId],
+                      })}
+                    </span>
+                    {isUnknownAccountIdentity(account) ? (
+                      <Badge tone="amber">Account details incomplete</Badge>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 text-slate-500">
+                    {formatAccountSupportText({
+                      ...account,
+                      alias: boundaryAliasDraft[account.accountId],
+                    })}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {account.fileCount} files
+                    {account.dateRange ? ` · ${account.dateRange.from} → ${account.dateRange.to}` : ""}
+                  </div>
+                  <input
+                    type="text"
+                    value={boundaryAliasDraft[account.accountId] || ""}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) =>
+                      setBoundaryAliasDraft((prev) => ({
+                        ...prev,
+                        [account.accountId]: e.target.value,
+                      }))
+                    }
+                    placeholder="Rename account (optional)"
+                    className="mt-3 h-10 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900"
+                  />
+                </div>
+              </label>
+            );
+          })}
+          {boundary && boundary.knownAccounts.length === 0 ? (
+            <div className="text-sm text-slate-500">No account details found yet. Upload and parse files first.</div>
+          ) : null}
+        </div>
+      </Modal>
     </main>
   );
 }

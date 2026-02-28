@@ -1,7 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import { getWarningCatalogEntry } from "@/lib/warnings/catalog";
+import {
+  Badge,
+  Button,
+  ButtonLink,
+  EmptyState,
+  Modal,
+  MotionCard,
+  SectionHeader,
+  Table,
+  TableFrame,
+  TBody,
+  TD,
+  TH,
+  THead,
+  Toast,
+  TR,
+} from "@/components/ui";
 
 type ApiError = { code: string; message: string };
 
@@ -53,10 +71,10 @@ function formatSize(bytes: number) {
 
 function formatStage(row: UploadItem["parseStatus"]) {
   if (row.stage === "parsed") {
-    const warnings = typeof row.warnings === "number" ? row.warnings : 0;
+    const notes = typeof row.warnings === "number" ? row.warnings : 0;
     const txCount = typeof row.txCount === "number" ? row.txCount : 0;
-    const review = row.needsReview ? " · needs review" : "";
-    return `parsed · ${txCount} tx · ${warnings} checks${review}`;
+    const review = row.needsReview ? " · review needed" : "";
+    return `Parsed · ${txCount} transactions · ${notes} notes${review}`;
   }
   return row.stage;
 }
@@ -64,9 +82,9 @@ function formatStage(row: UploadItem["parseStatus"]) {
 export default function FilesManagerPage() {
   const [rows, setRows] = useState<UploadItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>("");
-  const [status, setStatus] = useState<string>("");
-  const [boundaryWarning, setBoundaryWarning] = useState<string>("");
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+  const [boundaryWarning, setBoundaryWarning] = useState("");
   const [confirmFile, setConfirmFile] = useState<UploadItem | null>(null);
   const [warningFile, setWarningFile] = useState<UploadItem | null>(null);
   const [deletingHash, setDeletingHash] = useState("");
@@ -99,10 +117,9 @@ export default function FilesManagerPage() {
     setStatus("");
     setBoundaryWarning("");
     try {
-      const res = await fetch(
-        `/api/uploads?fileHash=${encodeURIComponent(file.fileHash)}`,
-        { method: "DELETE" }
-      );
+      const res = await fetch(`/api/uploads?fileHash=${encodeURIComponent(file.fileHash)}`, {
+        method: "DELETE",
+      });
       const data = (await res.json()) as DeleteResponse;
       if (!data.ok) {
         setError(`${data.error.code}: ${data.error.message}`);
@@ -122,9 +139,7 @@ export default function FilesManagerPage() {
   }
 
   async function handleDeleteAll() {
-    const confirmation = window.prompt(
-      "Type DELETE ALL to remove all uploaded PDFs and derived caches."
-    );
+    const confirmation = window.prompt("Type DELETE ALL to remove all uploaded PDFs and derived caches.");
     if (confirmation !== "DELETE ALL") {
       setStatus("Delete all uploads cancelled.");
       return;
@@ -150,240 +165,182 @@ export default function FilesManagerPage() {
     }
   }
 
-  const totalSizeLabel = useMemo(() => {
-    const total = rows.reduce((sum, row) => sum + row.size, 0);
-    return formatSize(total);
-  }, [rows]);
+  const totalSizeLabel = useMemo(() => formatSize(rows.reduce((sum, row) => sum + row.size, 0)), [rows]);
 
   return (
-    <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
-      <div className="mx-auto max-w-6xl space-y-4">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-semibold text-slate-900">Uploaded Files</h1>
-              <p className="mt-1 text-sm text-slate-600">
-                Manage local PDFs and review import checks.
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <a
-                href="/onboarding"
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Go to Onboarding
-              </a>
-              <a
-                href="/phase3"
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-              >
-                Open Report
-              </a>
-              <button
-                type="button"
-                onClick={() => void handleDeleteAll()}
-                disabled={deletingAll || rows.length === 0}
-                className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deletingAll ? "Deleting..." : "Delete all"}
-              </button>
-            </div>
+    <main className="px-5 py-8 sm:px-8 sm:py-10">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <MotionCard>
+          <SectionHeader
+            eyebrow="Files"
+            title="Manage uploaded statements"
+            description="Remove PDFs you no longer need and inspect import notes before they affect your report."
+            action={
+              <div className="flex flex-wrap gap-2">
+                <ButtonLink href="/onboarding" variant="secondary">Add more files</ButtonLink>
+                <Button variant="destructive" onClick={() => void handleDeleteAll()} disabled={deletingAll || rows.length === 0}>
+                  {deletingAll ? "Deleting..." : "Delete all uploads"}
+                </Button>
+              </div>
+            }
+          />
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Badge>Files {rows.length}</Badge>
+            <Badge>Storage {totalSizeLabel}</Badge>
           </div>
+        </MotionCard>
 
-          <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            files: {rows.length} · total size: {totalSizeLabel}
-          </div>
+        <Toast message={error || boundaryWarning || status} tone={error ? "error" : boundaryWarning ? "warning" : status ? "success" : "neutral"} />
 
-          {loading ? <p className="mt-4 text-sm text-slate-500">Loading files...</p> : null}
-          {error ? (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {error}
-            </div>
-          ) : null}
-          {status ? (
-            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-              {status}
-            </div>
-          ) : null}
-          {boundaryWarning ? (
-            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-              {boundaryWarning}
-            </div>
-          ) : null}
+        {loading ? <MotionCard><p className="text-sm text-slate-500">Loading files...</p></MotionCard> : null}
 
-          {!loading && rows.length === 0 ? (
-            <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              <p>No uploaded files yet.</p>
-              <a
-                href="/onboarding"
-                className="mt-2 inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Upload first PDF
-              </a>
-            </div>
-          ) : null}
+        {!loading && rows.length === 0 ? (
+          <EmptyState
+            title="No uploaded files yet"
+            body="Upload your first statement to start building a report. You can always come back here to clean up older files."
+            action={<ButtonLink href="/onboarding">Upload first PDF</ButtonLink>}
+          />
+        ) : null}
 
-          {!loading && rows.length > 0 ? (
-            <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2">File</th>
-                    <th className="px-3 py-2">Bank/Account</th>
-                    <th className="px-3 py-2">Uploaded</th>
-                    <th className="px-3 py-2">Size</th>
-                    <th className="px-3 py-2">Parse status</th>
-                    <th className="px-3 py-2">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white text-slate-700">
-                  {rows.map((row) => (
-                    <tr key={row.fileHash}>
-                      <td className="max-w-[280px] px-3 py-2">
-                        <div className="truncate font-medium text-slate-900">{row.originalName}</div>
-                      </td>
-                      <td className="px-3 py-2 text-xs">
-                        <div>{row.bankId?.toUpperCase() || "Account details incomplete"}</div>
-                        <div className="text-slate-500">
-                          {(row.accountIds || []).join(", ") || "n/a"}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-xs">{row.uploadedAt.slice(0, 10)}</td>
-                      <td className="px-3 py-2 text-xs">{formatSize(row.size)}</td>
-                      <td className="px-3 py-2 text-xs">
-                        <div>{formatStage(row.parseStatus)}</div>
-                        {row.warnings.length > 0 ? (
-                          <button
-                            type="button"
-                            onClick={() => setWarningFile(row)}
-                            className="mt-1 text-xs font-medium text-amber-700 underline decoration-amber-300 underline-offset-2"
-                          >
-                            {row.warnings.length} warnings
-                          </button>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setError("");
-                            setConfirmFile(row);
-                          }}
-                          className="rounded border border-red-300 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
-                        >
-                          Delete
-                        </button>
-                      </td>
+        {!loading && rows.length > 0 ? (
+          <MotionCard>
+            <SectionHeader
+              title="Library"
+              description="Local-first storage. Deleting a file also removes its derived caches and linked review state."
+            />
+            <div className="mt-5">
+              <TableFrame>
+                <Table>
+                  <THead>
+                    <tr>
+                      <TH>File</TH>
+                      <TH>Account</TH>
+                      <TH>Uploaded</TH>
+                      <TH>Size</TH>
+                      <TH>Notes</TH>
+                      <TH className="text-right">Action</TH>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </THead>
+                  <TBody>
+                    {rows.map((row) => (
+                      <TR key={row.fileHash}>
+                        <TD className="max-w-[320px]">
+                          <div className="truncate font-medium text-slate-900">{row.originalName}</div>
+                          <div className="mt-1 text-xs text-slate-500">{formatStage(row.parseStatus)}</div>
+                        </TD>
+                        <TD>
+                          <div className="text-sm text-slate-900">{row.bankId?.toUpperCase() || "Account details incomplete"}</div>
+                          <div className="mt-1 text-xs text-slate-500">{(row.accountIds || []).join(", ") || "No account details yet"}</div>
+                        </TD>
+                        <TD className="text-sm text-slate-600">{row.uploadedAt.slice(0, 10)}</TD>
+                        <TD className="text-sm text-slate-600">{formatSize(row.size)}</TD>
+                        <TD>
+                          {row.warnings.length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => setWarningFile(row)}
+                              className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
+                            >
+                              {row.warnings.length} notes
+                            </button>
+                          ) : (
+                            <Badge tone="green">No notes</Badge>
+                          )}
+                        </TD>
+                        <TD className="text-right">
+                          <Button variant="destructive" size="sm" onClick={() => setConfirmFile(row)}>
+                            Delete
+                          </Button>
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              </TableFrame>
             </div>
-          ) : null}
-        </section>
+          </MotionCard>
+        ) : null}
       </div>
 
-      {confirmFile ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 px-4">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
-            <h2 className="text-base font-semibold text-slate-900">Delete uploaded file?</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              This removes the PDF and related caches for:
-              <span className="mt-1 block font-medium text-slate-900">
-                {confirmFile.originalName}
-              </span>
-            </p>
-            <p className="mt-2 text-xs text-slate-500">
-              Review state entries linked to this file will also be cleaned.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmFile(null)}
-                disabled={deletingHash === confirmFile.fileHash}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleDelete(confirmFile)}
-                disabled={deletingHash === confirmFile.fileHash}
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
-              >
-                {deletingHash === confirmFile.fileHash ? "Deleting..." : "Confirm delete"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <Modal
+        open={Boolean(confirmFile)}
+        onClose={() => setConfirmFile(null)}
+        title="Delete this PDF?"
+        subtitle="This removes the PDF, its derived caches, and linked review state."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmFile(null)} disabled={!!confirmFile && deletingHash === confirmFile.fileHash}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => confirmFile && void handleDelete(confirmFile)}
+              disabled={!confirmFile || deletingHash === confirmFile.fileHash}
+            >
+              {confirmFile && deletingHash === confirmFile.fileHash ? "Deleting..." : "Confirm delete"}
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-slate-600">
+          <span className="font-medium text-slate-900">{confirmFile?.originalName}</span>
+          {" "}will be removed from local storage.
+        </p>
+      </Modal>
 
-      {warningFile ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 px-4">
-          <div className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-4 shadow-lg">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">Warnings for this file</h2>
-                <p className="mt-1 text-sm text-slate-600">{warningFile.originalName}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setWarningFile(null)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+      <Modal
+        open={Boolean(warningFile)}
+        onClose={() => setWarningFile(null)}
+        title="Import notes"
+        subtitle={warningFile?.originalName || ""}
+        footer={
+          <>
+            <ButtonLink href="/onboarding" variant="secondary">Review boundary setup</ButtonLink>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (!warningFile) return;
+                setConfirmFile(warningFile);
+                setWarningFile(null);
+              }}
+            >
+              Delete this PDF
+            </Button>
+          </>
+        }
+      >
+        <div className="max-h-[60vh] space-y-3 overflow-y-auto">
+          {warningFile?.warnings.map((warning, idx) => {
+            const catalog = getWarningCatalogEntry(warning.code);
+            return (
+              <motion.div
+                key={`${warning.code}-${idx}`}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-[22px] border border-slate-200 bg-slate-50 px-4 py-4"
               >
-                Close
-              </button>
-            </div>
-
-            <div className="mt-4 max-h-[60vh] space-y-3 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
-              {warningFile.warnings.map((warning, idx) => {
-                const catalog = getWarningCatalogEntry(warning.code);
-                return (
-                  <div key={`${warning.code}-${idx}`} className="rounded-lg border border-slate-200 bg-white p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-slate-900">{catalog.title}</div>
-                        <div className="mt-1 font-mono text-xs text-slate-500">{warning.code}</div>
-                      </div>
-                    </div>
-                    <p className="mt-2 text-sm text-slate-700">{catalog.explain}</p>
-                    <p className="mt-1 text-xs text-slate-600">
-                      Suggested action: {catalog.suggestion}
-                    </p>
-                    {warning.message ? (
-                      <p className="mt-2 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
-                        Raw detail: {warning.message}
-                      </p>
-                    ) : null}
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">{catalog.title}</div>
+                    <div className="mt-1 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">{warning.code}</div>
                   </div>
-                );
-              })}
-              {warningFile.warnings.length === 0 ? (
-                <p className="text-sm text-slate-500">No warnings stored for this file.</p>
-              ) : null}
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-              <a
-                href="/onboarding"
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Review boundary setup
-              </a>
-              <button
-                type="button"
-                onClick={() => {
-                  setWarningFile(null);
-                  setConfirmFile(warningFile);
-                }}
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700"
-              >
-                Delete this PDF
-              </button>
-            </div>
-          </div>
+                </div>
+                <p className="mt-3 text-sm leading-6 text-slate-700">{catalog.explain}</p>
+                <p className="mt-2 text-sm text-slate-500">Suggested action: {catalog.suggestion}</p>
+                {warning.message ? (
+                  <details className="mt-3 text-xs text-slate-500">
+                    <summary className="cursor-pointer list-none font-medium text-slate-600">Details</summary>
+                    <div className="mt-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">{warning.message}</div>
+                  </details>
+                ) : null}
+              </motion.div>
+            );
+          })}
+          {warningFile && warningFile.warnings.length === 0 ? (
+            <p className="text-sm text-slate-500">No notes stored for this file.</p>
+          ) : null}
         </div>
-      ) : null}
+      </Modal>
     </main>
   );
 }
