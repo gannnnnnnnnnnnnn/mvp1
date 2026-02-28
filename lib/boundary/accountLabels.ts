@@ -4,6 +4,7 @@ type AccountLabelInput = {
   accountName?: string;
   accountKey?: string;
   accountNumber?: string;
+  bsb?: string;
   alias?: string;
   sampleFileName?: string;
 };
@@ -29,7 +30,12 @@ export function sanitizeAccountName(name?: string) {
 export function isUnknownAccountIdentity(input: AccountLabelInput) {
   const accountId = String(input.accountId || "").trim();
   if (!accountId || accountId === "default") return true;
-  return !sanitizeAccountName(input.accountName) && !input.accountKey && !input.accountNumber;
+  return (
+    !sanitizeAccountName(input.accountName) &&
+    !input.accountKey &&
+    !input.bsb &&
+    !input.accountNumber
+  );
 }
 
 export function formatAccountLabel(input: AccountLabelInput) {
@@ -39,9 +45,14 @@ export function formatAccountLabel(input: AccountLabelInput) {
   const sanitizedName = sanitizeAccountName(input.accountName);
   if (sanitizedName) return sanitizedName;
 
-  const last4Digits = last4(input.accountNumber) || last4(input.accountKey) || last4(input.accountId);
-  if (last4Digits) return `Acct ••••${last4Digits}`;
+  if (input.accountKey) return input.accountKey;
+  if (input.bsb) {
+    const tail = last4(input.accountNumber) || last4(input.accountId);
+    return tail ? `${input.bsb}-••••${tail}` : input.bsb;
+  }
 
+  const fallbackLast4 = last4(input.accountNumber) || last4(input.accountId);
+  if (fallbackLast4) return `Acct ••••${fallbackLast4}`;
   return "Unknown account";
 }
 
@@ -49,6 +60,9 @@ export function formatAccountSupportText(input: AccountLabelInput) {
   const parts: string[] = [];
   if (input.accountKey) {
     parts.push(input.accountKey);
+  } else if (input.bsb) {
+    const tail = last4(input.accountNumber) || last4(input.accountId);
+    parts.push(tail ? `${input.bsb}-••••${tail}` : input.bsb);
   } else if (input.accountId && input.accountId !== "default") {
     parts.push(input.accountId);
   }

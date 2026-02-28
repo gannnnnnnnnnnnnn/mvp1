@@ -30,6 +30,7 @@ type KnownAccount = {
   accountId: string;
   accountName?: string;
   accountKey?: string;
+  bsb?: string;
   accountNumber?: string;
   fileCount: number;
   sampleFileName?: string;

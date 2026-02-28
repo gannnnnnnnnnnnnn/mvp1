@@ -294,6 +294,8 @@ function buildAccountDisplayOptions(params: {
       accountId: string;
       accountName?: string;
       accountKey?: string;
+      bsb?: string;
+      accountNumber?: string;
     }
   >();
 
@@ -326,10 +328,20 @@ function buildAccountDisplayOptions(params: {
           alias: params.accountAliases[meta.accountId],
         }),
       accountKey: existing.accountKey || meta.accountKey,
+      bsb: existing.bsb || meta.bsb,
+      accountNumber: existing.accountNumber || meta.accountNumber,
     });
   }
 
-  return [...byKey.values()].sort((a, b) => {
+  return [...byKey.values()]
+    .map((item) => ({
+      ...item,
+      accountName: formatAccountLabel({
+        ...item,
+        alias: params.accountAliases[item.accountId],
+      }),
+    }))
+    .sort((a, b) => {
     const bankDiff = a.bankId.localeCompare(b.bankId);
     if (bankDiff !== 0) return bankDiff;
     const keyA = `${a.accountName || ""}|${a.accountId}`;

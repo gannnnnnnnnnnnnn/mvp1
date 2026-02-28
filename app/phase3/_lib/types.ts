@@ -13,6 +13,8 @@ export type AccountDisplayOption = {
   accountId: string;
   accountName?: string;
   accountKey?: string;
+  bsb?: string;
+  accountNumber?: string;
 };
 
 export type OverviewResponse = {

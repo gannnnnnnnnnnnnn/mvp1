@@ -58,7 +58,7 @@ function cleanAccountName(value?: string) {
   if (!candidate) return undefined;
   if (/\bBSB\b/i.test(candidate)) return undefined;
   if (/^Account\b/i.test(candidate)) return undefined;
-  if (/^\+?\s*\$/.test(candidate)) return undefined;
+  if (/^[+\-]?\s*\$/.test(candidate)) return undefined;
   return candidate;
 }
 
@@ -109,11 +109,11 @@ function extractCbaHeaderIdentity(text: string) {
   for (let i = 0; i < lines.length; i += 1) {
     if (!/^Account Number\b/i.test(lines[i] || "")) continue;
     for (let j = i; j <= i + 2 && j < lines.length; j += 1) {
-      const candidate = digitsOnly(lines[j] || "");
-      if (candidate.length < 12) continue;
+      const digits = digitsOnly(lines[j] || "");
+      if (digits.length < 12) continue;
       return {
-        bsb: normalizeBsb(candidate.slice(0, 6)),
-        accountNumber: normalizeAccountNumber(candidate.slice(6)),
+        bsb: normalizeBsb(digits.slice(0, 6)),
+        accountNumber: normalizeAccountNumber(digits.slice(6)),
       };
     }
   }
@@ -169,8 +169,13 @@ export function normalizeAccountMeta(
   const rawAccountName = (meta.accountName || "").trim();
   const accountName =
     rawAccountName && !/\bBSB\b/i.test(rawAccountName) ? rawAccountName : undefined;
-  const bsb = normalizeBsb(meta.bsb);
-  const sanitized = sanitizeAccountNumber(bsb, meta.accountNumber);
+  let bsb = normalizeBsb(meta.bsb);
+  let normalizedAccountRaw = normalizeAccountNumber(meta.accountNumber);
+  if (!bsb && normalizedAccountRaw && normalizedAccountRaw.length >= 12) {
+    bsb = normalizeBsb(normalizedAccountRaw.slice(0, 6));
+    normalizedAccountRaw = normalizeAccountNumber(normalizedAccountRaw.slice(6));
+  }
+  const sanitized = sanitizeAccountNumber(bsb, normalizedAccountRaw);
   const accountNumber = sanitized.accountNumber;
   const accountKey = buildAccountKey(bsb, accountNumber);
   const metaWarnings = [
@@ -319,11 +324,10 @@ export function extractCbaAccountMeta(params: {
     accountNumber = accountNumber || normalizeAccountNumber(idAccount);
   }
 
-  if (headerFallbackUsed && !accountName && accountNumber) {
-    metaWarnings.push("CBA_IDENTITY_HEADER_ONLY");
-  }
   if (!accountNumber) {
-    metaWarnings.push("ACCOUNT_IDENTITY_MISSING");
+    metaWarnings.push("IDENTITY_MISSING");
+  } else if (headerFallbackUsed && !accountName) {
+    metaWarnings.push("IDENTITY_HEADER_ONLY");
   }
 
   return normalizeAccountMeta({
