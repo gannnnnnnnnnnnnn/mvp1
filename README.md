@@ -126,6 +126,8 @@ What it does:
   - `/onboarding`
   - `/phase3`
   - `/inbox`
+  - `/files`
+  - `/settings`
 
 Local data:
 - Uploaded files and local state are stored under `uploads/*`.
@@ -135,6 +137,39 @@ Flow:
 - Start at `/onboarding` for first-time setup.
 - Use `/inbox` to review unknown merchants, uncertain transfers, and parse issues.
 - Use `/phase3` for analysis and export CSV from the `Export` menu.
+
+### Trial
+
+Use this when a friend is trying the product locally for the first time.
+
+Prerequisites:
+- Node.js 20+
+- npm
+
+Setup:
+
+```bash
+./scripts/run_local.sh
+```
+
+Trial checklist:
+1. Upload one or more PDFs in `/onboarding`.
+2. Confirm boundary accounts and continue into `/phase3`.
+3. Review the summary in Report, then open a month in Period view.
+4. Check uncertain items in `/inbox`.
+5. Export CSV from Report.
+6. Open `/files` and confirm uploads can be listed and deleted safely.
+7. Open `/settings` and confirm reset / overrides actions are understandable.
+
+Reset commands:
+
+```bash
+# reset analysis state only, keep PDFs
+./scripts/reset_local_state.sh analysis
+
+# delete all uploads and runtime state
+./scripts/reset_local_state.sh uploads --yes
+```
 
 ### 1) Install and run
 
