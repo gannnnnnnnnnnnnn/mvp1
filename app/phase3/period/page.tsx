@@ -1045,6 +1045,101 @@ export default function Phase3PeriodPage() {
           )}
         </section>
 
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <div className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+                Offset Mode
+              </div>
+              <h2 className="mt-2 text-xl font-semibold text-slate-900">
+                Make transfer offset the default view for this period.
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                Conservative mode hides only matched internal transfers, so spending and income
+                stay closer to what actually left or entered your world. Uncertain transfers are
+                never hidden automatically.
+              </p>
+            </div>
+
+            <a
+              href="/inbox"
+              className="inline-flex h-10 items-center justify-center rounded-full border border-slate-300 px-4 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+            >
+              Review in Inbox
+            </a>
+          </div>
+
+          <div className="mt-5 grid gap-3 lg:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setExcludeMatchedTransfers(true)}
+              className={`rounded-2xl border p-4 text-left transition ${
+                excludeMatchedTransfers
+                  ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+                  : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white"
+              }`}
+            >
+              <div className="text-sm font-semibold">Conservative (Recommended)</div>
+              <div
+                className={`mt-1 text-sm ${
+                  excludeMatchedTransfers ? "text-slate-200" : "text-slate-600"
+                }`}
+              >
+                Exclude matched internal transfers. Uncertain items stay visible.
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setExcludeMatchedTransfers(false)}
+              className={`rounded-2xl border p-4 text-left transition ${
+                !excludeMatchedTransfers
+                  ? "border-slate-900 bg-slate-900 text-white shadow-sm"
+                  : "border-slate-200 bg-slate-50 text-slate-900 hover:border-slate-300 hover:bg-white"
+              }`}
+            >
+              <div className="text-sm font-semibold">Show all (Raw)</div>
+              <div
+                className={`mt-1 text-sm ${
+                  !excludeMatchedTransfers ? "text-slate-200" : "text-slate-600"
+                }`}
+              >
+                Keep every transfer in view, including matched internal movement.
+              </div>
+            </button>
+          </div>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Matched excluded</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">
+                {overview?.transferStats?.internalOffsetPairsCount || 0}
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                {CURRENCY.format(overview?.transferStats?.internalOffsetAbs || 0)}
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Uncertain</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">
+                {overview?.transferStats?.uncertainPairsCount || 0}
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                Still counted until you review them.
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs uppercase tracking-wide text-slate-500">Boundary flow</div>
+              <div className="mt-2 text-2xl font-semibold text-slate-900">
+                {overview?.transferStats?.boundaryFlowPairsCount || 0}
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                Cross-boundary movement remains in totals.
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <article
             ref={triageSectionRef}
