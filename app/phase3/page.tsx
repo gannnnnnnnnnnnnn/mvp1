@@ -23,6 +23,11 @@ import {
   parseScopeFromWindow,
   pushScopeIntoUrl,
 } from "@/app/phase3/_lib/timeNav";
+import {
+  formatAccountLabel,
+  formatAccountSupportText,
+  isUnknownAccountIdentity,
+} from "@/lib/boundary/accountLabels";
 
 const CURRENCY = new Intl.NumberFormat("en-AU", {
   style: "currency",
@@ -45,6 +50,7 @@ type KnownAccount = {
   accountKey?: string;
   bsb?: string;
   accountNumber?: string;
+  sampleFileName?: string;
   fileCount: number;
   dateRange?: { from: string; to: string };
 };
@@ -57,11 +63,9 @@ type BoundaryResponse = {
 };
 
 function formatAccountOptionLabel(option: AccountDisplayOption) {
-  const head = option.accountName
-    ? `${option.bankId.toUpperCase()} · ${option.accountName}`
-    : `${option.bankId.toUpperCase()} · ${option.accountId}`;
-  const tail = option.accountKey || option.accountId;
-  return `${head} (${tail})`;
+  const head = `${option.bankId.toUpperCase()} · ${formatAccountLabel(option)}`;
+  const tail = formatAccountSupportText(option);
+  return tail ? `${head} (${tail})` : head;
 }
 
 export default function Phase3DatasetHomePage() {
@@ -752,19 +756,28 @@ export default function Phase3DatasetHomePage() {
                       <span className="text-xs text-slate-700">
                         <span className="font-medium text-slate-900">
                           {account.bankId.toUpperCase()} ·{" "}
-                          {account.accountName || account.accountId}
+                          {formatAccountLabel({
+                            ...account,
+                            alias: boundaryAliasDraft[account.accountId],
+                          })}
                         </span>
-                        {account.accountKey ? (
-                          <span className="ml-2 text-slate-500">
-                            ({account.accountKey})
-                          </span>
-                        ) : null}
+                        <span className="ml-2 text-slate-500">
+                          {formatAccountSupportText({
+                            ...account,
+                            alias: boundaryAliasDraft[account.accountId],
+                          })}
+                        </span>
                         <span className="ml-2 text-slate-500">
                           files: {account.fileCount}
                           {account.dateRange
                             ? ` · ${account.dateRange.from} → ${account.dateRange.to}`
                             : ""}
                         </span>
+                        {isUnknownAccountIdentity(account) ? (
+                          <span className="mt-1 block text-amber-700">
+                            Unknown/default identity. Add alias before including it in the boundary.
+                          </span>
+                        ) : null}
                         <span className="mt-1 block">
                           <input
                             type="text"

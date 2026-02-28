@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  formatAccountLabel,
+  formatAccountSupportText,
+  isUnknownAccountIdentity,
+} from "@/lib/boundary/accountLabels";
 
 type ApiError = { code: string; message: string };
 
@@ -25,7 +30,9 @@ type KnownAccount = {
   accountId: string;
   accountName?: string;
   accountKey?: string;
+  accountNumber?: string;
   fileCount: number;
+  sampleFileName?: string;
   dateRange?: { from: string; to: string };
 };
 
@@ -53,14 +60,6 @@ function formatSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function accountLabel(account: KnownAccount) {
-  const left = account.accountName
-    ? `${account.bankId.toUpperCase()} · ${account.accountName}`
-    : `${account.bankId.toUpperCase()} · ${account.accountId}`;
-  const right = account.accountKey || account.accountId;
-  return `${left} (${right})`;
-}
-
 export default function OnboardingPage() {
   const [step, setStep] = useState<Step>(1);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
@@ -70,6 +69,7 @@ export default function OnboardingPage() {
   const [success, setSuccess] = useState("");
   const [boundary, setBoundary] = useState<BoundaryResponse | null>(null);
   const [boundaryDraft, setBoundaryDraft] = useState<string[]>([]);
+  const [boundaryAliasDraft, setBoundaryAliasDraft] = useState<Record<string, string>>({});
   const [isSavingBoundary, setIsSavingBoundary] = useState(false);
   const [existingUploads, setExistingUploads] = useState(0);
 
@@ -108,6 +108,7 @@ export default function OnboardingPage() {
       setBoundary(data);
       if (data.ok) {
         setBoundaryDraft(data.config.boundaryAccountIds);
+        setBoundaryAliasDraft(data.config.accountAliases || {});
         if (data.knownAccounts.length > 0) {
           setStep(2);
         }
@@ -246,7 +247,10 @@ export default function OnboardingPage() {
       const res = await fetch("/api/analysis/boundary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ boundaryAccountIds: boundaryDraft }),
+        body: JSON.stringify({
+          boundaryAccountIds: boundaryDraft,
+          accountAliases: boundaryAliasDraft,
+        }),
       });
       const data = (await res.json()) as BoundaryResponse;
       if (!data.ok) {
@@ -365,12 +369,44 @@ export default function OnboardingPage() {
                         onChange={() => toggleBoundary(account.accountId)}
                       />
                       <span className="text-xs text-slate-700">
-                        <span className="font-medium text-slate-900">{accountLabel(account)}</span>
+                        <span className="font-medium text-slate-900">
+                          {account.bankId.toUpperCase()} ·{" "}
+                          {formatAccountLabel({
+                            ...account,
+                            alias: boundaryAliasDraft[account.accountId],
+                          })}
+                        </span>
+                        <span className="ml-2 text-slate-500">
+                          {formatAccountSupportText({
+                            ...account,
+                            alias: boundaryAliasDraft[account.accountId],
+                          })}
+                        </span>
                         <span className="ml-2 text-slate-500">
                           files: {account.fileCount}
                           {account.dateRange
                             ? ` · ${account.dateRange.from} → ${account.dateRange.to}`
                             : ""}
+                        </span>
+                        {isUnknownAccountIdentity(account) ? (
+                          <span className="mt-1 block text-amber-700">
+                            Unknown/default identity. Not auto-selected.
+                          </span>
+                        ) : null}
+                        <span className="mt-2 block">
+                          <input
+                            type="text"
+                            value={boundaryAliasDraft[account.accountId] || ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) =>
+                              setBoundaryAliasDraft((prev) => ({
+                                ...prev,
+                                [account.accountId]: e.target.value,
+                              }))
+                            }
+                            placeholder="Rename / alias (optional)"
+                            className="h-8 w-full rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                          />
                         </span>
                       </span>
                     </label>

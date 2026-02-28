@@ -6,6 +6,7 @@ import { loadParsedTransactions } from "@/lib/analysis/loadParsed";
 import { matchTransfersV3 } from "@/lib/analysis/transfers/matchTransfersV3";
 import { decideTransferEffect } from "@/lib/analysis/transfers/decideTransferEffect";
 import { readBoundaryConfig } from "@/lib/boundary/store";
+import { formatAccountLabel } from "@/lib/boundary/accountLabels";
 import { findById, readIndex } from "@/lib/fileStore";
 import { normalizeAccountMeta, StatementAccountMeta } from "@/lib/parsing/accountMeta";
 
@@ -284,6 +285,7 @@ function buildDatasetCoverage(transactions: NormalizedTransaction[]) {
 function buildAccountDisplayOptions(params: {
   transactions: NormalizedTransaction[];
   statementAccountMeta: StatementAccountMeta[];
+  accountAliases: Record<string, string>;
 }) {
   const byKey = new Map<
     string,
@@ -313,7 +315,16 @@ function buildAccountDisplayOptions(params: {
     };
     byKey.set(key, {
       ...existing,
-      accountName: existing.accountName || meta.accountName,
+      accountName:
+        existing.accountName ||
+        formatAccountLabel({
+          bankId: meta.bankId,
+          accountId: meta.accountId,
+          accountName: meta.accountName,
+          accountKey: meta.accountKey,
+          accountNumber: meta.accountNumber,
+          alias: params.accountAliases[meta.accountId],
+        }),
       accountKey: existing.accountKey || meta.accountKey,
     });
   }
@@ -566,6 +577,7 @@ export async function loadCategorizedTransactionsForScope(params: AnalysisOption
   const accountDisplayOptions = buildAccountDisplayOptions({
     transactions: annotatedTransactions,
     statementAccountMeta: [...statementAccountMetaByKey.values()],
+    accountAliases: boundary.config.accountAliases || {},
   });
 
   const core = runAnalysisCore({
