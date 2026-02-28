@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { AppShellNav } from "@/components/app/AppShellNav";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -25,29 +26,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        <div className="min-h-screen bg-slate-50">
-          <header className="border-b border-slate-200 bg-white">
-            <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3 sm:px-8">
-              <div className="text-sm font-semibold text-slate-900">
+      <body className={`${geistSans.variable} ${geistMono.variable} bg-[#f6f7f3] text-slate-900 antialiased`}>
+        <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.92),_rgba(246,247,243,1)_52%)]">
+          <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/70 backdrop-blur-xl">
+            <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
+              <Link href="/phase3" className="text-sm font-semibold tracking-[0.2em] text-slate-900 uppercase">
                 Personal Cashflow
-              </div>
-              <nav className="flex items-center gap-5 text-sm text-slate-600">
-                <Link href="/onboarding" className="font-medium text-slate-900 hover:text-blue-700">
-                  Onboarding
-                </Link>
-                <Link href="/phase3" className="font-medium text-slate-900 hover:text-blue-700">
-                  Report
-                </Link>
-                <Link href="/inbox" className="font-medium text-slate-900 hover:text-blue-700">
-                  Inbox
-                </Link>
-                <Link href="/settings" className="font-medium text-slate-900 hover:text-blue-700">
-                  Settings
-                </Link>
-              </nav>
+              </Link>
+              <AppShellNav />
             </div>
           </header>
           {children}

@@ -1,6 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  Button,
+  ButtonLink,
+  Card,
+  MotionCard,
+  SectionHeader,
+  Toast,
+} from "@/components/ui";
 
 type ApiError = { code: string; message: string };
 
@@ -63,15 +71,10 @@ export default function SettingsPage() {
     void loadUploads();
   }, []);
 
-  const totalUploadSize = useMemo(
-    () => uploads.reduce((sum, item) => sum + item.size, 0),
-    [uploads]
-  );
+  const totalUploadSize = useMemo(() => uploads.reduce((sum, item) => sum + item.size, 0), [uploads]);
 
   async function handleDeleteAll() {
-    const confirmation = window.prompt(
-      "Type DELETE ALL to remove all uploaded PDFs and derived caches."
-    );
+    const confirmation = window.prompt("Type DELETE ALL to remove all uploaded PDFs and derived caches.");
     if (confirmation !== "DELETE ALL") {
       setStatus("Delete all uploads cancelled.");
       return;
@@ -99,9 +102,7 @@ export default function SettingsPage() {
   }
 
   async function handleResetAnalysisState() {
-    const confirmation = window.prompt(
-      "Type RESET ANALYSIS to clear review state and overrides."
-    );
+    const confirmation = window.prompt("Type RESET ANALYSIS to clear review state and overrides.");
     if (confirmation !== "RESET ANALYSIS") {
       setStatus("Reset analysis state cancelled.");
       return;
@@ -111,9 +112,7 @@ export default function SettingsPage() {
     setError("");
     setStatus("");
     try {
-      const res = await fetch("/api/settings/reset-analysis", {
-        method: "POST",
-      });
+      const res = await fetch("/api/settings/reset-analysis", { method: "POST" });
       const data = (await res.json()) as
         | { ok: true; removedFiles: string[]; removedDirs: string[] }
         | { ok: false; error: ApiError };
@@ -121,9 +120,7 @@ export default function SettingsPage() {
         setError(`${data.error.code}: ${data.error.message}`);
         return;
       }
-      setStatus(
-        `Analysis state reset. Removed files: ${data.removedFiles.length}, caches: ${data.removedDirs.length}.`
-      );
+      setStatus(`Analysis state reset. Removed files: ${data.removedFiles.length}, caches: ${data.removedDirs.length}.`);
     } catch {
       setError("Failed to reset analysis state.");
     } finally {
@@ -158,9 +155,7 @@ export default function SettingsPage() {
         setError(`${data.error.code}: ${data.error.message}`);
         return;
       }
-      setStatus(
-        `Overrides imported. merchant=${data.counts.merchantRules}, transfer=${data.counts.transferRules}, parse=${data.counts.parseRules}.`
-      );
+      setStatus(`Overrides imported. merchant=${data.counts.merchantRules}, transfer=${data.counts.transferRules}, parse=${data.counts.parseRules}.`);
     } catch {
       setError("Failed to import overrides.");
     } finally {
@@ -169,117 +164,60 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
+    <main className="px-5 py-8 sm:px-8 sm:py-10">
       <div className="mx-auto max-w-5xl space-y-6">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold text-slate-900">Settings</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Manage local files, safe reset actions, and the few advanced tools that are
-            not part of the main workflow.
-          </p>
-        </section>
+        <MotionCard>
+          <SectionHeader
+            eyebrow="Settings"
+            title="Local data and safeguards"
+            description="Everything stays on this machine. Use Settings to manage uploaded files, reset analysis state, and back up your rules."
+          />
+        </MotionCard>
 
-        <section
-          id="uploads-list"
-          className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-3">
+        <Toast message={error || status} tone={error ? "error" : status ? "success" : "neutral"} />
+
+        <MotionCard>
+          <SectionHeader
+            title="Uploads"
+            description="Quick view of your local statement library."
+            action={<ButtonLink href="/files" variant="secondary">Manage uploads</ButtonLink>}
+          />
+          <div className="mt-5 grid gap-4 md:grid-cols-[1fr_auto] md:items-center">
             <div>
-              <h2 className="text-lg font-semibold text-slate-900">Uploads</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Uploaded PDFs: {uploads.length} · total {formatBytes(totalUploadSize)}
-              </p>
+              <div className="text-3xl font-semibold tracking-tight text-slate-900">{uploads.length}</div>
+              <div className="mt-1 text-sm text-slate-600">PDFs stored locally · {formatBytes(totalUploadSize)}</div>
+              {!loadingUploads && uploads.length > 0 ? (
+                <div className="mt-3 text-sm text-slate-500">Latest: {uploads[0]?.originalName}</div>
+              ) : null}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <a
-                href="/files"
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Manage uploads
-              </a>
-              <button
-                type="button"
-                onClick={() => void handleDeleteAll()}
-                disabled={deleteAllBusy}
-                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
-              >
+            <div>
+              <Button variant="destructive" onClick={() => void handleDeleteAll()} disabled={deleteAllBusy}>
                 {deleteAllBusy ? "Deleting..." : "Delete all uploads"}
-              </button>
+              </Button>
             </div>
           </div>
+        </MotionCard>
 
-          {loadingUploads ? (
-            <p className="mt-4 text-sm text-slate-500">Loading uploads...</p>
-          ) : uploads.length === 0 ? (
-            <p className="mt-4 text-sm text-slate-500">No uploads found.</p>
-          ) : (
-            <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-3 py-2">File</th>
-                    <th className="px-3 py-2">Bank/Account</th>
-                    <th className="px-3 py-2">Uploaded</th>
-                    <th className="px-3 py-2">Size</th>
-                    <th className="px-3 py-2">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white">
-                  {uploads.map((item) => (
-                    <tr key={item.fileHash}>
-                      <td className="px-3 py-2 text-slate-900">{item.originalName}</td>
-                      <td className="px-3 py-2 text-xs text-slate-600">
-                        {(item.bankId || "unknown").toUpperCase()} ·{" "}
-                        {(item.accountIds || []).join(", ") || "n/a"}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-slate-600">
-                        {item.uploadedAt.slice(0, 10)}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-slate-600">
-                        {formatBytes(item.size)}
-                      </td>
-                      <td className="px-3 py-2 text-xs text-slate-600">
-                        {item.parseStatus.stage}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Analysis State</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Reset review state, overrides, and derived analysis caches. PDFs and
-            manifest are kept.
-          </p>
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={() => void handleResetAnalysisState()}
-              disabled={resetBusy}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
+        <MotionCard>
+          <SectionHeader
+            title="Analysis state"
+            description="Clear review state, saved decisions, and derived caches without deleting the original PDFs."
+          />
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Button variant="secondary" onClick={() => void handleResetAnalysisState()} disabled={resetBusy}>
               {resetBusy ? "Resetting..." : "Reset analysis state"}
-            </button>
+            </Button>
           </div>
-        </section>
+        </MotionCard>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Overrides</h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Backup and import merchant/transfer/parse rules.
-          </p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <a
-              href="/api/settings/overrides/export"
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Backup overrides.json
-            </a>
-            <label className="inline-flex cursor-pointer items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100">
+        <MotionCard>
+          <SectionHeader
+            title="Overrides"
+            description="Back up or restore your merchant, transfer, and parse rules."
+          />
+          <div className="mt-5 flex flex-wrap gap-3">
+            <ButtonLink href="/api/settings/overrides/export" variant="secondary">Backup overrides.json</ButtonLink>
+            <label className="inline-flex cursor-pointer items-center rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
               {importBusy ? "Importing..." : "Import overrides.json"}
               <input
                 type="file"
@@ -294,51 +232,19 @@ export default function SettingsPage() {
               />
             </label>
           </div>
-          <p className="mt-2 text-xs text-slate-500">
-            Invalid JSON is rejected safely; existing overrides stay unchanged.
-          </p>
-        </section>
+          <p className="mt-3 text-sm text-slate-500">Invalid JSON is rejected safely. Your current overrides stay unchanged.</p>
+        </MotionCard>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <details>
-            <summary className="cursor-pointer list-none text-lg font-semibold text-slate-900">
-              Advanced
-            </summary>
-            <p className="mt-2 text-sm text-slate-600">
-              These views are useful for investigation, but they are not part of the
-              main reporting flow.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <a
-                href="/phase3/compare"
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Compare view
-              </a>
-              <a
-                href="/transactions"
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Transactions workspace
-              </a>
-            </div>
-            <p className="mt-3 text-xs text-amber-700">
-              Advanced views may expose extra analysis detail that most users do not
-              need day to day.
-            </p>
-          </details>
-        </section>
-
-        {status ? (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-            {status}
+        <Card>
+          <SectionHeader
+            title="Advanced"
+            description="These tools are still available, but they are outside the main day-to-day workflow."
+          />
+          <div className="mt-5 flex flex-wrap gap-3">
+            <ButtonLink href="/phase3/compare" variant="secondary">Compare view</ButtonLink>
+            <ButtonLink href="/transactions" variant="secondary">Transactions workspace</ButtonLink>
           </div>
-        ) : null}
-        {error ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </div>
-        ) : null}
+        </Card>
       </div>
     </main>
   );

@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import { CATEGORY_TAXONOMY } from "@/lib/analysis/types";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Modal,
+  MotionCard,
+  SectionHeader,
+  Toast,
+} from "@/components/ui";
 
 type ApiError = { code: string; message: string };
 type InboxKind = "UNKNOWN_MERCHANT" | "UNCERTAIN_TRANSFER" | "PARSE_ISSUE";
@@ -23,16 +34,18 @@ type InboxItem = {
   metadata?: Record<string, unknown>;
 };
 
-type InboxResponse = {
-  ok: true;
-  items: InboxItem[];
-  counts: Record<InboxKind, number>;
-  totals: { all: number; unresolved: number; resolved: number };
-  suppressedByRule?: number;
-} | {
-  ok: false;
-  error: ApiError;
-};
+type InboxResponse =
+  | {
+      ok: true;
+      items: InboxItem[];
+      counts: Record<InboxKind, number>;
+      totals: { all: number; unresolved: number; resolved: number };
+      suppressedByRule?: number;
+    }
+  | {
+      ok: false;
+      error: ApiError;
+    };
 
 type ChangeModalState = {
   item: InboxItem;
@@ -43,14 +56,14 @@ type ChangeModalState = {
 const KIND_LABELS: Record<InboxKind, string> = {
   UNKNOWN_MERCHANT: "Unknown merchant",
   UNCERTAIN_TRANSFER: "Uncertain transfer",
-  PARSE_ISSUE: "Needs review parse issue",
+  PARSE_ISSUE: "Parse issue",
 };
 
-const SEVERITY_CLASS: Record<InboxItem["severity"], string> = {
-  high: "border-red-200 bg-red-50 text-red-700",
-  medium: "border-amber-200 bg-amber-50 text-amber-700",
-  low: "border-slate-200 bg-slate-50 text-slate-700",
-};
+function severityTone(severity: InboxItem["severity"]) {
+  if (severity === "high") return "red" as const;
+  if (severity === "medium") return "amber" as const;
+  return "neutral" as const;
+}
 
 function buildInboxQueryFromUrl() {
   const params = new URLSearchParams();
@@ -92,6 +105,18 @@ function readMetaString(item: InboxItem, key: string) {
 function readMetaNumber(item: InboxItem, key: string) {
   const value = item.metadata?.[key];
   return typeof value === "number" ? value : undefined;
+}
+
+function compactSupportingLine(item: InboxItem) {
+  if (item.kind === "UNKNOWN_MERCHANT") {
+    const merchant = readMetaString(item, "merchantNorm") || "Merchant not recognised";
+    const amount = readMetaNumber(item, "amount");
+    return amount ? `${merchant} · ${amount}` : merchant;
+  }
+  if (item.kind === "UNCERTAIN_TRANSFER") {
+    return readMetaString(item, "whySentence") || "Candidate transfer found, but no offset applied.";
+  }
+  return readMetaString(item, "templateType") || item.reason;
 }
 
 export default function InboxPage() {
@@ -145,7 +170,7 @@ export default function InboxPage() {
         setStatus(`${result.error?.code || "API_FAIL"}: ${result.error?.message || "Failed."}`);
         return;
       }
-      setStatus("Resolved.");
+      setStatus("Confirmed. You can undo this later from history once it is wired.");
       await fetchInbox();
     } catch {
       setStatus("Failed to resolve item.");
@@ -158,10 +183,7 @@ export default function InboxPage() {
     setActionBusyId(item.id);
     setStatus("");
     try {
-      const payload: Record<string, unknown> = {
-        id: item.id,
-        kind: item.kind,
-      };
+      const payload: Record<string, unknown> = { id: item.id, kind: item.kind };
       if (item.kind === "UNKNOWN_MERCHANT") {
         payload.merchantNorm = readMetaString(item, "merchantNorm");
       } else if (item.kind === "UNCERTAIN_TRANSFER") {
@@ -178,7 +200,7 @@ export default function InboxPage() {
         setStatus(`${result.error?.code || "API_FAIL"}: ${result.error?.message || "Failed."}`);
         return;
       }
-      setStatus("Rule saved.");
+      setStatus("Saved as the default rule for next time.");
       await fetchInbox();
     } catch {
       setStatus("Failed to save rule.");
@@ -216,7 +238,7 @@ export default function InboxPage() {
         setStatus(`${result.error?.code || "API_FAIL"}: ${result.error?.message || "Failed."}`);
         return;
       }
-      setStatus("One-off change applied.");
+      setStatus("Applied to this item only.");
       setChangeModal(null);
       await fetchInbox();
     } catch {
@@ -235,183 +257,101 @@ export default function InboxPage() {
       };
     }
     return {
-      UNKNOWN_MERCHANT: data.items
-        .filter((item) => item.kind === "UNKNOWN_MERCHANT")
-        .sort(itemSort),
-      UNCERTAIN_TRANSFER: data.items
-        .filter((item) => item.kind === "UNCERTAIN_TRANSFER")
-        .sort(itemSort),
+      UNKNOWN_MERCHANT: data.items.filter((item) => item.kind === "UNKNOWN_MERCHANT").sort(itemSort),
+      UNCERTAIN_TRANSFER: data.items.filter((item) => item.kind === "UNCERTAIN_TRANSFER").sort(itemSort),
       PARSE_ISSUE: data.items.filter((item) => item.kind === "PARSE_ISSUE").sort(itemSort),
     };
   }, [data]);
 
   return (
-    <main className="min-h-screen bg-slate-100/60 px-6 py-6 sm:px-8 sm:py-8">
-      <div className="mx-auto max-w-[1280px] space-y-6">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-semibold text-slate-900">Review Inbox</h1>
-              <p className="mt-1 text-sm text-slate-600">
-                Resolve uncertain items: unknown merchants, uncertain transfers, and parse issues.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void fetchInbox()}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-            >
-              Refresh
-            </button>
+    <main className="px-5 py-8 sm:px-8 sm:py-10">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <MotionCard>
+          <SectionHeader
+            eyebrow="Inbox"
+            title="Review what still needs a decision"
+            description="Work through merchants, transfers, and parse issues. Uncertain transfers are left in totals until you confirm them."
+            action={<Button variant="secondary" onClick={() => void fetchInbox()}>Refresh</Button>}
+          />
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Badge tone="neutral">Total {data?.ok ? data.totals.unresolved : 0}</Badge>
+            <Badge tone="neutral">Unknown merchant {data?.ok ? data.counts.UNKNOWN_MERCHANT : 0}</Badge>
+            <Badge tone="neutral">Uncertain transfer {data?.ok ? data.counts.UNCERTAIN_TRANSFER : 0}</Badge>
+            <Badge tone="neutral">Parse issue {data?.ok ? data.counts.PARSE_ISSUE : 0}</Badge>
+            <Button variant="ghost" size="sm" disabled>
+              Undo last action
+            </Button>
           </div>
+        </MotionCard>
 
-          {loading && <p className="mt-4 text-sm text-slate-500">Loading inbox...</p>}
+        <Toast message={status} tone={status.includes("Failed") ? "error" : status ? "success" : "neutral"} />
 
-          {data?.ok ? (
-            <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-600">
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
-                Total: {data.totals.unresolved}
-              </span>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
-                Unknown merchant: {data.counts.UNKNOWN_MERCHANT}
-              </span>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
-                Uncertain transfer: {data.counts.UNCERTAIN_TRANSFER}
-              </span>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1">
-                Parse issue: {data.counts.PARSE_ISSUE}
-              </span>
-              {typeof data.suppressedByRule === "number" && data.suppressedByRule > 0 ? (
-                <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-blue-700">
-                  Suppressed by rule: {data.suppressedByRule}
-                </span>
-              ) : null}
+        {loading ? <Card><p className="text-sm text-slate-500">Loading inbox...</p></Card> : null}
+        {!loading && data && !data.ok ? (
+          <Card>
+            <Toast message={`${data.error.code}: ${data.error.message}`} tone="error" />
+          </Card>
+        ) : null}
+
+        {data?.ok && data.totals.unresolved === 0 ? (
+          <EmptyState
+            title="Nothing to review"
+            body="Your inbox is clear. When the parser finds something uncertain or incomplete, it will appear here."
+          />
+        ) : null}
+
+        {(["UNKNOWN_MERCHANT", "UNCERTAIN_TRANSFER", "PARSE_ISSUE"] as InboxKind[]).map((kind) => (
+          <MotionCard key={kind}>
+            <div className="flex items-center justify-between gap-3">
+              <SectionHeader title={KIND_LABELS[kind]} description="" />
+              <Badge>{grouped[kind].length}</Badge>
             </div>
-          ) : null}
-          {data?.ok && data.totals.unresolved === 0 ? (
-            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-              Nothing to review right now. Your inbox is clear.
-            </div>
-          ) : null}
 
-          {!loading && data && !data.ok && (
-            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {data.error.code}: {data.error.message}
-            </div>
-          )}
-          {status ? (
-            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-              {status}
-            </div>
-          ) : null}
-        </section>
-
-        {(["UNKNOWN_MERCHANT", "UNCERTAIN_TRANSFER", "PARSE_ISSUE"] as InboxKind[]).map(
-          (kind) => (
-            <section
-              key={kind}
-              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-            >
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-slate-900">{KIND_LABELS[kind]}</h2>
-                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
-                  {grouped[kind].length}
-                </span>
-              </div>
-
-              {grouped[kind].length === 0 ? (
-                <p className="text-sm text-slate-500">Nothing to review in this group.</p>
-              ) : (
-                <div className="space-y-3">
-                  {grouped[kind].map((item) => (
-                    <article
-                      key={item.id}
-                      className="rounded-xl border border-slate-200 bg-slate-50 p-4"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
-                          <h3 className="text-sm font-semibold text-slate-900">{item.title}</h3>
-                          <p className="mt-1 text-xs text-slate-600">{item.summary}</p>
+            {grouped[kind].length === 0 ? (
+              <div className="mt-2 text-sm text-slate-500">Nothing to review in this section.</div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {grouped[kind].map((item) => (
+                  <motion.article
+                    key={item.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="rounded-[24px] border border-slate-200 bg-slate-50 px-5 py-4"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-base font-semibold text-slate-900">{item.title}</h3>
+                          <Badge tone={severityTone(item.severity)}>{item.severity}</Badge>
                         </div>
-                        <span
-                          className={`rounded-full border px-2 py-1 text-[11px] font-medium ${SEVERITY_CLASS[item.severity]}`}
-                        >
-                          {item.severity.toUpperCase()}
-                        </span>
+                        <p className="mt-2 text-sm leading-6 text-slate-600">{item.summary}</p>
+                        <div className="mt-3 text-sm text-slate-500">{compactSupportingLine(item)}</div>
+                        <details className="mt-3 text-xs text-slate-500">
+                          <summary className="cursor-pointer list-none font-medium text-slate-600">Details</summary>
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            <div>Reason: {item.reason}</div>
+                            <div>Date: {item.createdAt}</div>
+                            {item.bankId ? <div>Bank: {item.bankId}</div> : null}
+                            {item.accountId ? <div>Account: {item.accountId}</div> : null}
+                            {item.fileId ? <div className="sm:col-span-2">File: {item.fileId}</div> : null}
+                            {typeof readMetaNumber(item, "confidence") === "number" ? (
+                              <div>Confidence: {readMetaNumber(item, "confidence")?.toFixed(2)}</div>
+                            ) : null}
+                          </div>
+                        </details>
                       </div>
-
-                      <div className="mt-3 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
-                        <div>
-                          <span className="font-medium text-slate-700">Reason:</span>{" "}
-                          {item.reason}
-                        </div>
-                        <div>
-                          <span className="font-medium text-slate-700">Date:</span>{" "}
-                          {item.createdAt}
-                        </div>
-                        {item.bankId ? (
-                          <div>
-                            <span className="font-medium text-slate-700">Bank:</span> {item.bankId}
-                          </div>
-                        ) : null}
-                        {item.accountId ? (
-                          <div>
-                            <span className="font-medium text-slate-700">Account:</span>{" "}
-                            {item.accountId}
-                          </div>
-                        ) : null}
-                        {item.fileId ? (
-                          <div className="sm:col-span-2">
-                            <span className="font-medium text-slate-700">File:</span> {item.fileId}
-                          </div>
-                        ) : null}
-                        {item.kind === "UNKNOWN_MERCHANT" ? (
-                          <>
-                            <div>
-                              <span className="font-medium text-slate-700">Merchant:</span>{" "}
-                              {readMetaString(item, "merchantNorm") || "-"}
-                            </div>
-                            <div>
-                              <span className="font-medium text-slate-700">Amount:</span>{" "}
-                              {typeof readMetaNumber(item, "amount") === "number"
-                                ? readMetaNumber(item, "amount")
-                                : "-"}
-                            </div>
-                          </>
-                        ) : null}
-                        {item.kind === "UNCERTAIN_TRANSFER" ? (
-                          <>
-                            <div>
-                              <span className="font-medium text-slate-700">Confidence:</span>{" "}
-                              {typeof readMetaNumber(item, "confidence") === "number"
-                                ? readMetaNumber(item, "confidence")?.toFixed(2)
-                                : "-"}
-                            </div>
-                            <div>
-                              <span className="font-medium text-slate-700">Why:</span>{" "}
-                              {readMetaString(item, "whySentence") || "Uncertain transfer"}
-                            </div>
-                          </>
-                        ) : null}
-                        {item.kind === "PARSE_ISSUE" ? (
-                          <div className="sm:col-span-2">
-                            <span className="font-medium text-slate-700">Template:</span>{" "}
-                            {readMetaString(item, "templateType") || "-"}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
                           onClick={() => void resolveItem(item)}
                           disabled={actionBusyId === item.id}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
                         >
                           Confirm
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          variant="subtle"
+                          size="sm"
                           onClick={() =>
                             setChangeModal({
                               item,
@@ -422,48 +362,48 @@ export default function InboxPage() {
                             })
                           }
                           disabled={actionBusyId === item.id}
-                          className="rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-slate-400"
                         >
                           Change
-                        </button>
-                        <button
-                          type="button"
+                        </Button>
+                        <Button
+                          variant="primary"
+                          size="sm"
                           onClick={() => void applyAlways(item)}
                           disabled={actionBusyId === item.id}
-                          className="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:text-slate-400"
                         >
                           Always do this
-                        </button>
+                        </Button>
                       </div>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </section>
-          )
-        )}
+                    </div>
+                  </motion.article>
+                ))}
+              </div>
+            )}
+          </MotionCard>
+        ))}
       </div>
 
-      {changeModal ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
-            <div className="flex items-center justify-between gap-2">
-              <h2 className="text-base font-semibold text-slate-900">Change (one-off)</h2>
-              <button
-                type="button"
-                className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-                onClick={() => setChangeModal(null)}
-              >
-                Close
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-slate-600">
-              This applies only to this inbox item and marks it resolved.
-            </p>
-
+      <Modal
+        open={Boolean(changeModal)}
+        onClose={() => setChangeModal(null)}
+        title="Change this item only"
+        subtitle="This does not create a permanent rule."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setChangeModal(null)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitChange()} disabled={!changeModal || actionBusyId === changeModal.item.id}>
+              {changeModal && actionBusyId === changeModal.item.id ? "Saving..." : "Apply one-off"}
+            </Button>
+          </>
+        }
+      >
+        {changeModal ? (
+          <div className="space-y-4">
             {changeModal.item.kind === "UNKNOWN_MERCHANT" ? (
-              <label className="mt-4 block space-y-1 text-xs font-medium text-slate-700">
-                Category (this item only)
+              <label className="block space-y-2 text-sm font-medium text-slate-700">
+                Category
                 <select
                   value={changeModal.category}
                   onChange={(e) =>
@@ -476,7 +416,7 @@ export default function InboxPage() {
                         : prev
                     )
                   }
-                  className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900"
+                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm text-slate-900"
                 >
                   {CATEGORY_TAXONOMY.map((category) => (
                     <option key={category} value={category}>
@@ -487,8 +427,8 @@ export default function InboxPage() {
               </label>
             ) : null}
 
-            <label className="mt-4 block space-y-1 text-xs font-medium text-slate-700">
-              Note (optional)
+            <label className="block space-y-2 text-sm font-medium text-slate-700">
+              Note
               <textarea
                 value={changeModal.note}
                 onChange={(e) =>
@@ -501,32 +441,14 @@ export default function InboxPage() {
                       : prev
                   )
                 }
-                rows={3}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-                placeholder="Why are you changing this one-off item?"
+                rows={4}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-900"
+                placeholder="Optional context for this one-off decision"
               />
             </label>
-
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setChangeModal(null)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void submitChange()}
-                disabled={actionBusyId === changeModal.item.id}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
-              >
-                {actionBusyId === changeModal.item.id ? "Saving..." : "Apply one-off"}
-              </button>
-            </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </Modal>
     </main>
   );
 }
