@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Bar,
   CartesianGrid,
@@ -147,13 +147,13 @@ export default function Phase3DatasetHomePage() {
     }
   }
 
-  async function fetchOverview(
+  const fetchOverview = useCallback(async (
     nextScopeMode: ScopeMode,
     nextSelectedFileIds: string[],
     nextBankId: string,
     nextAccountId: string,
-    nextShowTransfers = excludeMatchedTransfers ? "excludeMatched" : "all"
-  ) {
+    nextShowTransfers = "excludeMatched"
+  ) => {
     setIsLoading(true);
     setError(null);
 
@@ -200,7 +200,7 @@ export default function Phase3DatasetHomePage() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     const openBoundary =
@@ -236,7 +236,7 @@ export default function Phase3DatasetHomePage() {
     if (openBoundary) {
       setBoundaryModalOpen(true);
     }
-  }, []);
+  }, [fetchOverview]);
 
   useEffect(() => {
     const params = buildScopeParams(scopeMode, selectedFileIds, {
@@ -544,7 +544,8 @@ export default function Phase3DatasetHomePage() {
                     scopeMode,
                     selectedFileIds,
                     selectedBankId,
-                    selectedAccountId
+                    selectedAccountId,
+                    excludeMatchedTransfers ? "excludeMatched" : "all"
                   )
                 }
                 disabled={isLoading || (scopeMode === "selected" && !selectedFileId)}
